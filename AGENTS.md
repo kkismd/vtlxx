@@ -111,6 +111,24 @@ issue または採用済み ADR に根拠がない限り、次のような変更
 
 PR では、issue にない重要な設計判断を暗黙に追加しない。
 
+### ADR / Research ラベル運用
+
+ADR issue には本文の決定状態に対応するラベルを1つだけ付ける。本文を正本とし、ラベルは検索・一覧化用の補助情報とする。
+
+* `提案中` → `ADR_proposed`
+* `採用` → `ADR_accepted`
+* `置換済み` → `ADR_superseded`
+* `撤回` → `ADR_withdrawn`
+* `却下` → `ADR_rejected`
+
+調査・検討 issue には `Research` を付け、結果に応じて次の分類ラベルを1つ付ける。
+
+* ADR で決定すべき事項を含む → `Research_needs_ADR`
+* ADR を必要とせず完結する → `Research_no_ADR`
+* より新しい調査に置き換えられた → `Research_superseded`
+
+`Research_needs_ADR` は ADR が未作成であることではなく、その調査結果が ADR の判断材料となることを示す。後続 ADR 作成後も残してよい。
+
 ## Git workflow
 
 * `main` へ直接 commit せず、branch と PR を経由する。
