@@ -286,6 +286,10 @@ head SHA が変化した場合、以前のレビュー結果を新しい head �
 * `main` へ直接 commit せず、branch と PR を経由する。
 * エージェントは自分で PR を merge しない。
 * issue の close は PR merge またはユーザー判断に委ねる。
+* branch 削除、force push、reset、rebase、履歴改変では、親子関係、tree 差分、merge 構造、他 branch からの参照、未マージ差分を確認する。
+* default branch の履歴変更前には復元可能な backup ref を作成する。
+* GitHub の merged / unmerged 表示や commit message だけで安全性を判断しない。
+* 不可逆性の高い操作では、対象と影響範囲を明示する。
 
 ## テスト
 
