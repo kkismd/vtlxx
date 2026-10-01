@@ -1,5 +1,6 @@
 use crate::{
     Cell, DefinitionId,
+    builder::{BuildError, CompletedBody},
     definition::{Definition, DefinitionBody, Instruction},
     dictionary::RuntimeDictionary,
     primitive::RUNTIME_SEED,
@@ -61,6 +62,22 @@ impl Machine {
         self.execute(id)
     }
 
+    #[allow(dead_code)] // Used by the later source processor.
+    pub(crate) fn resolve_runtime(&self, name: &str) -> Result<DefinitionId, BuildError> {
+        self.runtime_dictionary
+            .lookup(name)
+            .ok_or(BuildError::UnknownRuntimeWord)
+    }
+
+    #[allow(dead_code)] // Used by the later source processor.
+    pub(crate) fn publish_runtime(&mut self, name: &str, body: CompletedBody) -> DefinitionId {
+        let id = self.store_definition(Definition {
+            body: DefinitionBody::Compiled(body),
+        });
+        self.runtime_dictionary.bind(name, id);
+        id
+    }
+
     fn store_definition(&mut self, definition: Definition) -> DefinitionId {
         let id = DefinitionId(self.definitions.len());
         self.definitions.push(definition);
@@ -85,7 +102,7 @@ impl Machine {
 
         loop {
             let instructions = match &self.definitions[current.definition.0].body {
-                DefinitionBody::Compiled(instructions) => instructions,
+                DefinitionBody::Compiled(body) => body.instructions(),
                 DefinitionBody::Primitive(_) => unreachable!(),
             };
             let instruction = *instructions
@@ -147,13 +164,14 @@ impl Machine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builder::CodeBuilder;
 
     fn compiled(machine: &mut Machine, name: &str, instructions: Vec<Instruction>) -> DefinitionId {
-        let id = machine.store_definition(Definition {
-            body: DefinitionBody::Compiled(instructions),
-        });
-        machine.runtime_dictionary.bind(name, id);
-        id
+        // #91 execution-error fixtures intentionally include malformed code.
+        machine.publish_runtime(
+            name,
+            CompletedBody::from_instructions_unchecked(instructions),
+        )
     }
 
     fn stack(machine: &Machine) -> &[Cell] {
@@ -382,5 +400,97 @@ mod tests {
         machine.push(2);
         assert_eq!(machine.execute_runtime_word("A"), Ok(()));
         assert_eq!(stack(&machine), &[7]);
+    }
+
+    #[test]
+    fn resolve_and_publish_completed_runtime_body() {
+        let mut machine = Machine::with_runtime_seed();
+        assert_eq!(
+            machine.resolve_runtime("missing"),
+            Err(BuildError::UnknownRuntimeWord)
+        );
+        let add = machine.resolve_runtime("A").unwrap();
+        let original_count = machine.definitions.len();
+        let mut builder = CodeBuilder::new();
+        builder.emit_call(add);
+        assert_eq!(machine.definitions.len(), original_count);
+        assert_eq!(
+            machine.resolve_runtime("sum"),
+            Err(BuildError::UnknownRuntimeWord)
+        );
+        let id = machine.publish_runtime("sum", builder.finish().unwrap());
+        assert_eq!(id, DefinitionId(original_count));
+        assert_eq!(machine.resolve_runtime("sum"), Ok(id));
+        let DefinitionBody::Compiled(body) = &machine.definitions[id.0].body else {
+            panic!("published body must be compiled");
+        };
+        assert_eq!(
+            body.instructions(),
+            &[Instruction::Call(add), Instruction::Return]
+        );
+        machine.push(2);
+        machine.push(3);
+        assert_eq!(machine.execute_runtime_word("sum"), Ok(()));
+        assert_eq!(machine.pop(), Some(5));
+    }
+
+    #[test]
+    fn redefinition_preserves_old_definition_and_early_bound_call() {
+        let mut machine = Machine::with_runtime_seed();
+        let old = machine.publish_runtime("B", {
+            let mut builder = CodeBuilder::new();
+            builder.emit_call(machine.resolve_runtime("A").unwrap());
+            builder.finish().unwrap()
+        });
+        let mut caller = CodeBuilder::new();
+        caller.emit_call(machine.resolve_runtime("B").unwrap());
+        machine.publish_runtime("old_caller", caller.finish().unwrap());
+
+        let mut replacement = CodeBuilder::new();
+        replacement.emit_call(machine.resolve_runtime("S").unwrap());
+        let new = machine.publish_runtime("B", replacement.finish().unwrap());
+        assert_ne!(old, new);
+        assert_eq!(machine.resolve_runtime("B"), Ok(new));
+
+        let mut fresh_caller = CodeBuilder::new();
+        fresh_caller.emit_call(machine.resolve_runtime("B").unwrap());
+        machine.publish_runtime("new_caller", fresh_caller.finish().unwrap());
+
+        for (name, expected) in [("old_caller", 9), ("new_caller", 5)] {
+            machine.push(7);
+            machine.push(2);
+            assert_eq!(machine.execute_runtime_word(name), Ok(()));
+            assert_eq!(machine.pop(), Some(expected));
+        }
+        machine.push(7);
+        machine.push(2);
+        assert_eq!(machine.execute(old), Ok(()));
+        assert_eq!(machine.pop(), Some(9));
+    }
+
+    #[test]
+    fn failed_build_does_not_publish_or_rebind() {
+        let machine = Machine::with_runtime_seed();
+        let original = machine.resolve_runtime("A").unwrap();
+        let count = machine.definitions.len();
+        for name in ["A", "new"] {
+            let mut builder = CodeBuilder::new();
+            let unresolved = builder.new_target();
+            builder.emit_jump(unresolved).unwrap();
+            assert!(matches!(
+                builder.finish(),
+                Err(BuildError::UnresolvedBranchTarget)
+            ));
+            assert_eq!(machine.definitions.len(), count);
+            assert_eq!(machine.resolve_runtime("A"), Ok(original));
+            assert_eq!(
+                machine.resolve_runtime("new"),
+                Err(BuildError::UnknownRuntimeWord)
+            );
+            assert_eq!(
+                machine.runtime_dictionary.lookup(name),
+                if name == "A" { Some(original) } else { None }
+            );
+        }
     }
 }

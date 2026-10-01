@@ -1,3 +1,4 @@
+use crate::builder::CompletedBody;
 use crate::primitive::Primitive;
 
 /// Identity of a completed executable definition, independent of its source name.
@@ -8,11 +9,10 @@ pub(crate) struct Definition {
     pub(crate) body: DefinitionBody,
 }
 
+#[allow(dead_code)] // Compiled bodies are published by the later source processor.
 pub(crate) enum DefinitionBody {
     Primitive(Primitive),
-    // The builder and publication path for compiled bodies arrive in #92.
-    #[allow(dead_code)]
-    Compiled(Vec<Instruction>),
+    Compiled(CompletedBody),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
