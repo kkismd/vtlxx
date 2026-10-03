@@ -54,6 +54,74 @@ fn conditionals_own_the_remainder_of_their_line() {
 }
 
 #[test]
+fn anonymous_blocks_cross_lines_and_stop_at_the_matching_close() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("&=1 |=\n A=1\n &=0 |= A=9 =|\n B=2\n=| C=3\n&=0 |= D=4 =| E=5")
+        .unwrap();
+    for (index, expected) in [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5)] {
+        assert_eq!(machine.register(index), Some(expected));
+    }
+}
+
+#[test]
+fn block_delimiters_in_strings_and_comments_are_ordinary_text() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("&=1 |= ?=\"|= =|\" ; |= =|\n A=2 =| B=3")
+        .unwrap();
+    assert_eq!(machine.output(), b"|= =|");
+    assert_eq!(machine.register(0), Some(2));
+    assert_eq!(machine.register(1), Some(3));
+}
+
+#[test]
+fn block_and_surrounding_source_share_numeric_labels() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("#=10 &=1 |= ^=20 A=99 #=30 =| ^=10 A=3 #=20 ^=30")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(99));
+
+    let mut machine = Machine::new();
+    machine
+        .execute_source("A=0 ^=1 A=A+1 &=A<3 |= #=1 =|\n&=1 |= #=2 A=99 =| ^=2 B=7")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(3));
+    assert_eq!(machine.register(1), Some(7));
+}
+
+#[test]
+fn block_in_named_handler_uses_its_handlers_label_namespace() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("|=p #=10 &=1 |= ^=20 A=99 #=30 =| ^=10 A=3 #=20 ^=30 p=| p=()")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(99));
+}
+
+#[test]
+fn malformed_or_bare_blocks_and_duplicate_owner_labels_fail() {
+    for source in [
+        "|= A=1 =|",
+        "=|",
+        "&=1 |= A=1",
+        "&=1 |= |= A=1 =| =|",
+        "&=1 |= A=1 p=| =|",
+        "&=1 |= A=1+ =|",
+        "^=1 &=1 |= ^=1 =|",
+        "&=1 |= ^=1 =| ^=1",
+    ] {
+        let mut machine = Machine::new();
+        assert!(
+            matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+        assert_eq!(machine.register(0), Some(0), "{source}");
+    }
+}
+
+#[test]
 fn stack_connection_uses_existing_top_without_new_value() {
     let mut machine = Machine::new();
     machine.push(10);

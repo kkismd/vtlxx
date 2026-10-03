@@ -23,60 +23,150 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
     let mut builder = CodeBuilder::new();
     let mut definition = None;
     let mut has_statements = false;
-
-    for line in source.split('\n') {
-        let mut offset = 0;
-        while let Some(statement) =
-            next_statement(line, &mut offset).map_err(SourceError::Compile)?
-        {
-            let (target, rhs) = split_statement(statement).map_err(SourceError::Compile)?;
-            if target == '|' {
-                if definition.is_some() || rhs.len() != 1 || !rhs.as_bytes()[0].is_ascii_lowercase()
-                {
-                    return Err(SourceError::Compile(CompileError::Syntax));
-                }
-                let identity = rhs.as_bytes()[0] as char;
-                flush_top_level(
-                    machine,
-                    std::mem::replace(&mut builder, CodeBuilder::new()),
-                    has_statements,
-                )?;
-                has_statements = false;
-                if machine.resolve(identity, SourceRole::Write).is_some() {
-                    return Err(SourceError::Compile(CompileError::Syntax));
-                }
-                definition = Some(identity);
-            } else if rhs.starts_with('|') {
-                if rhs != "|" || definition != Some(target) {
-                    return Err(SourceError::Compile(CompileError::Syntax));
-                }
-                let completed = std::mem::replace(&mut builder, CodeBuilder::new())
-                    .finish()
-                    .map_err(|_| SourceError::Compile(CompileError::Builder))?;
-                machine
-                    .publish_initial(target, SourceRole::Write, completed)
-                    .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
-                definition = None;
-            } else if target == '&' {
-                let mut tail = vec![statement];
-                while let Some(next) =
-                    next_statement(line, &mut offset).map_err(SourceError::Compile)?
-                {
-                    tail.push(next);
-                }
-                compile_tail(&tail, 0, machine, &mut builder).map_err(SourceError::Compile)?;
-                has_statements = true;
-            } else {
-                compile_tail(&[statement], 0, machine, &mut builder)
-                    .map_err(SourceError::Compile)?;
-                has_statements = true;
+    let mut reader = SourceReader::new(source);
+    while let Some(token) = reader.next().map_err(SourceError::Compile)? {
+        let (target, rhs) = split_statement(token.text).map_err(SourceError::Compile)?;
+        if target == '|' {
+            if definition.is_some() || rhs.len() != 1 || !rhs.as_bytes()[0].is_ascii_lowercase() {
+                return Err(SourceError::Compile(CompileError::Syntax));
             }
+            let identity = rhs.as_bytes()[0] as char;
+            flush_top_level(
+                machine,
+                std::mem::replace(&mut builder, CodeBuilder::new()),
+                has_statements,
+            )?;
+            has_statements = false;
+            if machine.resolve(identity, SourceRole::Write).is_some() {
+                return Err(SourceError::Compile(CompileError::Syntax));
+            }
+            definition = Some(identity);
+        } else if rhs.starts_with('|') {
+            if rhs != "|" || definition != Some(target) {
+                return Err(SourceError::Compile(CompileError::Syntax));
+            }
+            let completed = std::mem::replace(&mut builder, CodeBuilder::new())
+                .finish()
+                .map_err(|_| SourceError::Compile(CompileError::Builder))?;
+            machine
+                .publish_initial(target, SourceRole::Write, completed)
+                .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
+            definition = None;
+        } else {
+            compile_source_statement(token, &mut reader, machine, &mut builder)
+                .map_err(SourceError::Compile)?;
+            has_statements = true;
         }
     }
     if definition.is_some() {
         return Err(SourceError::Compile(CompileError::Syntax));
     }
     flush_top_level(machine, builder, has_statements)
+}
+
+#[derive(Clone, Copy)]
+struct Token<'a> {
+    text: &'a str,
+    line: usize,
+}
+
+struct SourceReader<'a> {
+    lines: Vec<&'a str>,
+    line: usize,
+    offset: usize,
+}
+
+impl<'a> SourceReader<'a> {
+    fn new(source: &'a str) -> Self {
+        Self {
+            lines: source.split('\n').collect(),
+            line: 0,
+            offset: 0,
+        }
+    }
+
+    fn next(&mut self) -> Result<Option<Token<'a>>, CompileError> {
+        while let Some(line) = self.lines.get(self.line) {
+            if let Some(text) = next_statement(line, &mut self.offset)? {
+                return Ok(Some(Token {
+                    text,
+                    line: self.line,
+                }));
+            }
+            self.line += 1;
+            self.offset = 0;
+        }
+        Ok(None)
+    }
+
+    fn peek(&self) -> Result<Option<Token<'a>>, CompileError> {
+        let mut line_index = self.line;
+        let mut offset = self.offset;
+        while let Some(line) = self.lines.get(line_index) {
+            if let Some(text) = next_statement(line, &mut offset)? {
+                return Ok(Some(Token {
+                    text,
+                    line: line_index,
+                }));
+            }
+            line_index += 1;
+            offset = 0;
+        }
+        Ok(None)
+    }
+}
+
+fn compile_source_statement(
+    token: Token<'_>,
+    reader: &mut SourceReader<'_>,
+    machine: &Machine,
+    builder: &mut CodeBuilder,
+) -> Result<(), CompileError> {
+    let (target, rhs) = split_statement(token.text)?;
+    if target != '&' {
+        return compile_tail(&[token.text], 0, machine, builder);
+    }
+
+    // All code, generated targets, and numeric labels in the form share the
+    // surrounding owner's identity. Commit them together only after success.
+    let mut staged = builder.clone();
+    if reader.peek()?.is_some_and(|next| next.text == "|=") {
+        compile_rhs(rhs, machine, &mut staged)?;
+        let end = staged.new_target();
+        staged
+            .emit_jump_if_zero(end)
+            .map_err(|_| CompileError::Builder)?;
+        reader.next()?; // consume the anonymous block opener
+        compile_block(reader, machine, &mut staged)?;
+        staged
+            .complete_target(end)
+            .map_err(|_| CompileError::Builder)?;
+    } else {
+        let mut tail = vec![token.text];
+        while reader
+            .peek()?
+            .is_some_and(|next| next.line == token.line && next.text != "=|")
+        {
+            tail.push(reader.next()?.expect("peeked token").text);
+        }
+        compile_tail(&tail, 0, machine, &mut staged)?;
+    }
+    *builder = staged;
+    Ok(())
+}
+
+fn compile_block(
+    reader: &mut SourceReader<'_>,
+    machine: &Machine,
+    builder: &mut CodeBuilder,
+) -> Result<(), CompileError> {
+    while let Some(token) = reader.next()? {
+        if token.text == "=|" {
+            return Ok(());
+        }
+        compile_source_statement(token, reader, machine, builder)?;
+    }
+    Err(CompileError::Syntax)
 }
 
 fn flush_top_level(
@@ -247,5 +337,33 @@ mod tests {
             Err(SourceError::Compile(CompileError::Syntax))
         );
         assert_eq!(machine.register(0), Some(0));
+    }
+
+    #[test]
+    fn failed_block_keeps_parent_code_labels_and_targets_unchanged() {
+        let machine = Machine::new();
+        let mut builder = CodeBuilder::new();
+        builder.emit(Instruction::PushConst(7)).unwrap();
+        let before = builder.clone().finish().unwrap().into_instructions();
+        let mut reader = SourceReader::new("&=1 |= ^=8 A=1+ =|");
+        let token = reader.next().unwrap().unwrap();
+        assert_eq!(
+            compile_source_statement(token, &mut reader, &machine, &mut builder),
+            Err(CompileError::Syntax)
+        );
+        assert_eq!(
+            builder.clone().finish().unwrap().into_instructions(),
+            before
+        );
+        builder.define_numeric_label(8).unwrap();
+        builder.emit_numeric_jump(8).unwrap();
+        assert_eq!(
+            builder.finish().unwrap().into_instructions(),
+            vec![
+                Instruction::PushConst(7),
+                Instruction::Jump(1),
+                Instruction::Return
+            ]
+        );
     }
 }

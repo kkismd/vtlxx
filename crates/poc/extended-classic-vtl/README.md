@@ -352,7 +352,9 @@ label は top-level と source-defined procedure で別 namespace です。
 
 ## Conditional
 
-現在 `main` で利用できる conditional は、同じ logical line の残りを body とする `&=` です。
+現在 `main` の conditional は `&=` です。body には、同じ logical line の残りを使う形と anonymous block を使う形があります。
+
+### Line-tail form
 
 ```vtl
   &=A<10 B=B+1 #=100
@@ -362,7 +364,22 @@ condition が 0 なら、その logical line の後続 statement をすべて飛
 
 同一行内にさらに `&=` が現れる場合は、後続 tail が入れ子に条件付けされます。
 
-anonymous block を使う `&=cond |= ... =|`、IfElse `%=`, While `*=()` は採用済み設計がありますが、**この README が基準とする current `main` ではまだ利用可能機能ではありません**。現在の進捗は [#194](https://github.com/kkismd/vtlxx/issues/194) を確認してください。
+### Anonymous block form
+
+複数 logical line の body には `|= ... =|` を使えます。
+
+```vtl
+  &=A<10 |=
+    B=B+1
+    ?=B
+  =|
+```
+
+anonymous block は独立した procedure や runtime value ではありません。surrounding executable owner の code へ inline に構築され、numeric label namespace も surrounding owner と共有します。
+
+block は入れ子にできます。quoted string や comment 内の `|=` / `=|` は delimiter として扱われません。body argument を要求していない位置に bare `|= ... =|` を置くことはできません。
+
+IfElse `%=` と While `*=()` は採用済み設計がありますが、**この README が基準とする current `main` ではまだ利用可能機能ではありません**。現在の進捗は [#194](https://github.com/kkismd/vtlxx/issues/194) を確認してください。
 
 ## Source-defined 手続き
 
@@ -510,9 +527,28 @@ trailing comment は code との間に 1 文字以上の ASCII space を置き�
 
 ### Anonymous block の indentation
 
-[#200](https://github.com/kkismd/vtlxx/issues/200) では、将来の anonymous block についても owner depth と block nesting depth から indentation を求める規則を整理しています。
+anonymous block では owner depth に block nesting depth を加えます。block に入るごとに 1 level、つまり 2 spaces 増やします。
 
-ただし anonymous block 自体は current `main` ではまだ利用可能ではありません。実装が merge されるまでは、README の current syntax として使わないでください。
+```vtl
+  &=A |=
+    B=1
+    &=B |=
+      C=2
+    =|
+  =|
+```
+
+block 内の numeric label は意味論上 surrounding owner の label namespace を共有しますが、表示上は block nesting depth の基準位置へ置きます。
+
+```vtl
+  &=A |=
+  ^=1
+    B=B+1
+    &=B<10 #=1
+  =|
+```
+
+opener / closer の改行配置には今後評価する余地がありますが、同一 source 内では style を統一し、indentation depth 自体は #200 の rule から一意に決めます。
 
 ## Example: Eight Queens
 
@@ -549,5 +585,5 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 5. procedure 呼び出しは callee-first の定義順を守る。
 6. numeric label は executable owner ごとの local namespace として扱う。
 7. indentation は 2 ASCII spaces 単位で #200 の owner rule に従う。
-8. 未実装の関数・拡張プロパティ・拡張演算子・structured control surface を推測で書かない。
+8. 未実装の関数・拡張プロパティ・拡張演算子・`%=` / `*=()` を推測で書かない。
 9. current code / tests / accepted ADR と README が食い違う場合は、README を正本として扱わず差分を確認する。
