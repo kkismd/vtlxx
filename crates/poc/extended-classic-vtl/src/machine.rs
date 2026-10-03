@@ -4,7 +4,7 @@ use crate::{
     builder::CompletedBody,
     executable::{Executable, ExecutableBody, ExecutableId, Instruction, RuntimeError},
     primitive::Primitive,
-    source::{SourceError, compile_source},
+    source::{SourceError, execute_source},
 };
 
 const REGISTER_COUNT: usize = 26;
@@ -34,9 +34,7 @@ impl Default for Machine {
 
 impl Machine {
     pub fn execute_source(&mut self, source: &str) -> Result<(), SourceError> {
-        let completed = compile_source(self, source).map_err(SourceError::Compile)?;
-        let entry = self.install_completed(completed);
-        self.execute_completed(entry).map_err(SourceError::Runtime)
+        execute_source(self, source)
     }
 
     pub fn new() -> Self {
@@ -360,6 +358,21 @@ mod tests {
         let caller_id = machine.install_completed(caller.finish().unwrap());
         machine.execute_completed(caller_id).unwrap();
         assert_eq!(machine.stack(), &[9]);
+    }
+
+    #[test]
+    fn source_definition_preserves_another_role_of_the_same_identity() {
+        let mut machine = Machine::new();
+        let mut read = CodeBuilder::new();
+        read.emit(Instruction::PushConst(11)).unwrap();
+        let read_id = machine
+            .publish_initial('p', SourceRole::PrimaryRead, read.finish().unwrap())
+            .unwrap();
+
+        machine.execute_source("|=p A=[ p=| A=p p=7").unwrap();
+        assert_eq!(machine.resolve('p', SourceRole::PrimaryRead), Some(read_id));
+        assert_eq!(machine.register(0), Some(7));
+        assert!(machine.stack().is_empty());
     }
 
     #[test]

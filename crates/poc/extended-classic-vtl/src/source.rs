@@ -1,6 +1,6 @@
 use crate::{
     binding::SourceRole,
-    builder::{CodeBuilder, CompletedBody},
+    builder::CodeBuilder,
     executable::{Instruction, RuntimeError},
     expression::compile_rhs,
     machine::Machine,
@@ -19,42 +19,125 @@ pub enum SourceError {
     Runtime(RuntimeError),
 }
 
-pub(crate) fn compile_source(
-    machine: &Machine,
-    source: &str,
-) -> Result<CompletedBody, CompileError> {
+pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), SourceError> {
     let mut builder = CodeBuilder::new();
-    for physical_line in source.split('\n') {
-        let statements = scan_line(physical_line)?;
-        compile_tail(&statements, 0, machine, &mut builder)?;
+    let mut definition = None;
+    let mut has_statements = false;
+
+    for line in source.split('\n') {
+        let mut offset = 0;
+        while let Some(statement) =
+            next_statement(line, &mut offset).map_err(SourceError::Compile)?
+        {
+            let (target, rhs) = split_statement(statement).map_err(SourceError::Compile)?;
+            if target == '|' {
+                if definition.is_some() || rhs.len() != 1 || !rhs.as_bytes()[0].is_ascii_lowercase()
+                {
+                    return Err(SourceError::Compile(CompileError::Syntax));
+                }
+                let identity = rhs.as_bytes()[0] as char;
+                flush_top_level(
+                    machine,
+                    std::mem::replace(&mut builder, CodeBuilder::new()),
+                    has_statements,
+                )?;
+                has_statements = false;
+                if machine.resolve(identity, SourceRole::Write).is_some() {
+                    return Err(SourceError::Compile(CompileError::Syntax));
+                }
+                definition = Some(identity);
+            } else if rhs.starts_with('|') {
+                if rhs != "|" || definition != Some(target) {
+                    return Err(SourceError::Compile(CompileError::Syntax));
+                }
+                let completed = std::mem::replace(&mut builder, CodeBuilder::new())
+                    .finish()
+                    .map_err(|_| SourceError::Compile(CompileError::Builder))?;
+                machine
+                    .publish_initial(target, SourceRole::Write, completed)
+                    .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
+                definition = None;
+            } else if target == '&' {
+                let mut tail = vec![statement];
+                while let Some(next) =
+                    next_statement(line, &mut offset).map_err(SourceError::Compile)?
+                {
+                    tail.push(next);
+                }
+                compile_tail(&tail, 0, machine, &mut builder).map_err(SourceError::Compile)?;
+                has_statements = true;
+            } else {
+                compile_tail(&[statement], 0, machine, &mut builder)
+                    .map_err(SourceError::Compile)?;
+                has_statements = true;
+            }
+        }
     }
-    builder.finish().map_err(|_| CompileError::Builder)
+    if definition.is_some() {
+        return Err(SourceError::Compile(CompileError::Syntax));
+    }
+    flush_top_level(machine, builder, has_statements)
 }
 
-fn scan_line(line: &str) -> Result<Vec<&str>, CompileError> {
-    let mut statements = Vec::new();
-    let mut start = None;
+fn flush_top_level(
+    machine: &mut Machine,
+    builder: CodeBuilder,
+    nonempty: bool,
+) -> Result<(), SourceError> {
+    if !nonempty {
+        return Ok(());
+    }
+    let completed = builder
+        .finish()
+        .map_err(|_| SourceError::Compile(CompileError::Builder))?;
+    let entry = machine.install_completed(completed);
+    machine
+        .execute_completed(entry)
+        .map_err(SourceError::Runtime)
+}
+
+fn split_statement(statement: &str) -> Result<(char, &str), CompileError> {
+    let mut chars = statement.chars();
+    let target = chars.next().ok_or(CompileError::Syntax)?;
+    if chars.next() != Some('=') {
+        return Err(CompileError::Syntax);
+    }
+    Ok((target, chars.as_str()))
+}
+
+fn next_statement<'a>(line: &'a str, offset: &mut usize) -> Result<Option<&'a str>, CompileError> {
+    let bytes = line.as_bytes();
+    while *offset < bytes.len() && matches!(bytes[*offset], b' ' | b'\t') {
+        *offset += 1;
+    }
+    if *offset == bytes.len() || bytes[*offset] == b';' {
+        *offset = bytes.len();
+        return Ok(None);
+    }
+    let start = *offset;
     let mut quoted = false;
-    for (index, character) in line.char_indices() {
-        if character == '"' {
+    while *offset < bytes.len() {
+        let byte = bytes[*offset];
+        if byte == b'"' {
             quoted = !quoted;
         }
-        if !quoted && (character == ';' || character == ' ' || character == '\t') {
-            if let Some(begin) = start.take() {
-                statements.push(&line[begin..index]);
-            }
-            if character == ';' {
-                break;
-            }
-        } else if start.is_none() {
-            start = Some(index);
+        if !quoted && matches!(byte, b' ' | b'\t' | b';') {
+            break;
         }
+        *offset += 1;
     }
     if quoted {
         return Err(CompileError::Syntax);
     }
-    if let Some(begin) = start {
-        statements.push(&line[begin..]);
+    Ok(Some(&line[start..*offset]))
+}
+
+#[cfg(test)]
+fn scan_line(line: &str) -> Result<Vec<&str>, CompileError> {
+    let mut statements = Vec::new();
+    let mut offset = 0;
+    while let Some(statement) = next_statement(line, &mut offset)? {
+        statements.push(statement);
     }
     Ok(statements)
 }
@@ -66,12 +149,10 @@ fn compile_tail(
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     while let Some(statement) = statements.get(index) {
-        let mut chars = statement.chars();
-        let target = chars.next().ok_or(CompileError::Syntax)?;
-        if chars.next() != Some('=') {
+        let (target, rhs) = split_statement(statement)?;
+        if target == '|' || rhs.starts_with('|') {
             return Err(CompileError::Syntax);
         }
-        let rhs = chars.as_str();
         match target {
             '^' | '#' => {
                 if rhs.is_empty() || !rhs.bytes().all(|byte| byte.is_ascii_digit()) {
@@ -154,14 +235,15 @@ mod tests {
 
     #[test]
     fn compile_failure_never_produces_completed_body() {
-        let machine = Machine::new();
+        let mut machine = Machine::new();
         assert_eq!(
-            compile_source(&machine, "A=1 #=9").map(|_| ()),
-            Err(CompileError::Builder)
+            machine.execute_source("A=1 #=9"),
+            Err(SourceError::Compile(CompileError::Builder))
         );
         assert_eq!(
-            compile_source(&machine, "A=1 B=2+").map(|_| ()),
-            Err(CompileError::Syntax)
+            machine.execute_source("A=1 B=2+"),
+            Err(SourceError::Compile(CompileError::Syntax))
         );
+        assert_eq!(machine.register(0), Some(0));
     }
 }

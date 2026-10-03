@@ -160,3 +160,163 @@ fn invalid_source_forms_are_compile_errors() {
         );
     }
 }
+
+#[test]
+fn definition_flushes_prior_statements_and_is_callable_in_same_and_later_inputs() {
+    let mut machine = Machine::new();
+    machine.execute_source("A=7 |=p B=[ ?=B p=| p=42").unwrap();
+    assert_eq!(machine.register(0), Some(7));
+    assert_eq!(machine.output(), b"42");
+    machine.execute_source("p=A").unwrap();
+    assert_eq!(machine.output(), b"427");
+    assert!(machine.stack().is_empty());
+}
+
+#[test]
+fn multi_value_handler_uses_shared_stack_in_operand_order() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("|=p B=[ A=[ ?=A ?=B p=| p=10,20")
+        .unwrap();
+    assert_eq!(machine.output(), b"1020");
+    assert!(machine.stack().is_empty());
+
+    machine
+        .execute_source("|=q B=[+1 A=[ ?=A ?=B q=| q=5,8")
+        .unwrap();
+    assert_eq!(machine.output(), b"102059");
+}
+
+#[test]
+fn handler_stack_connection_and_return_leave_unconsumed_values() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("|=p A=[+2 [=A,9 B=[ p=| p=3")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(5));
+    assert_eq!(machine.register(1), Some(9));
+    assert_eq!(machine.stack(), &[5]);
+}
+
+#[test]
+fn published_handlers_call_each_other_with_owner_local_labels() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("|=p #=2 ?=99 ^=2 A=[ ?=A p=| |=q ^=1 p=4 &=0 #=1\nq=| q=8")
+        .unwrap();
+    assert_eq!(machine.output(), b"4");
+    assert_eq!(machine.stack(), &[8]);
+}
+
+#[test]
+fn handler_backward_branch_repeats_within_its_own_body() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("|=p A=[ ^=1 ?=A A=A-1 &=A #=1\np=| p=3")
+        .unwrap();
+    assert_eq!(machine.output(), b"321");
+}
+
+#[test]
+fn malformed_definitions_do_not_publish_or_process_later_source() {
+    for bad in [
+        "|=P A=1 P=|",
+        "|=pp A=1 p=|",
+        "|=p? A=1 p=|",
+        "|=p A=1 q=|",
+        "|=p A=1",
+        "|=p |=q q=| p=|",
+        "&=1 |=p p=|",
+        "|=p &=1 p=|",
+        "|=p A=1+ p=|",
+        "|=p #=9 p=|",
+        "|=p p=1 p=|",
+        "|=p q=1 p=| |=q q=|",
+    ] {
+        let mut machine = Machine::new();
+        let source = format!("{bad} B=9");
+        assert!(
+            matches!(
+                machine.execute_source(&source),
+                Err(SourceError::Compile(_))
+            ),
+            "{bad}"
+        );
+        assert_eq!(machine.register(0), Some(0), "{bad}");
+        assert_eq!(machine.register(1), Some(0), "{bad}");
+        assert_eq!(
+            machine.execute_source("p=3"),
+            Err(SourceError::Compile(CompileError::UndefinedBinding)),
+            "{bad}"
+        );
+    }
+}
+
+#[test]
+fn committed_publication_survives_later_failure_and_duplicate_is_rejected() {
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source("|=p A=[ p=| |=q B=1+ q=| C=9"),
+        Err(SourceError::Compile(CompileError::Syntax))
+    );
+    machine.execute_source("p=12").unwrap();
+    assert_eq!(machine.register(0), Some(12));
+    assert_eq!(machine.register(2), Some(0));
+    assert!(matches!(
+        machine.execute_source("|=p p=|"),
+        Err(SourceError::Compile(_))
+    ));
+    machine.execute_source("p=13").unwrap();
+    assert_eq!(machine.register(0), Some(13));
+}
+
+#[test]
+fn definition_failure_keeps_prior_top_level_effects() {
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source("A=7 ?=\"ok\" |=p B=1+ p=| C=9"),
+        Err(SourceError::Compile(CompileError::Syntax))
+    );
+    assert_eq!(machine.register(0), Some(7));
+    assert_eq!(machine.register(2), Some(0));
+    assert_eq!(machine.output(), b"ok");
+    assert_eq!(
+        machine.execute_source("p=1"),
+        Err(SourceError::Compile(CompileError::UndefinedBinding))
+    );
+}
+
+#[test]
+fn definition_boundary_isolates_top_level_labels_and_runtime_failure_stops_processing() {
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source("^=1 |=p p=| #=1"),
+        Err(SourceError::Compile(CompileError::Builder))
+    );
+    machine.execute_source("p=4").unwrap();
+    assert_eq!(machine.stack(), &[4]);
+    machine.pop();
+
+    assert_eq!(
+        machine.execute_source("A=5 |=q B=[ C=[ q=| q=6 C=9"),
+        Err(SourceError::Runtime(RuntimeError::StackUnderflow))
+    );
+    assert_eq!(machine.register(0), Some(5));
+    assert_eq!(machine.register(2), Some(0));
+    machine.execute_source("D=7").unwrap();
+    assert_eq!(machine.register(3), Some(7));
+}
+
+#[test]
+fn runtime_failure_before_header_prevents_publication() {
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source("A=5 B=[ |=p p=| p=1"),
+        Err(SourceError::Runtime(RuntimeError::StackUnderflow))
+    );
+    assert_eq!(machine.register(0), Some(5));
+    assert_eq!(
+        machine.execute_source("p=1"),
+        Err(SourceError::Compile(CompileError::UndefinedBinding))
+    );
+}
