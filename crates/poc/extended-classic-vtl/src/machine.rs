@@ -124,25 +124,15 @@ impl Machine {
                             instruction += 1;
                         }
                         Instruction::Call(target) => {
-                            let target_body = self
-                                .executables
-                                .get(target.0)
-                                .map(|executable| executable.body.clone())
-                                .ok_or(RuntimeError::InvalidExecutable)?;
-                            match target_body {
-                                ExecutableBody::Primitive(primitive) => {
-                                    primitive.execute(self)?;
-                                    instruction += 1;
-                                }
-                                ExecutableBody::Compiled(_) => {
-                                    call_stack.push(Continuation {
-                                        executable: current,
-                                        instruction: instruction + 1,
-                                    });
-                                    current = target;
-                                    instruction = 0;
-                                }
+                            if self.executables.get(target.0).is_none() {
+                                return Err(RuntimeError::InvalidExecutable);
                             }
+                            call_stack.push(Continuation {
+                                executable: current,
+                                instruction: instruction + 1,
+                            });
+                            current = target;
+                            instruction = 0;
                         }
                         Instruction::Jump(target) => {
                             validate_target(&code, target)?;
@@ -197,6 +187,16 @@ mod tests {
         assert_eq!(machine.storage(u16::MAX), 0);
         assert!(machine.stack().is_empty());
         assert!(machine.output().is_empty());
+    }
+
+    #[test]
+    fn top_level_primitive_uses_common_dispatch() {
+        let mut machine = Machine::new();
+        let add = machine.install(ExecutableBody::Primitive(Primitive::Add));
+        machine.push(20);
+        machine.push(22);
+        machine.execute(add).unwrap();
+        assert_eq!(machine.stack(), &[42]);
     }
 
     #[test]
