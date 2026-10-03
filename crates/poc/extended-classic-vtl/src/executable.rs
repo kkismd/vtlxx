@@ -1,4 +1,4 @@
-use crate::{primitive::Primitive, Cell};
+use crate::{Cell, primitive::Primitive};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct ExecutableId(pub(crate) usize);
