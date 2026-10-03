@@ -1,4 +1,4 @@
-use crate::{cell, executable::RuntimeError, machine::Machine, Cell};
+use crate::{Cell, cell, executable::RuntimeError, machine::Machine};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Primitive {
@@ -72,7 +72,9 @@ impl Primitive {
                     .value_stack
                     .last()
                     .ok_or(RuntimeError::StackUnderflow)?;
-                machine.output.extend_from_slice(value.to_string().as_bytes());
+                machine
+                    .output
+                    .extend_from_slice(value.to_string().as_bytes());
                 machine.value_stack.pop();
             }
             Self::PrintChar => {
