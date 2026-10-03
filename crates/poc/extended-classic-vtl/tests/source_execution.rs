@@ -54,6 +54,90 @@ fn conditionals_own_the_remainder_of_their_line() {
 }
 
 #[test]
+fn if_else_executes_exactly_one_arm() {
+    for (source, expected) in [
+        ("%=1 A=1 A=2", 1),
+        ("%=0 A=1 A=2", 2),
+        ("%=1 A=1 |= A=2 A=3 =|", 1),
+        ("%=0 A=1 |= A=2 A=3 =|", 3),
+        ("%=1 |= A=1 A=A+1 =| A=3", 2),
+        ("%=0 |= A=1 A=A+1 =| A=3", 3),
+        ("%=1 |= A=1 A=A+1 =| |= A=3 A=A+1 =|", 2),
+        ("%=0 |= A=1 A=A+1 =| |= A=3 A=A+1 =|", 4),
+    ] {
+        let mut machine = Machine::new();
+        machine.execute_source(source).unwrap();
+        assert_eq!(machine.register(0), Some(expected), "{source}");
+        assert!(machine.stack().is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn nested_if_else_consumes_both_arms_before_its_sibling() {
+    for (source, expected) in [
+        ("%=1 %=0 A=1 A=2 A=3", 2),
+        ("%=0 %=1 A=1 A=2 A=3", 3),
+        ("%=1 A=1 %=0 A=2 A=3", 1),
+        ("%=0 A=1 %=0 A=2 A=3", 3),
+    ] {
+        let mut machine = Machine::new();
+        machine.execute_source(source).unwrap();
+        assert_eq!(machine.register(0), Some(expected), "{source}");
+    }
+}
+
+#[test]
+fn if_else_blocks_cross_lines_and_share_the_owner_labels() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("%=1 |=\n #=10 A=99\n =| |=\n A=2\n =| ^=10 B=3")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(0));
+    assert_eq!(machine.register(1), Some(3));
+
+    let mut machine = Machine::new();
+    machine
+        .execute_source("|=p %=0 A=1 |= #=10 A=99 =| A=3 ^=10 B=3 p=| p=()")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(0));
+    assert_eq!(machine.register(1), Some(3));
+}
+
+#[test]
+fn if_else_requires_blocks_around_legacy_conditionals() {
+    for source in ["%=1 &=1 A=1 A=2", "%=0 A=1 &=1 A=2"] {
+        let mut machine = Machine::new();
+        assert_eq!(
+            machine.execute_source(source),
+            Err(SourceError::Compile(CompileError::Syntax)),
+            "{source}"
+        );
+        assert_eq!(machine.register(0), Some(0), "{source}");
+    }
+
+    for (source, expected) in [("%=1 |= &=1 A=1 =| A=2", 1), ("%=0 A=1 |= &=1 A=2 =|", 2)] {
+        let mut machine = Machine::new();
+        machine.execute_source(source).unwrap();
+        assert_eq!(machine.register(0), Some(expected), "{source}");
+    }
+}
+
+#[test]
+fn if_else_rejects_missing_arms_and_preserves_remainder() {
+    for source in ["%=1", "%=1 A=1", "%=1 |= A=1 =|", "%=1 A=1 =|"] {
+        let mut machine = Machine::new();
+        assert!(
+            matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+        assert_eq!(machine.register(0), Some(0), "{source}");
+    }
+    let mut machine = Machine::new();
+    machine.execute_source("%=7%3 A=7%3 A=0").unwrap();
+    assert_eq!(machine.register(0), Some(1));
+}
+
+#[test]
 fn anonymous_blocks_cross_lines_and_stop_at_the_matching_close() {
     let mut machine = Machine::new();
     machine

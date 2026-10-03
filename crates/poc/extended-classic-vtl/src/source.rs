@@ -123,6 +123,29 @@ fn compile_source_statement(
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     let (target, rhs) = split_statement(token.text)?;
+    if target == '%' {
+        // The complete form belongs to the surrounding code and label owner.
+        let mut staged = builder.clone();
+        compile_rhs(rhs, machine, &mut staged)?;
+        let else_target = staged.new_target();
+        let end_target = staged.new_target();
+        staged
+            .emit_jump_if_zero(else_target)
+            .map_err(|_| CompileError::Builder)?;
+        compile_body_argument(reader, machine, &mut staged)?;
+        staged
+            .emit_jump(end_target)
+            .map_err(|_| CompileError::Builder)?;
+        staged
+            .complete_target(else_target)
+            .map_err(|_| CompileError::Builder)?;
+        compile_body_argument(reader, machine, &mut staged)?;
+        staged
+            .complete_target(end_target)
+            .map_err(|_| CompileError::Builder)?;
+        *builder = staged;
+        return Ok(());
+    }
     if target != '&' {
         return compile_tail(&[token.text], 0, machine, builder);
     }
@@ -153,6 +176,24 @@ fn compile_source_statement(
     }
     *builder = staged;
     Ok(())
+}
+
+fn compile_body_argument(
+    reader: &mut SourceReader<'_>,
+    machine: &Machine,
+    builder: &mut CodeBuilder,
+) -> Result<(), CompileError> {
+    let token = reader.next()?.ok_or(CompileError::Syntax)?;
+    if token.text == "|=" {
+        return compile_block(reader, machine, builder);
+    }
+    let (target, _) = split_statement(token.text)?;
+    // A legacy conditional owns the rest of its logical line, so its sibling
+    // arm can only be distinguished when the conditional is inside a block.
+    if target == '&' {
+        return Err(CompileError::Syntax);
+    }
+    compile_source_statement(token, reader, machine, builder)
 }
 
 fn compile_block(
@@ -365,5 +406,43 @@ mod tests {
                 Instruction::Return
             ]
         );
+    }
+
+    #[test]
+    fn failed_if_else_keeps_parent_code_labels_and_targets_unchanged() {
+        let machine = Machine::new();
+        for source in [
+            "%=1+ A=1 A=2",
+            "%=1 A=1+ A=2",
+            "%=1 |= ^=8 A=1 =| A=2+",
+            "%=1 A=1 |= ^=8 A=2+ =|",
+            "%=1 |= ^=8 =|",
+        ] {
+            let mut builder = CodeBuilder::new();
+            builder.emit(Instruction::PushConst(7)).unwrap();
+            let before = builder.clone().finish().unwrap().into_instructions();
+            let mut reader = SourceReader::new(source);
+            let token = reader.next().unwrap().unwrap();
+            assert!(
+                compile_source_statement(token, &mut reader, &machine, &mut builder).is_err(),
+                "{source}"
+            );
+            assert_eq!(
+                builder.clone().finish().unwrap().into_instructions(),
+                before,
+                "{source}"
+            );
+            builder.define_numeric_label(8).unwrap();
+            builder.emit_numeric_jump(8).unwrap();
+            assert_eq!(
+                builder.finish().unwrap().into_instructions(),
+                vec![
+                    Instruction::PushConst(7),
+                    Instruction::Jump(1),
+                    Instruction::Return
+                ],
+                "{source}"
+            );
+        }
     }
 }
