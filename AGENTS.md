@@ -24,6 +24,8 @@ VTLXX 固有の bootstrap 設計原則は、一般的な言語処理系、Rust�
 
 repository root の `AGENTS.md` に加え、変更対象パスにより近い `AGENTS.md` が存在する場合は、それも適用する。関連文書は変更対象と issue が要求するものを確認し、過去 stage や別対象の資料を現在仕様として扱わない。
 
+VTLXX repository 全体の概要と主要文書への入口は root `README.md` を参照する。ECVTL の source surface、実行方法、記述例、formatting rule を扱う場合は、`crates/poc/extended-classic-vtl/README.md` を実用入口として確認する。これらの README は探索と実用上の案内であり、設計判断・現在の開発段階・現在の実装事実の正本を置き換えない。
+
 設計判断は採用済み ADR を正本とする。現在の実装事実はコードとテストを正本とする。
 
 現在の開発段階、対象 stage、issue 系列、対象範囲、非目標その他の変化しやすい情報は、対応する Tracker / マイルストーン issue を正本とする。
