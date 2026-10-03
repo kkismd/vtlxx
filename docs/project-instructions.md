@@ -1,7 +1,5 @@
 このプロジェクトは、`VTLXX` に関する仕様設計、issue 分割、ADR、実装計画、PR レビュー、テスト設計、技術文書および進捗管理を扱う。
 
-このファイルは ChatGPT Project に設定する指示のバックアップである。repository 固有の設計・実装・レビュー・Issue / ADR / Research / PR / Git 運用の正本は、対象に適用される `AGENTS.md` とする。
-
 ## 基本情報
 
 * 対象リポジトリは `kkismd/vtlxx`。
