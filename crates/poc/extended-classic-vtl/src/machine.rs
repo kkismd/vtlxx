@@ -1,6 +1,6 @@
 use crate::{
-    executable::{Executable, ExecutableBody, ExecutableId, Instruction, RuntimeError},
     Cell,
+    executable::{Executable, ExecutableBody, ExecutableId, Instruction, RuntimeError},
 };
 
 const REGISTER_COUNT: usize = 26;
@@ -282,10 +282,8 @@ mod tests {
 
     #[test]
     fn missing_return_is_an_error() {
-        let mut machine =
-            Machine::new();
-        let program =
-            machine.install(ExecutableBody::Compiled(vec![Instruction::PushConst(1)]));
+        let mut machine = Machine::new();
+        let program = machine.install(ExecutableBody::Compiled(vec![Instruction::PushConst(1)]));
         assert_eq!(machine.execute(program), Err(RuntimeError::MissingReturn));
         assert_eq!(machine.stack(), &[1]);
     }
