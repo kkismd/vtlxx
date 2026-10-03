@@ -1,6 +1,9 @@
 use crate::{
     Cell,
+    binding::{BindingError, Bindings, SourceRole},
+    builder::CompletedBody,
     executable::{Executable, ExecutableBody, ExecutableId, Instruction, RuntimeError},
+    primitive::Primitive,
 };
 
 const REGISTER_COUNT: usize = 26;
@@ -17,6 +20,8 @@ pub struct Machine {
     pub(crate) storage: Box<[Cell; STORAGE_SIZE]>,
     pub(crate) value_stack: Vec<Cell>,
     executables: Vec<Executable>,
+    bindings: Bindings,
+    builtins: Vec<(Primitive, ExecutableId)>,
     pub(crate) output: Vec<u8>,
 }
 
@@ -28,13 +33,17 @@ impl Default for Machine {
 
 impl Machine {
     pub fn new() -> Self {
-        Self {
+        let mut machine = Self {
             registers: [0; REGISTER_COUNT],
             storage: Box::new([0; STORAGE_SIZE]),
             value_stack: Vec::new(),
             executables: Vec::new(),
+            bindings: Bindings::default(),
+            builtins: Vec::new(),
             output: Vec::new(),
-        }
+        };
+        machine.seed_builtins();
+        machine
     }
 
     pub fn push(&mut self, value: Cell) {
@@ -78,11 +87,87 @@ impl Machine {
         Ok(self.registers[index])
     }
 
-    #[cfg(test)]
-    fn install(&mut self, body: ExecutableBody) -> ExecutableId {
+    fn install_body(&mut self, body: ExecutableBody) -> ExecutableId {
         let id = ExecutableId(self.executables.len());
         self.executables.push(Executable { body });
         id
+    }
+
+    pub(crate) fn install_completed(&mut self, body: CompletedBody) -> ExecutableId {
+        self.install_body(ExecutableBody::Compiled(body.into_instructions()))
+    }
+
+    pub(crate) fn resolve(&self, identity: char, role: SourceRole) -> Option<ExecutableId> {
+        self.bindings.resolve(identity, role)
+    }
+
+    pub(crate) fn builtin_id(&self, primitive: Primitive) -> Option<ExecutableId> {
+        self.builtins
+            .iter()
+            .find(|(candidate, _)| *candidate == primitive)
+            .map(|(_, id)| *id)
+    }
+
+    pub(crate) fn publish_initial(
+        &mut self,
+        identity: char,
+        role: SourceRole,
+        body: CompletedBody,
+    ) -> Result<ExecutableId, BindingError> {
+        if self.resolve(identity, role).is_some() {
+            return Err(BindingError::AlreadyBound);
+        }
+        let id = self.install_completed(body);
+        self.bindings.bind_initial(identity, role, id)?;
+        Ok(id)
+    }
+
+    fn seed(&mut self, primitive: Primitive, binding: Option<(char, SourceRole)>) {
+        let id = self.install_body(ExecutableBody::Primitive(primitive));
+        self.builtins.push((primitive, id));
+        if let Some((identity, role)) = binding {
+            self.bindings
+                .bind_initial(identity, role, id)
+                .expect("unique built-in binding");
+        }
+    }
+
+    fn seed_builtins(&mut self) {
+        for index in 0..REGISTER_COUNT {
+            let identity = char::from(b'A' + index as u8);
+            self.seed(
+                Primitive::LoadReg(index),
+                Some((identity, SourceRole::PrimaryRead)),
+            );
+            self.seed(
+                Primitive::StoreReg(index),
+                Some((identity, SourceRole::Write)),
+            );
+        }
+        for (primitive, binding) in [
+            (Primitive::LoadStorage, Some(('@', SourceRole::AppliedRead))),
+            (Primitive::StoreStorage, Some(('@', SourceRole::Write))),
+            (Primitive::PrintNumber, Some(('?', SourceRole::Write))),
+            (Primitive::PrintChar, Some(('$', SourceRole::Write))),
+            (Primitive::Add, Some(('+', SourceRole::BinaryOperator))),
+            (Primitive::Sub, Some(('-', SourceRole::BinaryOperator))),
+            (Primitive::Mul, Some(('*', SourceRole::BinaryOperator))),
+            (Primitive::Div, Some(('/', SourceRole::BinaryOperator))),
+            (Primitive::Rem, Some(('%', SourceRole::BinaryOperator))),
+            (Primitive::Lt, Some(('<', SourceRole::BinaryOperator))),
+            (Primitive::Gt, Some(('>', SourceRole::BinaryOperator))),
+            (Primitive::Eq, None),
+            (Primitive::Ne, None),
+            (Primitive::Le, None),
+            (Primitive::Ge, None),
+        ] {
+            self.seed(primitive, binding);
+        }
+    }
+
+    #[cfg(test)]
+    fn install(&mut self, body: ExecutableBody) -> ExecutableId {
+        self.install_body(body)
     }
 
     #[cfg(test)]
@@ -90,7 +175,7 @@ impl Machine {
         self.execute_completed(entry)
     }
 
-    fn execute_completed(&mut self, entry: ExecutableId) -> Result<(), RuntimeError> {
+    pub(crate) fn execute_completed(&mut self, entry: ExecutableId) -> Result<(), RuntimeError> {
         let mut current = entry;
         let mut instruction = 0usize;
         let mut call_stack: Vec<Continuation> = Vec::new();
@@ -176,7 +261,129 @@ fn validate_target(code: &[Instruction], target: usize) -> Result<(), RuntimeErr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::primitive::Primitive;
+    use crate::builder::{BuildError, CodeBuilder};
+
+    #[test]
+    fn builtins_have_their_source_roles_and_composites_have_only_ids() {
+        let machine = Machine::new();
+        for (index, identity) in ('A'..='Z').enumerate() {
+            assert_eq!(
+                machine.resolve(identity, SourceRole::PrimaryRead),
+                machine.builtin_id(Primitive::LoadReg(index))
+            );
+            assert_eq!(
+                machine.resolve(identity, SourceRole::Write),
+                machine.builtin_id(Primitive::StoreReg(index))
+            );
+        }
+        for (identity, role, primitive) in [
+            ('@', SourceRole::AppliedRead, Primitive::LoadStorage),
+            ('@', SourceRole::Write, Primitive::StoreStorage),
+            ('?', SourceRole::Write, Primitive::PrintNumber),
+            ('$', SourceRole::Write, Primitive::PrintChar),
+            ('+', SourceRole::BinaryOperator, Primitive::Add),
+            ('-', SourceRole::BinaryOperator, Primitive::Sub),
+            ('*', SourceRole::BinaryOperator, Primitive::Mul),
+            ('/', SourceRole::BinaryOperator, Primitive::Div),
+            ('%', SourceRole::BinaryOperator, Primitive::Rem),
+            ('<', SourceRole::BinaryOperator, Primitive::Lt),
+            ('>', SourceRole::BinaryOperator, Primitive::Gt),
+        ] {
+            assert_eq!(
+                machine.resolve(identity, role),
+                machine.builtin_id(primitive)
+            );
+        }
+        for primitive in [Primitive::Eq, Primitive::Ne, Primitive::Le, Primitive::Ge] {
+            assert!(machine.builtin_id(primitive).is_some());
+        }
+        for identity in ['#', '^', '&', '[', '|', '='] {
+            for role in [
+                SourceRole::Write,
+                SourceRole::PrimaryRead,
+                SourceRole::AppliedRead,
+                SourceRole::BinaryOperator,
+            ] {
+                assert_eq!(machine.resolve(identity, role), None);
+            }
+        }
+        assert_eq!(machine.resolve('?', SourceRole::PrimaryRead), None);
+        assert_eq!(machine.resolve('@', SourceRole::PrimaryRead), None);
+    }
+
+    #[test]
+    fn install_without_binding_and_publish_only_completed_body() {
+        let mut machine = Machine::new();
+        let mut unit = CodeBuilder::new();
+        unit.emit(Instruction::PushConst(7)).unwrap();
+        let id = machine.install_completed(unit.finish().unwrap());
+        assert_eq!(machine.resolve('p', SourceRole::Write), None);
+        machine.execute_completed(id).unwrap();
+        assert_eq!(machine.pop(), Some(7));
+
+        let mut unfinished = CodeBuilder::new();
+        let missing = unfinished.new_target();
+        unfinished.emit_jump(missing).unwrap();
+        assert_eq!(unfinished.finish(), Err(BuildError::UnresolvedTarget));
+        assert_eq!(machine.resolve('p', SourceRole::Write), None);
+
+        let mut body = CodeBuilder::new();
+        body.emit(Instruction::PushConst(9)).unwrap();
+        let published = machine
+            .publish_initial('p', SourceRole::Write, body.finish().unwrap())
+            .unwrap();
+        assert_eq!(machine.resolve('p', SourceRole::Write), Some(published));
+        assert_eq!(machine.resolve('p', SourceRole::PrimaryRead), None);
+
+        let before = machine.executables.len();
+        let duplicate = CodeBuilder::new().finish().unwrap();
+        assert_eq!(
+            machine.publish_initial('p', SourceRole::Write, duplicate),
+            Err(BindingError::AlreadyBound)
+        );
+        assert_eq!(machine.executables.len(), before);
+        assert_eq!(machine.resolve('p', SourceRole::Write), Some(published));
+        assert_eq!(
+            machine.publish_initial('A', SourceRole::Write, CodeBuilder::new().finish().unwrap()),
+            Err(BindingError::AlreadyBound)
+        );
+
+        let mut caller = CodeBuilder::new();
+        caller.emit_call(published);
+        let caller_id = machine.install_completed(caller.finish().unwrap());
+        machine.execute_completed(caller_id).unwrap();
+        assert_eq!(machine.stack(), &[9]);
+    }
+
+    #[test]
+    fn completed_call_keeps_resolved_id_without_runtime_binding_lookup() {
+        let mut machine = Machine::new();
+        let id = machine.resolve('A', SourceRole::PrimaryRead).unwrap();
+        let mut caller = CodeBuilder::new();
+        caller.emit_call(id);
+        let completed = caller.finish().unwrap();
+        assert_eq!(
+            completed.clone().into_instructions(),
+            vec![Instruction::Call(id), Instruction::Return]
+        );
+        let caller_id = machine.install_completed(completed);
+        machine.registers[0] = 17;
+        machine.execute_completed(caller_id).unwrap();
+        assert_eq!(machine.stack(), &[17]);
+    }
+
+    #[test]
+    fn branch_to_body_end_executes_implicit_return() {
+        let mut machine = Machine::new();
+        let mut builder = CodeBuilder::new();
+        let end = builder.new_target();
+        builder.emit_jump(end).unwrap();
+        builder.emit(Instruction::PushConst(99)).unwrap();
+        builder.complete_target(end).unwrap();
+        let id = machine.install_completed(builder.finish().unwrap());
+        machine.execute_completed(id).unwrap();
+        assert!(machine.stack().is_empty());
+    }
 
     #[test]
     fn machine_starts_zeroed_and_empty() {
