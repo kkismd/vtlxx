@@ -383,25 +383,52 @@ block は入れ子にできます。quoted string や comment 内の `|=` / `=|`
 
 ### IfElse `%=`
 
-`%=` の RHS は condition expression です。続く2つの body のうち、condition が0以外なら1つ目、0なら2つ目を実行します。各 body は1 statementまたは anonymous blockです。
+`%=` は condition に続けて then / else の **2つの body argument** を取ります。condition が 0 以外なら then 側、0 なら else 側だけを実行します。
+
+最小形:
 
 ```vtl
   %=A<10 B=1 B=2
 ```
 
-複数 statement の body には block を使います。
+この例では `B=1` が then、`B=2` が else です。
+
+各 arm は **1 source form** を消費します。ordinary statement と anonymous block を混在できます。
+
+```vtl
+  %=A<10 B=1 |=
+    B=2
+    ?=B
+  =|
+```
+
+両 arm を block にすることもできます。
 
 ```vtl
   %=A<10 |=
     B=1
-    C=2
+    ?="then"
   =| |=
-    B=3
-    C=4
+    B=2
+    ?="else"
   =|
 ```
 
-各 body に statement と block を混在させることもできます。`&=` の line-tail form は同じ logical line の残りを消費するため、`%=` の body に置く場合は anonymous block で囲みます。
+nested `%=` は condition と2 armを含む全体で1 source formとして扱われます。
+
+```vtl
+  %=A %=B C=1 C=2 C=3
+```
+
+一方、legacy line-tail `&=` は同じ logical line の残り全体を所有するため、`%=` の unbraced arm には置けません。arm 内で `&=` を使う場合は anonymous block で包みます。
+
+```vtl
+  %=A |=
+    &=B C=1
+  =| C=2
+```
+
+statement target の `%=` は native IfElse source command です。expression 中の `%` は従来どおり remainder operator であり、意味は変わりません。
 
 ### While `*=()`
 
