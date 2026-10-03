@@ -2,8 +2,10 @@ use std::{collections::HashSet, path::Path, process::Command};
 use vtlxx_poc_extended_classic_vtl::Machine;
 
 const EXAMPLE: &str = include_str!("../examples/eight_queens.vtl");
+const EXPECTED_OUTPUT: &[u8] = include_bytes!("fixtures/eight_queens_example_output.txt");
 
 fn assert_solution_output(output: &[u8]) {
+    assert_eq!(output, EXPECTED_OUTPUT, "solution output changed");
     assert!(output.ends_with(b"\n"), "output must end with LF");
 
     let lines: Vec<_> = output[..output.len() - 1]

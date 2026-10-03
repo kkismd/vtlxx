@@ -2,64 +2,114 @@
 ; From the repository root: cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- crates/poc/extended-classic-vtl/examples/eight_queens.vtl
 ; @(C) stores the row (1..8) of the queen in column C (0..7); zero means empty.
 ; C is the current column, R its candidate row, and S the solution count.
-; J scans earlier columns (and later prints the board); P and D check collisions.
+; J scans earlier columns or prints the board; P, D, and F check collisions.
+; The procedures share registers and storage. Each contract below names its effects.
 
-  ; p has stack effect ( address value -- ). Board writes use this source-defined
-  ; handler to pass two values through the shared stack to the built-in @ writer.
+  ; p: ( address value -- ). All board writes pass through this procedure.
+  ; reads: value stack
+  ; writes/clobbers: I, V, indexed storage at address
   |=p
     V=[
     I=[
     @=I,V
   p=|
 
+  ; a: ( difference -- absolute difference ).
+  ; reads: value stack
+  ; writes/clobbers: D
+  |=a
+    D=[
+    &=D<0 D=0-D
+    [=D
+  a=|
+
+  ; c: ( -- ). Set F when the current candidate collides with an earlier queen.
+  ; reads: C, R, indexed storage; calls a
+  ; writes/clobbers: F, J, P, D
+  |=c
+    F=0
+    J=0
+    *=()
+    |=
+      [=J<C
+    =|
+    |=
+      P=@(J)
+      %=P==R |=
+        F=1
+        J=C
+      =| |=
+        a=P-R
+        D=[
+        &=D==(C-J) |=
+          F=1
+          J=C
+        =|
+      =|
+      J=J+1
+    =|
+  c=|
+
+  ; o: ( -- ). Print the placed rows in column order, followed by LF.
+  ; reads: indexed storage
+  ; writes/clobbers: J, output
+  |=o
+    J=0
+    *=()
+    |=
+      [=J<8
+    =|
+    |=
+      ?=@(J)
+      J=J+1
+    =|
+    ?=()
+  o=|
+
+  ; d: ( -- ). Descend to an empty next column.
+  ; reads: C; calls p
+  ; writes/clobbers: C, I, V, indexed storage at the new C
+  |=d
+    C=C+1
+    p=C,0
+  d=|
+
+  ; b: ( -- ). Clear an exhausted column and backtrack.
+  ; reads: C; calls p
+  ; writes/clobbers: C, I, V, indexed storage at the old C
+  |=b
+    p=C,0
+    C=C-1
+  b=|
+
+  ; s: ( -- ). Advance candidates until backtracking passes column zero.
+  ; reads: C, S, indexed storage; calls b, c, d, o, p
+  ; writes/clobbers: C, R, S, F, J, P, D, I, V, board, output
+  |=s
+    *=()
+    |=
+      [=C>=0
+    =|
+    |=
+      ; Advance this column's row candidate. Exhaustion backtracks.
+      R=@(C)+1
+      %=R>8 b=() |=
+        p=C,R
+        c=()
+        ; A clear candidate completes a solution or descends.
+        &=F==0 |=
+          %=C==7 |=
+            S=S+1
+            o=()
+          =| d=()
+        =|
+      =|
+    =|
+  s=|
+
   C=0
   S=0
   p=C,0
-
-; Try the next row in this column, then check it against earlier queens.
-^=1
-  R=@(C)+1
-  &=R>8 #=2
-  p=C,R
-  J=0
-
-; A shared row or equal diagonal distance rejects this candidate.
-^=3
-  &=J==C #=7
-  P=@(J)
-  &=P==R #=1
-  D=P-R
-  &=D<0 D=0-D
-  &=D==(C-J) #=1
-  J=J+1
-  #=3
-
-; A valid placement descends, unless the last column completes a solution.
-^=7
-  &=C==7 #=8
-  C=C+1
-  p=C,0
-  #=1
-
-; Print one row digit per column, then a newline, and continue the search.
-^=8
-  S=S+1
-  J=0
-^=4
-  ?=@(J)
-  J=J+1
-  &=J<8 #=4
-  ?=()
-  #=1
-
-; No rows remain here: clear the column and backtrack to the previous one.
-^=2
-  p=C,0
-  C=C-1
-  &=C<0 #=9
-  #=1
-
-; Backtracking past column zero ends the search; print the final count.
-^=9
+  s=()
   ?=S
   ?=()

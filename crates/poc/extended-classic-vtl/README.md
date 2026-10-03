@@ -630,14 +630,13 @@ opener / closer の改行配置には今後評価する余地がありますが�
 
 - A-Z register
 - storage
-- source-defined procedure
+- source-defined procedures for board writes, collision checks, output, and search
 - shared value stack
-- numeric label / jump
-- line-tail conditional `&=`
+- `&=` anonymous block, IfElse `%=` and While `*=()`
 - decimal / newline output
 - formatting / indentation rule
 
-`%=` と `*=()` は現在利用できますが、この Eight Queens example ではまだ使用していません。
+手続きは callee-first で定義し、stack effect と共有 register / storage の読み書きを source comment に記載しています。探索・衝突判定・解の表示では anonymous block と structured control を使い、numeric label / jump は使っていません。
 
 実行:
 
