@@ -350,11 +350,13 @@ label は decimal `0..32767` です。同じ executable owner 内で一意でな
 
 label は top-level と source-defined procedure で別 namespace です。
 
-## Conditional
+## Conditional / IfElse / While
 
-現在 `main` の conditional は `&=` です。body には、同じ logical line の残りを使う形と anonymous block を使う形があります。
+### Conditional `&=`
 
-### Line-tail form
+`&=` の body には、同じ logical line の残りを使う形と anonymous block を使う形があります。
+
+#### Line-tail form
 
 ```vtl
   &=A<10 B=B+1 #=100
@@ -364,7 +366,7 @@ condition が 0 なら、その logical line の後続 statement をすべて飛
 
 同一行内にさらに `&=` が現れる場合は、後続 tail が入れ子に条件付けされます。
 
-### Anonymous block form
+#### Anonymous block form
 
 複数 logical line の body には `|= ... =|` を使えます。
 
@@ -379,7 +381,50 @@ anonymous block は独立した procedure や runtime value ではありませ�
 
 block は入れ子にできます。quoted string や comment 内の `|=` / `=|` は delimiter として扱われません。body argument を要求していない位置に bare `|= ... =|` を置くことはできません。
 
-IfElse `%=` と While `*=()` は採用済み設計がありますが、**この README が基準とする current `main` ではまだ利用可能機能ではありません**。現在の進捗は [#194](https://github.com/kkismd/vtlxx/issues/194) を確認してください。
+### IfElse `%=`
+
+`%=` の RHS は condition expression です。続く2つの body のうち、condition が0以外なら1つ目、0なら2つ目を実行します。各 body は1 statementまたは anonymous blockです。
+
+```vtl
+  %=A<10 B=1 B=2
+```
+
+複数 statement の body には block を使います。
+
+```vtl
+  %=A<10 |=
+    B=1
+    C=2
+  =| |=
+    B=3
+    C=4
+  =|
+```
+
+各 body に statement と block を混在させることもできます。`&=` の line-tail form は同じ logical line の残りを消費するため、`%=` の body に置く場合は anonymous block で囲みます。
+
+### While `*=()`
+
+`*=()` は直後に predicate と body の **2つの anonymous block** を取ります。どちらにも単独 statement の省略形はありません。
+
+```vtl
+  A=0
+  *=()
+  |=
+    [=A<10
+  =|
+  |=
+    A=A+1
+  =|
+```
+
+第1 block の predicate は各反復の先頭で実行されます。その実行後、既存の `JumpIfZero` が現在の value stack top 1 Cell を condition として消費します。0なら終了し、0以外なら第2 block の body を実行して predicate に戻ります。
+
+predicate の `( -- condition )` は programmer contract です。arity metadata や compile-time check はなく、condition が stack に無ければ通常の stack-underflow error になります。`*=()` 自体の `()` は通常 operand を生成しません。
+
+While は stack を自動 cleanup しません。開始前からある値や predicate / body が余分に残した値は、共通の value stack 上にそのまま残ります。
+
+statement の `*=()` は native While source command です。expression 内の `*` は従来どおり multiplication operator です。
 
 ## Source-defined 手続き
 
@@ -565,6 +610,8 @@ opener / closer の改行配置には今後評価する余地がありますが�
 - decimal / newline output
 - formatting / indentation rule
 
+`%=` と `*=()` は現在利用できますが、この Eight Queens example ではまだ使用していません。
+
 実行:
 
 ```sh
@@ -585,5 +632,5 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 5. procedure 呼び出しは callee-first の定義順を守る。
 6. numeric label は executable owner ごとの local namespace として扱う。
 7. indentation は 2 ASCII spaces 単位で #200 の owner rule に従う。
-8. 未実装の関数・拡張プロパティ・拡張演算子・`%=` / `*=()` を推測で書かない。
+8. 未実装の関数・拡張プロパティ・拡張演算子を推測で書かない。
 9. current code / tests / accepted ADR と README が食い違う場合は、README を正本として扱わず差分を確認する。
