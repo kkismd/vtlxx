@@ -6,5 +6,5 @@ edition = "2024"
 [dependencies]
 
 [workspace]
-members = ["crates/poc/m01"]
+members = ["crates/poc/m01", "crates/poc/extended-classic-vtl"]
 resolver = "3"
