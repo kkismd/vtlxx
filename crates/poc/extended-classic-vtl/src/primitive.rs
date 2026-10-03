@@ -130,6 +130,20 @@ mod tests {
     }
 
     #[test]
+    fn storage_uses_raw_bits_for_negative_cell_addresses() {
+        let mut machine = Machine::new();
+        machine.push(Cell::MIN);
+        machine.push(123);
+        Primitive::StoreStorage.execute(&mut machine).unwrap();
+
+        assert_eq!(machine.storage(0x8000), 123);
+        assert_eq!(machine.storage(0), 0);
+        machine.push(Cell::MIN);
+        Primitive::LoadStorage.execute(&mut machine).unwrap();
+        assert_eq!(machine.pop(), Some(123));
+    }
+
+    #[test]
     fn failing_binary_primitive_preserves_operands() {
         let mut machine = Machine::new();
         machine.push(7);

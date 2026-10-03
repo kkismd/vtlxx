@@ -181,10 +181,12 @@ mod tests {
     #[test]
     fn machine_starts_zeroed_and_empty() {
         let machine = Machine::new();
-        assert_eq!(machine.register(0), Some(0));
-        assert_eq!(machine.register(25), Some(0));
-        assert_eq!(machine.storage(0), 0);
-        assert_eq!(machine.storage(u16::MAX), 0);
+        for index in 0..REGISTER_COUNT {
+            assert_eq!(machine.register(index), Some(0));
+        }
+        for address in [0, 0x7fff, 0x8000, u16::MAX] {
+            assert_eq!(machine.storage(address), 0);
+        }
         assert!(machine.stack().is_empty());
         assert!(machine.output().is_empty());
     }
@@ -331,6 +333,53 @@ mod tests {
         ]));
         machine.execute(good).unwrap();
         assert_eq!(machine.stack(), &[9]);
+    }
+
+    #[test]
+    fn nested_underflow_preserves_completed_effects_and_clears_control() {
+        let mut machine = Machine::new();
+        let store_reg = machine.install(ExecutableBody::Primitive(Primitive::StoreReg(0)));
+        let store_storage = machine.install(ExecutableBody::Primitive(Primitive::StoreStorage));
+        let print_char = machine.install(ExecutableBody::Primitive(Primitive::PrintChar));
+        let add = machine.install(ExecutableBody::Primitive(Primitive::Add));
+        let leaf = machine.install(ExecutableBody::Compiled(vec![
+            Instruction::PushConst(7),
+            Instruction::Call(add),
+            Instruction::Return,
+        ]));
+        let middle = machine.install(ExecutableBody::Compiled(vec![
+            Instruction::Call(leaf),
+            Instruction::PushConst(99),
+            Instruction::Return,
+        ]));
+        let root = machine.install(ExecutableBody::Compiled(vec![
+            Instruction::PushConst(41),
+            Instruction::Call(store_reg),
+            Instruction::PushConst(Cell::MIN),
+            Instruction::PushConst(23),
+            Instruction::Call(store_storage),
+            Instruction::PushConst(65),
+            Instruction::Call(print_char),
+            Instruction::Call(middle),
+            Instruction::PushConst(88),
+            Instruction::Return,
+        ]));
+
+        assert_eq!(machine.execute(root), Err(RuntimeError::StackUnderflow));
+        assert_eq!(machine.stack(), &[7]);
+        assert_eq!(machine.register(0), Some(41));
+        assert_eq!(machine.storage(0x8000), 23);
+        assert_eq!(machine.output(), b"A");
+
+        let good = machine.install(ExecutableBody::Compiled(vec![
+            Instruction::PushConst(9),
+            Instruction::Return,
+        ]));
+        machine.execute(good).unwrap();
+        assert_eq!(machine.stack(), &[7, 9]);
+        assert_eq!(machine.register(0), Some(41));
+        assert_eq!(machine.storage(0x8000), 23);
+        assert_eq!(machine.output(), b"A");
     }
 
     #[test]
