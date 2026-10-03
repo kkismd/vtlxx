@@ -1,0 +1,65 @@
+; Enumerate all 92 solutions to Eight Queens, then print the solution count.
+; From the repository root: cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- crates/poc/extended-classic-vtl/examples/eight_queens.vtl
+; @(C) stores the row (1..8) of the queen in column C (0..7); zero means empty.
+; C is the current column, R its candidate row, and S the solution count.
+; J scans earlier columns (and later prints the board); P and D check collisions.
+
+; p has stack effect ( address value -- ). Board writes use this source-defined
+; handler to pass two values through the shared stack to the built-in @ writer.
+|=p
+V=[
+I=[
+@=I,V
+p=|
+
+C=0
+S=0
+p=C,0
+
+; Try the next row in this column, then check it against earlier queens.
+^=1
+R=@(C)+1
+&=R>8 #=2
+p=C,R
+J=0
+
+; A shared row or equal diagonal distance rejects this candidate.
+^=3
+&=J==C #=7
+P=@(J)
+&=P==R #=1
+D=P-R
+&=D<0 D=0-D
+&=D==(C-J) #=1
+J=J+1
+#=3
+
+; A valid placement descends, unless the last column completes a solution.
+^=7
+&=C==7 #=8
+C=C+1
+p=C,0
+#=1
+
+; Print one row digit per column, then a newline, and continue the search.
+^=8
+S=S+1
+J=0
+^=4
+?=@(J)
+J=J+1
+&=J<8 #=4
+?=
+#=1
+
+; No rows remain here: clear the column and backtrack to the previous one.
+^=2
+p=C,0
+C=C-1
+&=C<0 #=9
+#=1
+
+; Backtracking past column zero ends the search; print the final count.
+^=9
+?=S
+?=
