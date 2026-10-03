@@ -251,6 +251,29 @@ mod tests {
     }
 
     #[test]
+    fn backward_jump_repeats_within_current_body() {
+        let mut machine = Machine::new();
+        let load = machine.install(ExecutableBody::Primitive(Primitive::LoadReg(0)));
+        let store = machine.install(ExecutableBody::Primitive(Primitive::StoreReg(0)));
+        let sub = machine.install(ExecutableBody::Primitive(Primitive::Sub));
+        let program = machine.install(ExecutableBody::Compiled(vec![
+            Instruction::PushConst(2),
+            Instruction::Call(store),
+            Instruction::Call(load),
+            Instruction::PushConst(1),
+            Instruction::Call(sub),
+            Instruction::Call(store),
+            Instruction::Call(load),
+            Instruction::JumpIfZero(9),
+            Instruction::Jump(2),
+            Instruction::Return,
+        ]));
+        machine.execute(program).unwrap();
+        assert_eq!(machine.register(0), Some(0));
+        assert!(machine.stack().is_empty());
+    }
+
+    #[test]
     fn invalid_jump_if_zero_keeps_condition() {
         let mut machine = Machine::new();
         let program = machine.install(ExecutableBody::Compiled(vec![
