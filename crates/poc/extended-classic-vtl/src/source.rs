@@ -197,7 +197,7 @@ fn compile_tail(
                     builder.emit_call(output);
                 }
             }
-            '?' if rhs.is_empty() => {
+            '?' if rhs == "()" => {
                 let output = machine
                     .resolve('$', SourceRole::Write)
                     .ok_or(CompileError::UndefinedBinding)?;
@@ -208,7 +208,9 @@ fn compile_tail(
             }
             '[' => compile_rhs(rhs, machine, builder)?,
             _ => {
-                compile_rhs(rhs, machine, builder)?;
+                if rhs != "()" {
+                    compile_rhs(rhs, machine, builder)?;
+                }
                 let id = machine
                     .resolve(target, SourceRole::Write)
                     .ok_or(CompileError::UndefinedBinding)?;

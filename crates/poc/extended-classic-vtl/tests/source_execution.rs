@@ -85,9 +85,55 @@ fn stack_connection_uses_existing_top_without_new_value() {
 fn output_sugar_preserves_quoted_space_and_semicolon() {
     let mut machine = Machine::new();
     machine
-        .execute_source("?=-12 $=32 ?=\"hello; world\" ?= ; comment\n$=65")
+        .execute_source("?=-12 $=32 ?=\"hello; world\" ?=() ; comment\n$=65")
         .unwrap();
     assert_eq!(machine.output(), b"-12 hello; world\nA");
+}
+
+#[test]
+fn zero_operand_call_preserves_the_caller_stack_for_the_handler() {
+    let mut machine = Machine::new();
+    machine.execute_source("|=q ?=\"called\" q=|").unwrap();
+    machine.push(17);
+    machine.execute_source("q=()").unwrap();
+    assert_eq!(machine.output(), b"called");
+    assert_eq!(machine.stack(), &[17]);
+
+    machine.execute_source("|=p A=[ p=| p=()").unwrap();
+    assert_eq!(machine.register(0), Some(17));
+    assert!(machine.stack().is_empty());
+}
+
+#[test]
+fn zero_operand_call_uses_the_existing_callee_stack_contract() {
+    let mut machine = Machine::new();
+    machine.execute_source("|=q A=[ q=|").unwrap();
+    assert_eq!(
+        machine.execute_source("q=()"),
+        Err(SourceError::Runtime(RuntimeError::StackUnderflow))
+    );
+    assert!(machine.stack().is_empty());
+
+    assert_eq!(
+        machine.execute_source("X=()"),
+        Err(SourceError::Runtime(RuntimeError::StackUnderflow))
+    );
+    machine.push(23);
+    machine.execute_source("X=()").unwrap();
+    assert_eq!(machine.register(23), Some(23));
+    assert!(machine.stack().is_empty());
+}
+
+#[test]
+fn newline_requires_explicit_zero_operand_marker() {
+    let mut machine = Machine::new();
+    machine.execute_source("?=()").unwrap();
+    assert_eq!(machine.output(), b"\n");
+    assert_eq!(
+        machine.execute_source("?="),
+        Err(SourceError::Compile(CompileError::Syntax))
+    );
+    assert_eq!(machine.output(), b"\n");
 }
 
 #[test]
@@ -140,6 +186,8 @@ fn invalid_source_forms_are_compile_errors() {
         "A=(1+2",
         "A=1+2)",
         "A=1,",
+        "A=1+()",
+        "A=(())",
         "A=@()",
         "A=@(1)(2)",
         "A=1+[",

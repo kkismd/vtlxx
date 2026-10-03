@@ -48,7 +48,7 @@ fn eight_queens_output_is_exact() {
 
 #[test]
 fn machine_newline_is_the_only_newline() {
-    let source = SourceFile::new(b"?=\"hello\" ?=");
+    let source = SourceFile::new(b"?=\"hello\" ?=()");
     let output = ecvtl(&[source.0.as_os_str()]);
     assert!(output.status.success(), "{:?}", output.stderr);
     assert_eq!(output.stdout, b"hello\n");
