@@ -138,6 +138,88 @@ fn if_else_rejects_missing_arms_and_preserves_remainder() {
 }
 
 #[test]
+fn while_rechecks_predicate_and_handles_zero_iterations() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("A=0 B=0 *=() |= [=A<3 =| |= A=A+1 B=B+2 =| C=A")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(3));
+    assert_eq!(machine.register(1), Some(6));
+    assert_eq!(machine.register(2), Some(3));
+    assert!(machine.stack().is_empty());
+
+    let mut machine = Machine::new();
+    machine
+        .execute_source("A=3 *=() |= [=A<3 =| |= A=99 =| B=7")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(3));
+    assert_eq!(machine.register(1), Some(7));
+}
+
+#[test]
+fn nested_while_and_following_source_keep_their_own_arguments() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(
+            "A=0 B=0 *=() |= [=A<2 =| |= C=0 *=() |= [=C<3 =| |= B=B+1 C=C+1 =| A=A+1 =| D=9",
+        )
+        .unwrap();
+    for (index, expected) in [(0, 2), (1, 6), (2, 3), (3, 9)] {
+        assert_eq!(machine.register(index), Some(expected));
+    }
+    assert!(machine.stack().is_empty());
+}
+
+#[test]
+fn while_uses_shared_stack_without_cleanup() {
+    let mut machine = Machine::new();
+    machine.push(7);
+    machine
+        .execute_source("A=0 *=() |= [=99,A<2 =| |= [=88 A=A+1 =|")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(2));
+    assert_eq!(machine.stack(), &[7, 99, 88, 99, 88, 99]);
+
+    let mut machine = Machine::new();
+    machine.push(0);
+    machine.execute_source("*=() |= A=1 =| |= A=2 =|").unwrap();
+    assert_eq!(machine.register(0), Some(1));
+    assert!(machine.stack().is_empty());
+
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source("*=() |= A=1 =| |= A=2 =|"),
+        Err(SourceError::Runtime(RuntimeError::StackUnderflow))
+    );
+    assert_eq!(machine.register(0), Some(1));
+}
+
+#[test]
+fn while_requires_two_blocks_and_preserves_multiplication() {
+    for source in [
+        "*=()",
+        "*=() |= [=1 =|",
+        "*=() [=1 |= A=1 =|",
+        "*=() |= [=1 =| A=1",
+        "*=1 |= [=1 =| |= A=1 =|",
+        "*=() |= [=1 =| |= A=1",
+    ] {
+        let mut machine = Machine::new();
+        assert!(
+            matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+        assert_eq!(machine.register(0), Some(0), "{source}");
+    }
+    let mut machine = Machine::new();
+    machine
+        .execute_source("A=2*3 *=() |= [=0 =| |= A=99 =| B=A*4")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(6));
+    assert_eq!(machine.register(1), Some(24));
+}
+
+#[test]
 fn anonymous_blocks_cross_lines_and_stop_at_the_matching_close() {
     let mut machine = Machine::new();
     machine
