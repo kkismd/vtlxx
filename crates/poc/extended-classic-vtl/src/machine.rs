@@ -4,6 +4,7 @@ use crate::{
     builder::CompletedBody,
     executable::{Executable, ExecutableBody, ExecutableId, Instruction, RuntimeError},
     primitive::Primitive,
+    source::{SourceError, compile_source},
 };
 
 const REGISTER_COUNT: usize = 26;
@@ -32,6 +33,12 @@ impl Default for Machine {
 }
 
 impl Machine {
+    pub fn execute_source(&mut self, source: &str) -> Result<(), SourceError> {
+        let completed = compile_source(self, source).map_err(SourceError::Compile)?;
+        let entry = self.install_completed(completed);
+        self.execute_completed(entry).map_err(SourceError::Runtime)
+    }
+
     pub fn new() -> Self {
         let mut machine = Self {
             registers: [0; REGISTER_COUNT],
