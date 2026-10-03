@@ -350,9 +350,9 @@ label は decimal `0..32767` です。同じ executable owner 内で一意でな
 
 label は top-level と source-defined procedure で別 namespace です。
 
-## Conditional
+## Conditional / IfElse
 
-現在 `main` の conditional は `&=` です。body には、同じ logical line の残りを使う形と anonymous block を使う形があります。
+現在 `main` では、単一条件の conditional に `&=`、2分岐の IfElse に `%=` を使えます。
 
 ### Line-tail form
 
@@ -379,7 +379,56 @@ anonymous block は独立した procedure や runtime value ではありませ�
 
 block は入れ子にできます。quoted string や comment 内の `|=` / `=|` は delimiter として扱われません。body argument を要求していない位置に bare `|= ... =|` を置くことはできません。
 
-IfElse `%=` と While `*=()` は採用済み設計がありますが、**この README が基準とする current `main` ではまだ利用可能機能ではありません**。現在の進捗は [#194](https://github.com/kkismd/vtlxx/issues/194) を確認してください。
+### IfElse `%=`
+
+`%=` は condition に続けて then / else の **2つの body argument** を取ります。condition が 0 以外なら then 側、0 なら else 側だけを実行します。
+
+最小形:
+
+```vtl
+  %=A<10 B=1 B=2
+```
+
+この例では `B=1` が then、`B=2` が else です。
+
+各 arm は **1 source form** を消費します。ordinary statement と anonymous block を混在できます。
+
+```vtl
+  %=A<10 B=1 |=
+    B=2
+    ?=B
+  =|
+```
+
+両 arm を block にすることもできます。
+
+```vtl
+  %=A<10 |=
+    B=1
+    ?="then"
+  =| |=
+    B=2
+    ?="else"
+  =|
+```
+
+nested `%=` は condition と2 armを含む全体で1 source formとして扱われます。
+
+```vtl
+  %=A %=B C=1 C=2 C=3
+```
+
+一方、legacy line-tail `&=` は同じ logical line の残り全体を所有するため、`%=` の unbraced arm には置けません。arm 内で `&=` を使う場合は anonymous block で包みます。
+
+```vtl
+  %=A |=
+    &=B C=1
+  =| C=2
+```
+
+statement target の `%=` は native IfElse source command です。expression 中の `%` は従来どおり remainder operator であり、意味は変わりません。
+
+While `*=()` は採用済み設計がありますが、**この README が基準とする current `main` ではまだ利用可能機能ではありません**。現在の進捗は [#194](https://github.com/kkismd/vtlxx/issues/194) を確認してください。
 
 ## Source-defined 手続き
 
@@ -585,5 +634,5 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 5. procedure 呼び出しは callee-first の定義順を守る。
 6. numeric label は executable owner ごとの local namespace として扱う。
 7. indentation は 2 ASCII spaces 単位で #200 の owner rule に従う。
-8. 未実装の関数・拡張プロパティ・拡張演算子・`%=` / `*=()` を推測で書かない。
+8. 未実装の関数・拡張プロパティ・拡張演算子・`*=()` を推測で書かない。
 9. current code / tests / accepted ADR と README が食い違う場合は、README を正本として扱わず差分を確認する。
