@@ -12,17 +12,20 @@ pub(crate) fn compile_rhs(
         chars: source.chars().collect(),
         position: 0,
         machine,
-        builder,
+        instructions: Vec::new(),
     };
     let seeded = parser.consume('[');
-    parser.operand_list(None, seeded)
+    parser.operand_list(None, seeded)?;
+    builder
+        .append_fragment(parser.instructions)
+        .map_err(|_| CompileError::Builder)
 }
 
 struct Parser<'a> {
     chars: Vec<char>,
     position: usize,
     machine: &'a Machine,
-    builder: &'a mut CodeBuilder,
+    instructions: Vec<Instruction>,
 }
 
 impl Parser<'_> {
@@ -68,7 +71,7 @@ impl Parser<'_> {
             }
             let operator = self.operator()?;
             self.value()?;
-            self.builder.emit_call(operator);
+            self.instructions.push(Instruction::Call(operator));
         }
     }
 
@@ -105,7 +108,7 @@ impl Parser<'_> {
             .machine
             .resolve(current, role)
             .ok_or(CompileError::UndefinedBinding)?;
-        self.builder.emit_call(id);
+        self.instructions.push(Instruction::Call(id));
         Ok(())
     }
 
@@ -119,9 +122,8 @@ impl Parser<'_> {
         }
         let text: String = self.chars[start..self.position].iter().collect();
         let value: Cell = text.parse().map_err(|_| CompileError::Syntax)?;
-        self.builder
-            .emit(Instruction::PushConst(value))
-            .map_err(|_| CompileError::Builder)
+        self.instructions.push(Instruction::PushConst(value));
+        Ok(())
     }
 
     fn operator(&mut self) -> Result<crate::executable::ExecutableId, CompileError> {
@@ -260,6 +262,26 @@ mod tests {
             assert_eq!(
                 code[2],
                 Instruction::Call(machine.builtin_id(expected).unwrap())
+            );
+        }
+    }
+
+    #[test]
+    fn failed_expression_leaves_existing_parent_code_unchanged() {
+        let machine = Machine::new();
+        for (source, error) in [
+            ("A+", CompileError::Syntax),
+            ("A+z", CompileError::UndefinedBinding),
+            ("A+(B+", CompileError::Syntax),
+            ("A+@(B)(C)", CompileError::Syntax),
+        ] {
+            let mut parent = CodeBuilder::new();
+            parent.emit(Instruction::PushConst(99)).unwrap();
+            assert_eq!(compile_rhs(source, &machine, &mut parent), Err(error));
+            assert_eq!(
+                parent.finish().unwrap().into_instructions(),
+                vec![Instruction::PushConst(99), Instruction::Return],
+                "{source}"
             );
         }
     }

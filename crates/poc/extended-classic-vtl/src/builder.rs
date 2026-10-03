@@ -75,6 +75,23 @@ impl CodeBuilder {
             .push(PendingInstruction::Ready(Instruction::Call(id)));
     }
 
+    pub(crate) fn append_fragment(
+        &mut self,
+        instructions: Vec<Instruction>,
+    ) -> Result<(), BuildError> {
+        if instructions.iter().any(|instruction| {
+            matches!(
+                instruction,
+                Instruction::Jump(_) | Instruction::JumpIfZero(_)
+            )
+        }) {
+            return Err(BuildError::RawBranch);
+        }
+        self.code
+            .extend(instructions.into_iter().map(PendingInstruction::Ready));
+        Ok(())
+    }
+
     pub(crate) fn new_target(&mut self) -> BranchTarget {
         let target = BranchTarget {
             owner: self.owner,
@@ -295,6 +312,20 @@ mod tests {
         assert_eq!(
             builder.finish().unwrap().into_instructions(),
             vec![Instruction::Call(ExecutableId(42)), Instruction::Return]
+        );
+    }
+
+    #[test]
+    fn fragment_append_rejects_raw_branch_without_partial_change() {
+        let mut builder = CodeBuilder::new();
+        builder.emit(Instruction::PushConst(99)).unwrap();
+        assert_eq!(
+            builder.append_fragment(vec![Instruction::PushConst(1), Instruction::Jump(0)]),
+            Err(BuildError::RawBranch)
+        );
+        assert_eq!(
+            builder.finish().unwrap().into_instructions(),
+            vec![Instruction::PushConst(99), Instruction::Return]
         );
     }
 }
