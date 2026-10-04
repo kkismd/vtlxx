@@ -647,6 +647,8 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 
 92 個の解を列挙し、最後に解数 `92` を出力します。
 
+[`examples/eight_queens_storage.vtl`](examples/eight_queens_storage.vtl) は、列ごとの候補と解数を storage に置き、現在の候補だけを短時間 register に読み出す別例です。同じ92解を逐一表示します。
+
 ## ECVTL source を書くときの確認事項
 
 新しい ECVTL source を追加・変更するときは、少なくとも次を確認してください。
