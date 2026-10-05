@@ -369,7 +369,7 @@ mod tests {
             .publish_initial('p', SourceRole::PrimaryRead, read.finish().unwrap())
             .unwrap();
 
-        machine.execute_source("|=p A=[ p=| A=p p=7").unwrap();
+        machine.execute_source("&=p [ A=[ ] A=p p=7").unwrap();
         assert_eq!(machine.resolve('p', SourceRole::PrimaryRead), Some(read_id));
         assert_eq!(machine.register(0), Some(7));
         assert!(machine.stack().is_empty());

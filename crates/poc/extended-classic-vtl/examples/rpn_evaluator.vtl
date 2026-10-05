@@ -6,32 +6,32 @@
 
   ; a: ( lhs rhs -- result ). Reads/writes A and B; leaves P, T and
   ; storage unchanged. B takes the top (rhs), then A takes lhs.
-  |=a
+  &=a [
     B=[
     A=[
     [=A+B
-  a=|
+  ]
 
   ; s: ( lhs rhs -- result ). Reads/writes A and B; leaves P, T and
   ; storage unchanged. Operand order is lhs minus rhs.
-  |=s
+  &=s [
     B=[
     A=[
     [=A-B
-  s=|
+  ]
 
   ; m: ( lhs rhs -- result ). Reads/writes A and B; leaves P, T and
   ; storage unchanged.
-  |=m
+  &=m [
     B=[
     A=[
     [=A*B
-  m=|
+  ]
 
   ; e: ( -- result ). Reads storage[0..6], writes P and T, and calls
   ; a, s, m (which clobber A and B). Existing stack values below the
   ; calculator operands survive the loop and its procedure calls.
-  |=e
+  &=e [
     P=0
     *=()
     [
@@ -46,7 +46,7 @@
         %=T==-3 [ m=() ]
       ]
     ]
-  e=|
+  ]
 
   ; Initialize the fixed program in indexed storage before evaluation.
   @=0,3

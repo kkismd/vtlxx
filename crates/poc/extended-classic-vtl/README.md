@@ -422,9 +422,9 @@ user-defined Write binding は、利用者向けには「手続き」と呼び�
 現在の surface は:
 
 ```vtl
-  |=p
+  &=p [
     ; procedure body
-  p=|
+  ]
 ```
 
 current implementation では identity は 1 文字の lowercase ASCII letter です。
@@ -433,11 +433,11 @@ current implementation では identity は 1 文字の lowercase ASCII letter �
 
 ```vtl
   ; ( address value -- )
-  |=p
+  &=p [
     V=[
     I=[
     @=I,V
-  p=|
+  ]
 
   p=10,42
 ```
@@ -449,9 +449,9 @@ procedure は caller と同じ value stack を使います。`p=10,42` は `10`,
 operand を追加せず procedure を呼ぶには `()` を使います。
 
 ```vtl
-  |=q
+  &=q [
     ?="called"
-  q=|
+  ]
 
   q=()
 ```
@@ -508,13 +508,13 @@ column 4  procedure body statement
 例:
 
 ```vtl
-  |=q
+  &=q [
     A=[
   ^=1
     ?=A
     A=A-1
     %=A [ #=1 ]
-  q=|
+  ]
 
   A=3
   q=A
@@ -544,10 +544,10 @@ top-level label:
 procedure body の説明なら body と同じ位置です。
 
 ```vtl
-  |=q
+  &=q [
     ; consume the top value
     A=[
-  q=|
+  ]
 ```
 
 trailing comment は code との間に 1 文字以上の ASCII space を置きます。
