@@ -104,6 +104,79 @@ fn if_else_blocks_cross_lines_and_share_the_owner_labels() {
 }
 
 #[test]
+fn bracket_blocks_work_for_conditional_if_else_and_while() {
+    let mut machine = Machine::new();
+    machine.execute_source("&=1 [\n A=1\n]").unwrap();
+    assert_eq!(machine.register(0), Some(1));
+
+    let mut machine = Machine::new();
+    machine.execute_source("%=1 [ B=1 ] [ B=2 ]").unwrap();
+    assert_eq!(machine.register(1), Some(1));
+    let mut machine = Machine::new();
+    machine.execute_source("%=0 [ B=1 ] [ B=2 ]").unwrap();
+    assert_eq!(machine.register(1), Some(2));
+
+    let mut machine = Machine::new();
+    machine
+        .execute_source("A=0 *=() [ [=A<3 ] [ A=A+1 ]")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(3));
+    assert!(machine.stack().is_empty());
+}
+
+#[test]
+fn bracket_blocks_nest_mix_with_legacy_blocks_and_allow_same_line_forms() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("&=1 [ %=1 |= A=1 =| [ A=A+1 ] ]")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(1));
+
+    let mut machine = Machine::new();
+    machine.execute_source("%=0 [ B=1 ] [ B=2 ]").unwrap();
+    assert_eq!(machine.register(0), Some(0));
+    assert_eq!(machine.register(1), Some(2));
+}
+
+#[test]
+fn bracket_delimiters_preserve_stack_surface_quotes_and_comments() {
+    let mut machine = Machine::new();
+    machine.push(10);
+    machine.execute_source("[=[+1 B=[").unwrap();
+    assert_eq!(machine.register(1), Some(11));
+
+    machine.push(10);
+    machine
+        .execute_source("A=[+2 &=1 [ ?=\"[]\" ; ] ignored\n C=3 ]")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(12));
+    assert_eq!(machine.register(2), Some(3));
+    assert_eq!(machine.output(), b"[]");
+}
+
+#[test]
+fn bracket_block_errors_are_atomic_and_require_matching_independent_delimiters() {
+    for source in [
+        "[ A=1 ]",
+        "]",
+        "&=1 [ A=1",
+        "&=1 [ A=1 =|",
+        "&=1 |= A=1 ] =|",
+        "%=1 [ A=1 =| ] [ B=2 ]",
+        "*=() [ [=0 ] [ A=1",
+        "%=1 [ A=1 ]",
+    ] {
+        let mut machine = Machine::new();
+        assert!(
+            matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+        assert_eq!(machine.register(0), Some(0), "{source}");
+        assert_eq!(machine.register(1), Some(0), "{source}");
+    }
+}
+
+#[test]
 fn if_else_requires_blocks_around_legacy_conditionals() {
     for source in ["%=1 &=1 A=1 A=2", "%=0 A=1 &=1 A=2"] {
         let mut machine = Machine::new();

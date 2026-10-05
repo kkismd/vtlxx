@@ -368,7 +368,7 @@ condition が 0 なら、その logical line の後続 statement をすべて飛
 
 #### Anonymous block form
 
-複数 logical line の body には `|= ... =|` を使えます。
+複数 logical line の body には `|= ... =|` または `[ ... ]` を使えます。どちらも同じ anonymous block です。推奨する書き方は複数行形式です。
 
 ```vtl
   &=A<10 |=
@@ -377,9 +377,18 @@ condition が 0 なら、その logical line の後続 statement をすべて飛
   =|
 ```
 
+同じ block は bracket 表記でも書けます。
+
+```vtl
+  &=A<10 [
+    B=B+1
+    ?=B
+  ]
+```
+
 anonymous block は独立した procedure や runtime value ではありません。surrounding executable owner の code へ inline に構築され、numeric label namespace も surrounding owner と共有します。
 
-block は入れ子にできます。quoted string や comment 内の `|=` / `=|` は delimiter として扱われません。body argument を要求していない位置に bare `|= ... =|` を置くことはできません。
+block は入れ子にでき、2つの表記を混在できます。各 block は対応する closer だけで閉じます。`[` / `]` は空白または logical-line separator で独立した token にします。同じ行にも書けますが、複数行形式を推奨します。quoted string や comment 内の delimiter は認識されません。既存 stack surface の `[=expr`, `target=[`, RHS-root `[` は変わりません。body argument を要求していない位置に bare delimiter を置くことはできません。
 
 ### IfElse `%=`
 
@@ -396,10 +405,10 @@ block は入れ子にできます。quoted string や comment 内の `|=` / `=|`
 各 arm は **1 source form** を消費します。ordinary statement と anonymous block を混在できます。
 
 ```vtl
-  %=A<10 B=1 |=
+  %=A<10 B=1 [
     B=2
     ?=B
-  =|
+  ]
 ```
 
 両 arm を block にすることもできます。
@@ -437,12 +446,12 @@ statement target の `%=` は native IfElse source command です。expression �
 ```vtl
   A=0
   *=()
-  |=
+  [
     [=A<10
-  =|
-  |=
+  ]
+  [
     A=A+1
-  =|
+  ]
 ```
 
 第1 block の predicate は各反復の先頭で実行されます。その実行後、既存の `JumpIfZero` が現在の value stack top 1 Cell を condition として消費します。0なら終了し、0以外なら第2 block の body を実行して predicate に戻ります。
