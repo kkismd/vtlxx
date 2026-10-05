@@ -9,24 +9,24 @@
 
   ; m: ( cell -- open ). Reads maze[0..15]; writes/clobbers T; storage unchanged.
   &=m [
-    T=[
-    %=T<0 [ [=0 ] [ [=@(T)==1 ]
+    T=~
+    %=T<0 [ ~=0 ] [ ~=@(T)==1 ]
   ]
 
   ; v: ( cell -- newly visited ). Reads/writes visited[16..31].
   ; Writes/clobbers T; no other A-Z or storage changes.
   &=v [
-    T=[
+    T=~
     %=@(16+T)==0 [
       @=16+T,1
-      [=1
-    ] [ [=0 ]
+      ~=1
+    ] [ ~=0 ]
   ]
 
   ; p: ( cell -- ). Reads/writes D and C, path[32..47], directions[48..63].
   ; Writes/clobbers T. The new frame starts with the right direction.
   &=p [
-    T=[
+    T=~
     D=D+1
     @=32+D,T
     @=48+D,0
@@ -56,7 +56,7 @@
       N=C-4
       %=C<4 [ N=-1 ]
     ]
-    [=N
+    ~=N
   ]
 
   ; b: ( -- ). Reads path[32..47] and D; writes C and D.
@@ -73,16 +73,16 @@
   &=s [
     *=()
     [
-      [=(D>=0)*(C!=15)
+      ~=(D>=0)*(C!=15)
     ]
     [
       %=@(48+D)<4 [
         n=()
-        N=[
+        N=~
         m=N
-        %=[ [
+        %=~ [
           v=N
-          %=[ [ p=N ]
+          %=~ [ p=N ]
         ]
       ] [ b=() ]
     ]
@@ -99,7 +99,7 @@
   I=0
   *=()
   [
-    [=I<64
+    ~=I<64
   ]
   [
     @=I,0
@@ -116,7 +116,7 @@
 
   D=-1
   v=0
-  T=[
+  T=~
   p=0
   s=()
   o=()

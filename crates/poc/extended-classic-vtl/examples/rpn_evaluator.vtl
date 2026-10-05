@@ -7,25 +7,25 @@
   ; a: ( lhs rhs -- result ). Reads/writes A and B; leaves P, T and
   ; storage unchanged. B takes the top (rhs), then A takes lhs.
   &=a [
-    B=[
-    A=[
-    [=A+B
+    B=~
+    A=~
+    ~=A+B
   ]
 
   ; s: ( lhs rhs -- result ). Reads/writes A and B; leaves P, T and
   ; storage unchanged. Operand order is lhs minus rhs.
   &=s [
-    B=[
-    A=[
-    [=A-B
+    B=~
+    A=~
+    ~=A-B
   ]
 
   ; m: ( lhs rhs -- result ). Reads/writes A and B; leaves P, T and
   ; storage unchanged.
   &=m [
-    B=[
-    A=[
-    [=A*B
+    B=~
+    A=~
+    ~=A*B
   ]
 
   ; e: ( -- result ). Reads storage[0..6], writes P and T, and calls
@@ -35,12 +35,12 @@
     P=0
     *=()
     [
-      [=P<7
+      ~=P<7
     ]
     [
       T=@(P)
       P=P+1
-      %=T>=0 [ [=T ] [
+      %=T>=0 [ ~=T ] [
         %=T==-1 [ a=() ]
         %=T==-2 [ s=() ]
         %=T==-3 [ m=() ]
@@ -58,5 +58,5 @@
   @=6,-2
 
   e=()
-  ?=[
+  ?=~
   ?=()

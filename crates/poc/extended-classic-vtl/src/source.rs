@@ -261,7 +261,7 @@ fn compile_statement(
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     let (target, rhs) = split_statement(statement)?;
-    if target == '&' {
+    if matches!(target, '&' | '[') {
         return Err(CompileError::Syntax);
     }
     match target {
@@ -277,7 +277,6 @@ fn compile_statement(
             };
             result.map_err(|_| CompileError::Builder)?;
         }
-        '&' => return Err(CompileError::Syntax),
         '?' if rhs.starts_with('"') => {
             let bytes = rhs.as_bytes();
             if bytes.len() < 2 || bytes.last() != Some(&b'"') {
@@ -306,7 +305,7 @@ fn compile_statement(
                 .map_err(|_| CompileError::Builder)?;
             builder.emit_call(output);
         }
-        '[' => compile_rhs(rhs, machine, builder)?,
+        '~' => compile_rhs(rhs, machine, builder)?,
         _ => {
             if rhs != "()" {
                 compile_rhs(rhs, machine, builder)?;
@@ -428,10 +427,10 @@ mod tests {
         let machine = Machine::new();
         for source in [
             "*=() [ ^=8 A=1+ ] [ A=1 ]",
-            "*=() [ [=1 ] [ ^=8 A=1+ ]",
-            "*=() [ ^=8 [=1 ] [ ^=8 ]",
-            "*=() [ [=1 ] [ A=1+ ]",
-            "*=() [ [=1 ] [ ^=8 A=1",
+            "*=() [ ~=1 ] [ ^=8 A=1+ ]",
+            "*=() [ ^=8 ~=1 ] [ ^=8 ]",
+            "*=() [ ~=1 ] [ A=1+ ]",
+            "*=() [ ~=1 ] [ ^=8 A=1",
         ] {
             let mut builder = CodeBuilder::new();
             builder.emit(Instruction::PushConst(7)).unwrap();
@@ -465,7 +464,7 @@ mod tests {
     fn while_consumes_only_two_block_arguments() {
         let machine = Machine::new();
         let mut builder = CodeBuilder::new();
-        let mut reader = SourceReader::new("*=() [ [=0 ] [ A=1 ] [ A=2 ]");
+        let mut reader = SourceReader::new("*=() [ ~=0 ] [ A=1 ] [ A=2 ]");
         let token = reader.next().unwrap().unwrap();
         compile_source_statement(token, &mut reader, &machine, &mut builder).unwrap();
         assert_eq!(reader.peek().unwrap().unwrap().text, "[");

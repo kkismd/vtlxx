@@ -22,7 +22,7 @@ fn operators_consume_lhs_and_rhs_without_touching_an_older_stack_value() {
     let definitions = EXAMPLE.split("  ; e:").next().unwrap();
     for (operator, expected) in [('a', 17), ('s', 7), ('m', 60)] {
         let mut machine = Machine::new();
-        let source = format!("{definitions}  [=99,12,5\n  {operator}=()\n");
+        let source = format!("{definitions}  ~=99,12,5\n  {operator}=()\n");
         machine.execute_source(&source).unwrap();
         assert_eq!(machine.stack(), &[99, expected], "operator {operator}");
     }
@@ -30,7 +30,7 @@ fn operators_consume_lhs_and_rhs_without_touching_an_older_stack_value() {
 
 #[test]
 fn evaluator_preserves_a_callers_older_stack_value() {
-    let source = EXAMPLE.replace("  e=()\n  ?=[", "  [=99\n  e=()\n  ?=[");
+    let source = EXAMPLE.replace("  e=()\n  ?=~", "  ~=99\n  e=()\n  ?=~");
     assert_ne!(source, EXAMPLE);
 
     let mut machine = Machine::new();
