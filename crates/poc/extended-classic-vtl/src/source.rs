@@ -151,10 +151,7 @@ fn compile_source_statement(
             .emit_jump_if_zero(false_target)
             .map_err(|_| CompileError::Builder)?;
         compile_required_block(reader, machine, &mut staged)?;
-        if reader
-            .peek()?
-            .is_some_and(|next| matches!(next.text, "|=" | "["))
-        {
+        if reader.peek()?.is_some_and(|next| next.text == "[") {
             let end_target = staged.new_target();
             staged
                 .emit_jump(end_target)
@@ -182,34 +179,24 @@ fn compile_required_block(
     machine: &Machine,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
-    let opener = reader.next()?.ok_or(CompileError::Syntax)?.text;
-    compile_block(reader, machine, builder, block_closer(opener)?)
+    if reader.next()?.ok_or(CompileError::Syntax)?.text != "[" {
+        return Err(CompileError::Syntax);
+    }
+    compile_block(reader, machine, builder)
 }
 
 fn compile_block(
     reader: &mut SourceReader<'_>,
     machine: &Machine,
     builder: &mut CodeBuilder,
-    closer: &str,
 ) -> Result<(), CompileError> {
     while let Some(token) = reader.next()? {
-        if token.text == closer {
+        if token.text == "]" {
             return Ok(());
-        }
-        if matches!(token.text, "=|" | "]") {
-            return Err(CompileError::Syntax);
         }
         compile_source_statement(token, reader, machine, builder)?;
     }
     Err(CompileError::Syntax)
-}
-
-fn block_closer(opener: &str) -> Result<&'static str, CompileError> {
-    match opener {
-        "|=" => Ok("=|"),
-        "[" => Ok("]"),
-        _ => Err(CompileError::Syntax),
-    }
 }
 
 fn flush_top_level(
@@ -374,7 +361,7 @@ mod tests {
         builder.emit(Instruction::PushConst(7)).unwrap();
         let original = builder.clone();
         let before = builder.clone().finish().unwrap().into_instructions();
-        let mut reader = SourceReader::new("%=1 |= ^=8 A=1+ =|");
+        let mut reader = SourceReader::new("%=1 [ ^=8 A=1+ ]");
         let token = reader.next().unwrap().unwrap();
         assert_eq!(
             compile_source_statement(token, &mut reader, &machine, &mut builder),
@@ -403,9 +390,9 @@ mod tests {
         for source in [
             "%=1+ [ A=1 ]",
             "%=1 [ ^=8 A=1+ ]",
-            "%=1 |= ^=8 A=1 =| [ A=2+ ]",
+            "%=1 [ ^=8 A=1 ] [ A=2+ ]",
             "%=1 [ %=0 [ A=1+ ] ]",
-            "%=1 |= ^=8 A=1+ =|",
+            "%=1 [ ^=8 A=1+ ]",
             "%=1 [ ^=8 A=1 ] [ B=2+ ]",
             "%=1 [ ^=8 A=1 ] [ B=2",
             "%=1 [ ^=8 A=1 =| ] [ B=2 ]",
@@ -447,11 +434,11 @@ mod tests {
     fn failed_while_keeps_parent_code_labels_and_targets_unchanged() {
         let machine = Machine::new();
         for source in [
-            "*=() |= ^=8 A=1+ =| |= A=1 =|",
-            "*=() |= [=1 =| |= ^=8 A=1+ =|",
-            "*=() |= ^=8 [=1 =| |= ^=8 =|",
-            "*=() [ ^=8 A=1+ ] [ B=1 ]",
+            "*=() [ ^=8 A=1+ ] [ A=1 ]",
             "*=() [ [=1 ] [ ^=8 A=1+ ]",
+            "*=() [ ^=8 [=1 ] [ ^=8 ]",
+            "*=() [ [=1 ] [ A=1+ ]",
+            "*=() [ [=1 ] [ ^=8 A=1",
         ] {
             let mut builder = CodeBuilder::new();
             builder.emit(Instruction::PushConst(7)).unwrap();
@@ -485,9 +472,9 @@ mod tests {
     fn while_consumes_only_two_block_arguments() {
         let machine = Machine::new();
         let mut builder = CodeBuilder::new();
-        let mut reader = SourceReader::new("*=() |= [=0 =| |= A=1 =| |= A=2 =|");
+        let mut reader = SourceReader::new("*=() [ [=0 ] [ A=1 ] [ A=2 ]");
         let token = reader.next().unwrap().unwrap();
         compile_source_statement(token, &mut reader, &machine, &mut builder).unwrap();
-        assert_eq!(reader.peek().unwrap().unwrap().text, "|=");
+        assert_eq!(reader.peek().unwrap().unwrap().text, "[");
     }
 }

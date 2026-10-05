@@ -30,24 +30,24 @@
     F=0
     J=0
     *=()
-    |=
+    [
       [=J<C
-    =|
-    |=
+    ]
+    [
       P=@(J)
-      %=P==R |=
+      %=P==R [
         F=1
         J=C
-      =| |=
+      ] [
         a=P-R
         D=[
-        %=D==(C-J) |=
+        %=D==(C-J) [
           F=1
           J=C
-        =|
-      =|
+        ]
+      ]
       J=J+1
-    =|
+    ]
   c=|
 
   ; o: ( -- ). Print the placed rows in column order, followed by LF.
@@ -56,13 +56,13 @@
   |=o
     J=0
     *=()
-    |=
+    [
       [=J<8
-    =|
-    |=
+    ]
+    [
       ?=@(J)
       J=J+1
-    =|
+    ]
     ?=()
   o=|
 
@@ -87,24 +87,24 @@
   ; writes/clobbers: C, R, S, F, J, P, D, I, V, board, output
   |=s
     *=()
-    |=
+    [
       [=C>=0
-    =|
-    |=
+    ]
+    [
       ; Advance this column's row candidate. Exhaustion backtracks.
       R=@(C)+1
-      %=R>8 [ b=() ] |=
+      %=R>8 [ b=() ] [
         p=C,R
         c=()
         ; A clear candidate completes a solution or descends.
-        %=F==0 |=
-          %=C==7 |=
+        %=F==0 [
+          %=C==7 [
             S=S+1
             o=()
-          =| [ d=() ]
-        =|
-      =|
-    =|
+          ] [ d=() ]
+        ]
+      ]
+    ]
   s=|
 
   C=0
