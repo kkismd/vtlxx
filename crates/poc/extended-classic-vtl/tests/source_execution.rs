@@ -123,7 +123,7 @@ fn if_else_blocks_cross_lines_and_share_the_owner_labels() {
 
     let mut machine = Machine::new();
     machine
-        .execute_source("|=p %=0 [ A=1 ] [ #=10 A=99 ] A=3 ^=10 B=3 p=| p=()")
+        .execute_source("&=p [ %=0 [ A=1 ] [ #=10 A=99 ] A=3 ^=10 B=3 ] p=()")
         .unwrap();
     assert_eq!(machine.register(0), Some(0));
     assert_eq!(machine.register(1), Some(3));
@@ -363,7 +363,7 @@ fn block_and_surrounding_source_share_numeric_labels() {
 fn block_in_named_handler_uses_its_handlers_label_namespace() {
     let mut machine = Machine::new();
     machine
-        .execute_source("|=p #=10 %=1 [ ^=20 A=99 #=30 ] ^=10 A=3 #=20 ^=30 p=| p=()")
+        .execute_source("&=p [ #=10 %=1 [ ^=20 A=99 #=30 ] ^=10 A=3 #=20 ^=30 ] p=()")
         .unwrap();
     assert_eq!(machine.register(0), Some(99));
 }
@@ -375,7 +375,7 @@ fn malformed_or_bare_blocks_and_duplicate_owner_labels_fail() {
         "=|",
         "%=1 |= A=1",
         "%=1 [ [ A=1 ]",
-        "%=1 [ A=1 p=| ]",
+        "%=1 [ A=1 ] ]",
         "%=1 [ A=1+ ]",
         "^=1 %=1 [ ^=1 ]",
         "%=1 [ ^=1 ] ^=1",
@@ -429,13 +429,13 @@ fn output_sugar_preserves_quoted_space_and_semicolon() {
 #[test]
 fn zero_operand_call_preserves_the_caller_stack_for_the_handler() {
     let mut machine = Machine::new();
-    machine.execute_source("|=q ?=\"called\" q=|").unwrap();
+    machine.execute_source("&=q [ ?=\"called\" ]").unwrap();
     machine.push(17);
     machine.execute_source("q=()").unwrap();
     assert_eq!(machine.output(), b"called");
     assert_eq!(machine.stack(), &[17]);
 
-    machine.execute_source("|=p A=[ p=| p=()").unwrap();
+    machine.execute_source("&=p [ A=[ ] p=()").unwrap();
     assert_eq!(machine.register(0), Some(17));
     assert!(machine.stack().is_empty());
 }
@@ -443,7 +443,7 @@ fn zero_operand_call_preserves_the_caller_stack_for_the_handler() {
 #[test]
 fn zero_operand_call_uses_the_existing_callee_stack_contract() {
     let mut machine = Machine::new();
-    machine.execute_source("|=q A=[ q=|").unwrap();
+    machine.execute_source("&=q [ A=[ ]").unwrap();
     assert_eq!(
         machine.execute_source("q=()"),
         Err(SourceError::Runtime(RuntimeError::StackUnderflow))
@@ -548,7 +548,7 @@ fn invalid_source_forms_are_compile_errors() {
 #[test]
 fn definition_flushes_prior_statements_and_is_callable_in_same_and_later_inputs() {
     let mut machine = Machine::new();
-    machine.execute_source("A=7 |=p B=[ ?=B p=| p=42").unwrap();
+    machine.execute_source("A=7 &=p [ B=[ ?=B ] p=42").unwrap();
     assert_eq!(machine.register(0), Some(7));
     assert_eq!(machine.output(), b"42");
     machine.execute_source("p=A").unwrap();
@@ -557,16 +557,24 @@ fn definition_flushes_prior_statements_and_is_callable_in_same_and_later_inputs(
 }
 
 #[test]
+fn empty_write_definition_is_completed_and_callable() {
+    let mut machine = Machine::new();
+    machine.execute_source("&=p [ ] p=()").unwrap();
+    assert_eq!(machine.stack(), &[]);
+    assert_eq!(machine.register(0), Some(0));
+}
+
+#[test]
 fn multi_value_handler_uses_shared_stack_in_operand_order() {
     let mut machine = Machine::new();
     machine
-        .execute_source("|=p B=[ A=[ ?=A ?=B p=| p=10,20")
+        .execute_source("&=p [ B=[ A=[ ?=A ?=B ] p=10,20")
         .unwrap();
     assert_eq!(machine.output(), b"1020");
     assert!(machine.stack().is_empty());
 
     machine
-        .execute_source("|=q B=[+1 A=[ ?=A ?=B q=| q=5,8")
+        .execute_source("&=q [ B=[+1 A=[ ?=A ?=B ] q=5,8")
         .unwrap();
     assert_eq!(machine.output(), b"102059");
 }
@@ -575,7 +583,7 @@ fn multi_value_handler_uses_shared_stack_in_operand_order() {
 fn handler_stack_connection_and_return_leave_unconsumed_values() {
     let mut machine = Machine::new();
     machine
-        .execute_source("|=p A=[+2 [=A,9 B=[ p=| p=3")
+        .execute_source("&=p [ A=[+2 [=A,9 B=[ ] p=3")
         .unwrap();
     assert_eq!(machine.register(0), Some(5));
     assert_eq!(machine.register(1), Some(9));
@@ -586,7 +594,7 @@ fn handler_stack_connection_and_return_leave_unconsumed_values() {
 fn published_handlers_call_each_other_with_owner_local_labels() {
     let mut machine = Machine::new();
     machine
-        .execute_source("|=p #=2 ?=99 ^=2 A=[ ?=A p=| |=q ^=1 p=4 %=0 [ #=1 ]\nq=| q=8")
+        .execute_source("&=p [ #=2 ?=99 ^=2 A=[ ?=A ] &=q [ ^=1 p=4 %=0 [ #=1 ]\n] q=8")
         .unwrap();
     assert_eq!(machine.output(), b"4");
     assert_eq!(machine.stack(), &[8]);
@@ -596,7 +604,7 @@ fn published_handlers_call_each_other_with_owner_local_labels() {
 fn handler_backward_branch_repeats_within_its_own_body() {
     let mut machine = Machine::new();
     machine
-        .execute_source("|=p A=[ ^=1 ?=A A=A-1 %=A [ #=1 ]\np=| p=3")
+        .execute_source("&=p [ A=[ ^=1 ?=A A=A-1 %=A [ #=1 ]\n] p=3")
         .unwrap();
     assert_eq!(machine.output(), b"321");
 }
@@ -604,18 +612,20 @@ fn handler_backward_branch_repeats_within_its_own_body() {
 #[test]
 fn malformed_definitions_do_not_publish_or_process_later_source() {
     for bad in [
-        "|=P A=1 P=|",
-        "|=pp A=1 p=|",
-        "|=p? A=1 p=|",
-        "|=p A=1 q=|",
-        "|=p A=1",
-        "|=p |=q q=| p=|",
-        "&=1 |=p p=|",
-        "|=p &=1 p=|",
-        "|=p A=1+ p=|",
-        "|=p #=9 p=|",
-        "|=p p=1 p=|",
-        "|=p q=1 p=| |=q q=|",
+        "|=p A=1 p=|",
+        "&=P [ A=1 ]",
+        "&=pp [ A=1 ]",
+        "&=p? [ A=1 ]",
+        "&= A=1",
+        "&=p A=1",
+        "&=p [ A=1",
+        "&=p [ &=q [ ] ]",
+        "%=1 [ &=q [ ] ]",
+        "&=1 [ ]",
+        "&=p [ A=1+ ]",
+        "&=p [ #=9 ]",
+        "&=p [ p=1 ]",
+        "&=p [ q=1 ] &=q [ ]",
     ] {
         let mut machine = Machine::new();
         let source = format!("{bad} B=9");
@@ -640,14 +650,14 @@ fn malformed_definitions_do_not_publish_or_process_later_source() {
 fn committed_publication_survives_later_failure_and_duplicate_is_rejected() {
     let mut machine = Machine::new();
     assert_eq!(
-        machine.execute_source("|=p A=[ p=| |=q B=1+ q=| C=9"),
+        machine.execute_source("&=p [ A=[ ] &=q [ B=1+ ] C=9"),
         Err(SourceError::Compile(CompileError::Syntax))
     );
     machine.execute_source("p=12").unwrap();
     assert_eq!(machine.register(0), Some(12));
     assert_eq!(machine.register(2), Some(0));
     assert!(matches!(
-        machine.execute_source("|=p p=|"),
+        machine.execute_source("&=p [ ]"),
         Err(SourceError::Compile(_))
     ));
     machine.execute_source("p=13").unwrap();
@@ -658,7 +668,7 @@ fn committed_publication_survives_later_failure_and_duplicate_is_rejected() {
 fn definition_failure_keeps_prior_top_level_effects() {
     let mut machine = Machine::new();
     assert_eq!(
-        machine.execute_source("A=7 ?=\"ok\" |=p B=1+ p=| C=9"),
+        machine.execute_source("A=7 ?=\"ok\" &=p [ B=1+ ] C=9"),
         Err(SourceError::Compile(CompileError::Syntax))
     );
     assert_eq!(machine.register(0), Some(7));
@@ -674,7 +684,7 @@ fn definition_failure_keeps_prior_top_level_effects() {
 fn definition_boundary_isolates_top_level_labels_and_runtime_failure_stops_processing() {
     let mut machine = Machine::new();
     assert_eq!(
-        machine.execute_source("^=1 |=p p=| #=1"),
+        machine.execute_source("^=1 &=p [ ] #=1"),
         Err(SourceError::Compile(CompileError::Builder))
     );
     machine.execute_source("p=4").unwrap();
@@ -682,7 +692,7 @@ fn definition_boundary_isolates_top_level_labels_and_runtime_failure_stops_proce
     machine.pop();
 
     assert_eq!(
-        machine.execute_source("A=5 |=q B=[ C=[ q=| q=6 C=9"),
+        machine.execute_source("A=5 &=q [ B=[ C=[ ] q=6 C=9"),
         Err(SourceError::Runtime(RuntimeError::StackUnderflow))
     );
     assert_eq!(machine.register(0), Some(5));
@@ -695,7 +705,7 @@ fn definition_boundary_isolates_top_level_labels_and_runtime_failure_stops_proce
 fn runtime_failure_before_header_prevents_publication() {
     let mut machine = Machine::new();
     assert_eq!(
-        machine.execute_source("A=5 B=[ |=p p=| p=1"),
+        machine.execute_source("A=5 B=[ &=p [ ] p=1"),
         Err(SourceError::Runtime(RuntimeError::StackUnderflow))
     );
     assert_eq!(machine.register(0), Some(5));

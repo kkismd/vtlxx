@@ -21,13 +21,12 @@ pub enum SourceError {
 
 pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), SourceError> {
     let mut builder = CodeBuilder::new();
-    let mut definition = None;
     let mut has_statements = false;
     let mut reader = SourceReader::new(source);
     while let Some(token) = reader.next().map_err(SourceError::Compile)? {
         let (target, rhs) = split_statement(token.text).map_err(SourceError::Compile)?;
-        if target == '|' {
-            if definition.is_some() || rhs.len() != 1 || !rhs.as_bytes()[0].is_ascii_lowercase() {
+        if target == '&' {
+            if rhs.len() != 1 || !rhs.as_bytes()[0].is_ascii_lowercase() {
                 return Err(SourceError::Compile(CompileError::Syntax));
             }
             let identity = rhs.as_bytes()[0] as char;
@@ -40,26 +39,20 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
             if machine.resolve(identity, SourceRole::Write).is_some() {
                 return Err(SourceError::Compile(CompileError::Syntax));
             }
-            definition = Some(identity);
-        } else if rhs.starts_with('|') {
-            if rhs != "|" || definition != Some(target) {
-                return Err(SourceError::Compile(CompileError::Syntax));
-            }
-            let completed = std::mem::replace(&mut builder, CodeBuilder::new())
+            let mut definition_builder = CodeBuilder::new();
+            compile_required_block(&mut reader, machine, &mut definition_builder)
+                .map_err(SourceError::Compile)?;
+            let completed = definition_builder
                 .finish()
                 .map_err(|_| SourceError::Compile(CompileError::Builder))?;
             machine
-                .publish_initial(target, SourceRole::Write, completed)
+                .publish_initial(identity, SourceRole::Write, completed)
                 .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
-            definition = None;
         } else {
             compile_source_statement(token, &mut reader, machine, &mut builder)
                 .map_err(SourceError::Compile)?;
             has_statements = true;
         }
-    }
-    if definition.is_some() {
-        return Err(SourceError::Compile(CompileError::Syntax));
     }
     flush_top_level(machine, builder, has_statements)
 }
@@ -268,7 +261,7 @@ fn compile_statement(
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     let (target, rhs) = split_statement(statement)?;
-    if target == '|' || rhs.starts_with('|') {
+    if target == '&' {
         return Err(CompileError::Syntax);
     }
     match target {

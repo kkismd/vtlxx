@@ -8,35 +8,35 @@
 ; N is a candidate across calls. R and T are procedure scratch.
 
   ; m: ( cell -- open ). Reads maze[0..15]; writes/clobbers T; storage unchanged.
-  |=m
+  &=m [
     T=[
     %=T<0 [ [=0 ] [ [=@(T)==1 ]
-  m=|
+  ]
 
   ; v: ( cell -- newly visited ). Reads/writes visited[16..31].
   ; Writes/clobbers T; no other A-Z or storage changes.
-  |=v
+  &=v [
     T=[
     %=@(16+T)==0 [
       @=16+T,1
       [=1
     ] [ [=0 ]
-  v=|
+  ]
 
   ; p: ( cell -- ). Reads/writes D and C, path[32..47], directions[48..63].
   ; Writes/clobbers T. The new frame starts with the right direction.
-  |=p
+  &=p [
     T=[
     D=D+1
     @=32+D,T
     @=48+D,0
     C=T
-  p=|
+  ]
 
   ; n: ( -- candidate ). Reads C, D, directions[48..63]; advances that
   ; depth's direction and returns the neighbor or -1 when outside the grid.
   ; Writes/clobbers R and N; writes directions[48..63].
-  |=n
+  &=n [
     R=@(48+D)
     @=48+D,R+1
     N=-1
@@ -57,20 +57,20 @@
       %=C<4 [ N=-1 ]
     ]
     [=N
-  n=|
+  ]
 
   ; b: ( -- ). Reads path[32..47] and D; writes C and D.
   ; Does not clear visited or path: visited is global, while D bounds live path.
   ; No scratch is clobbered and storage is unchanged.
-  |=b
+  &=b [
     D=D-1
     %=D>=0 [ C=@(32+D) ]
-  b=|
+  ]
 
   ; s: ( -- ). Reads/writes C, D, N, R, T, visited, path, directions;
   ; reads maze; calls n, m, v, p, b and clobbers their scratch.
   ; Each attempted direction advances exactly once, even for a wall or revisit.
-  |=s
+  &=s [
     *=()
     [
       [=(D>=0)*(C!=15)
@@ -86,14 +86,14 @@
         ]
       ] [ b=() ]
     ]
-  s=|
+  ]
 
   ; o: ( -- ). Reads D; writes output; clobbers no A-Z or storage.
   ; D is zero-based, so the number of cells on the path is D+1.
-  |=o
+  &=o [
     ?=D+1
     ?=()
-  o=|
+  ]
 
   ; Initialize all four storage regions, then mark the fixed open cells.
   I=0

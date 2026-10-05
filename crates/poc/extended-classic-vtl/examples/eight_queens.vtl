@@ -8,25 +8,25 @@
   ; p: ( address value -- ). All board writes pass through this procedure.
   ; reads: value stack
   ; writes/clobbers: I, V, indexed storage at address
-  |=p
+  &=p [
     V=[
     I=[
     @=I,V
-  p=|
+  ]
 
   ; a: ( difference -- absolute difference ).
   ; reads: value stack
   ; writes/clobbers: D
-  |=a
+  &=a [
     D=[
     %=D<0 [ D=0-D ]
     [=D
-  a=|
+  ]
 
   ; c: ( -- ). Set F when the current candidate collides with an earlier queen.
   ; reads: C, R, indexed storage; calls a
   ; writes/clobbers: F, J, P, D
-  |=c
+  &=c [
     F=0
     J=0
     *=()
@@ -48,12 +48,12 @@
       ]
       J=J+1
     ]
-  c=|
+  ]
 
   ; o: ( -- ). Print the placed rows in column order, followed by LF.
   ; reads: indexed storage
   ; writes/clobbers: J, output
-  |=o
+  &=o [
     J=0
     *=()
     [
@@ -64,28 +64,28 @@
       J=J+1
     ]
     ?=()
-  o=|
+  ]
 
   ; d: ( -- ). Descend to an empty next column.
   ; reads: C; calls p
   ; writes/clobbers: C, I, V, indexed storage at the new C
-  |=d
+  &=d [
     C=C+1
     p=C,0
-  d=|
+  ]
 
   ; b: ( -- ). Clear an exhausted column and backtrack.
   ; reads: C; calls p
   ; writes/clobbers: C, I, V, indexed storage at the old C
-  |=b
+  &=b [
     p=C,0
     C=C-1
-  b=|
+  ]
 
   ; s: ( -- ). Advance candidates until backtracking passes column zero.
   ; reads: C, S, indexed storage; calls b, c, d, o, p
   ; writes/clobbers: C, R, S, F, J, P, D, I, V, board, output
-  |=s
+  &=s [
     *=()
     [
       [=C>=0
@@ -105,7 +105,7 @@
         ]
       ]
     ]
-  s=|
+  ]
 
   C=0
   S=0
