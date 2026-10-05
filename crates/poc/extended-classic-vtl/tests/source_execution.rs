@@ -54,18 +54,16 @@ fn one_arm_if_leaves_following_statements_outside_the_block() {
 }
 
 #[test]
-fn if_executes_one_or_two_blocks_with_both_spellings() {
+fn if_executes_one_or_two_bracket_blocks() {
     for (source, expected) in [
         ("%=1 [ A=1 ]", 1),
         ("%=0 [ A=1 ]", 0),
         ("%=1 [ A=1 ] [ A=2 ]", 1),
         ("%=0 [ A=1 ] [ A=2 ]", 2),
-        ("%=1 [ A=1 ] |= A=2 A=3 =|", 1),
-        ("%=0 [ A=1 ] |= A=2 A=3 =|", 3),
-        ("%=1 |= A=1 A=A+1 =|", 2),
-        ("%=0 |= A=1 A=A+1 =|", 0),
-        ("%=1 |= A=1 A=A+1 =| |= A=3 A=A+1 =|", 2),
-        ("%=0 |= A=1 A=A+1 =| |= A=3 A=A+1 =|", 4),
+        ("%=1 [ A=1 A=A+1 ]", 2),
+        ("%=0 [ A=1 A=A+1 ]", 0),
+        ("%=1 [ A=1 A=A+1 ] [ A=3 A=A+1 ]", 2),
+        ("%=0 [ A=1 A=A+1 ] [ A=3 A=A+1 ]", 4),
     ] {
         let mut machine = Machine::new();
         machine.execute_source(source).unwrap();
@@ -78,7 +76,7 @@ fn if_executes_one_or_two_blocks_with_both_spellings() {
 fn if_else_crosses_comments_and_blank_lines_and_empty_blocks_are_valid() {
     for (condition, expected) in [(1, 1), (0, 2)] {
         let mut machine = Machine::new();
-        let source = format!("%={condition} [ A=1 ]\n; between arms\n\n|= A=2 =|");
+        let source = format!("%={condition} [ A=1 ]\n; between arms\n\n[ A=2 ]");
         machine.execute_source(&source).unwrap();
         assert_eq!(machine.register(0), Some(expected));
     }
@@ -118,14 +116,14 @@ fn nested_if_uses_explicit_block_ownership() {
 fn if_else_blocks_cross_lines_and_share_the_owner_labels() {
     let mut machine = Machine::new();
     machine
-        .execute_source("%=1 |=\n #=10 A=99\n =| |=\n A=2\n =| ^=10 B=3")
+        .execute_source("%=1 [\n #=10 A=99\n ] [\n A=2\n ] ^=10 B=3")
         .unwrap();
     assert_eq!(machine.register(0), Some(0));
     assert_eq!(machine.register(1), Some(3));
 
     let mut machine = Machine::new();
     machine
-        .execute_source("|=p %=0 [ A=1 ] |= #=10 A=99 =| A=3 ^=10 B=3 p=| p=()")
+        .execute_source("|=p %=0 [ A=1 ] [ #=10 A=99 ] A=3 ^=10 B=3 p=| p=()")
         .unwrap();
     assert_eq!(machine.register(0), Some(0));
     assert_eq!(machine.register(1), Some(3));
@@ -153,10 +151,10 @@ fn bracket_blocks_work_for_if_and_while() {
 }
 
 #[test]
-fn bracket_blocks_nest_mix_with_legacy_blocks_and_allow_same_line_forms() {
+fn bracket_blocks_nest_and_allow_same_line_forms() {
     let mut machine = Machine::new();
     machine
-        .execute_source("%=1 [ %=1 |= A=1 =| [ A=A+1 ] ]")
+        .execute_source("%=1 [ %=1 [ A=1 ] [ A=A+1 ] ]")
         .unwrap();
     assert_eq!(machine.register(0), Some(1));
 
@@ -183,7 +181,7 @@ fn bracket_delimiters_preserve_stack_surface_quotes_and_comments() {
 }
 
 #[test]
-fn bracket_block_errors_are_atomic_and_require_matching_independent_delimiters() {
+fn bracket_block_errors_are_atomic() {
     for source in [
         "[ A=1 ]",
         "]",
@@ -191,6 +189,10 @@ fn bracket_block_errors_are_atomic_and_require_matching_independent_delimiters()
         "%=1 [ A=1 =|",
         "%=1 |= A=1 ] =|",
         "%=1 [ A=1 =| ] [ B=2 ]",
+        "%=1 [ A=1 ] |= B=2 =|",
+        "%=1 |= A=1 =| [ B=2 ]",
+        "*=() |= [=0 =| [ A=1 ]",
+        "*=() [ [=0 ] |= A=1 =|",
         "*=() [ [=0 ] [ A=1",
         "%=1 [ A=1 ] [ B=2",
         "%=1 [ A=1 ] |= B=2 ]",
@@ -243,7 +245,7 @@ fn if_requires_then_block_and_preserves_remainder() {
 fn while_rechecks_predicate_and_handles_zero_iterations() {
     let mut machine = Machine::new();
     machine
-        .execute_source("A=0 B=0 *=() |= [=A<3 =| |= A=A+1 B=B+2 =| C=A")
+        .execute_source("A=0 B=0 *=() [ [=A<3 ] [ A=A+1 B=B+2 ] C=A")
         .unwrap();
     assert_eq!(machine.register(0), Some(3));
     assert_eq!(machine.register(1), Some(6));
@@ -252,7 +254,7 @@ fn while_rechecks_predicate_and_handles_zero_iterations() {
 
     let mut machine = Machine::new();
     machine
-        .execute_source("A=3 *=() |= [=A<3 =| |= A=99 =| B=7")
+        .execute_source("A=3 *=() [ [=A<3 ] [ A=99 ] B=7")
         .unwrap();
     assert_eq!(machine.register(0), Some(3));
     assert_eq!(machine.register(1), Some(7));
@@ -262,9 +264,7 @@ fn while_rechecks_predicate_and_handles_zero_iterations() {
 fn nested_while_and_following_source_keep_their_own_arguments() {
     let mut machine = Machine::new();
     machine
-        .execute_source(
-            "A=0 B=0 *=() |= [=A<2 =| |= C=0 *=() |= [=C<3 =| |= B=B+1 C=C+1 =| A=A+1 =| D=9",
-        )
+        .execute_source("A=0 B=0 *=() [ [=A<2 ] [ C=0 *=() [ [=C<3 ] [ B=B+1 C=C+1 ] A=A+1 ] D=9")
         .unwrap();
     for (index, expected) in [(0, 2), (1, 6), (2, 3), (3, 9)] {
         assert_eq!(machine.register(index), Some(expected));
@@ -277,20 +277,20 @@ fn while_uses_shared_stack_without_cleanup() {
     let mut machine = Machine::new();
     machine.push(7);
     machine
-        .execute_source("A=0 *=() |= [=99,A<2 =| |= [=88 A=A+1 =|")
+        .execute_source("A=0 *=() [ [=99,A<2 ] [ [=88 A=A+1 ]")
         .unwrap();
     assert_eq!(machine.register(0), Some(2));
     assert_eq!(machine.stack(), &[7, 99, 88, 99, 88, 99]);
 
     let mut machine = Machine::new();
     machine.push(0);
-    machine.execute_source("*=() |= A=1 =| |= A=2 =|").unwrap();
+    machine.execute_source("*=() [ A=1 ] [ A=2 ]").unwrap();
     assert_eq!(machine.register(0), Some(1));
     assert!(machine.stack().is_empty());
 
     let mut machine = Machine::new();
     assert_eq!(
-        machine.execute_source("*=() |= A=1 =| |= A=2 =|"),
+        machine.execute_source("*=() [ A=1 ] [ A=2 ]"),
         Err(SourceError::Runtime(RuntimeError::StackUnderflow))
     );
     assert_eq!(machine.register(0), Some(1));
@@ -300,11 +300,11 @@ fn while_uses_shared_stack_without_cleanup() {
 fn while_requires_two_blocks_and_preserves_multiplication() {
     for source in [
         "*=()",
-        "*=() |= [=1 =|",
+        "*=() [ [=1 ]",
         "*=() [=1 |= A=1 =|",
-        "*=() |= [=1 =| A=1",
-        "*=1 |= [=1 =| |= A=1 =|",
-        "*=() |= [=1 =| |= A=1",
+        "*=() [ [=1 ] A=1",
+        "*=1 [ [=1 ] [ A=1 ]",
+        "*=() [ [=1 ] [ A=1",
     ] {
         let mut machine = Machine::new();
         assert!(
@@ -315,7 +315,7 @@ fn while_requires_two_blocks_and_preserves_multiplication() {
     }
     let mut machine = Machine::new();
     machine
-        .execute_source("A=2*3 *=() |= [=0 =| |= A=99 =| B=A*4")
+        .execute_source("A=2*3 *=() [ [=0 ] [ A=99 ] B=A*4")
         .unwrap();
     assert_eq!(machine.register(0), Some(6));
     assert_eq!(machine.register(1), Some(24));
@@ -325,7 +325,7 @@ fn while_requires_two_blocks_and_preserves_multiplication() {
 fn anonymous_blocks_cross_lines_and_stop_at_the_matching_close() {
     let mut machine = Machine::new();
     machine
-        .execute_source("%=1 |=\n A=1\n %=0 |= A=9 =|\n B=2\n=| C=3\n%=0 |= D=4 =| E=5")
+        .execute_source("%=1 [\n A=1\n %=0 [ A=9 ]\n B=2\n] C=3\n%=0 [ D=4 ] E=5")
         .unwrap();
     for (index, expected) in [(0, 1), (1, 2), (2, 3), (3, 0), (4, 5)] {
         assert_eq!(machine.register(index), Some(expected));
@@ -336,9 +336,9 @@ fn anonymous_blocks_cross_lines_and_stop_at_the_matching_close() {
 fn block_delimiters_in_strings_and_comments_are_ordinary_text() {
     let mut machine = Machine::new();
     machine
-        .execute_source("%=1 |= ?=\"|= =|\" ; |= =|\n A=2 =| B=3")
+        .execute_source("%=1 [ ?=\"[ ]\" ; [ ]\n A=2 ] B=3")
         .unwrap();
-    assert_eq!(machine.output(), b"|= =|");
+    assert_eq!(machine.output(), b"[ ]");
     assert_eq!(machine.register(0), Some(2));
     assert_eq!(machine.register(1), Some(3));
 }
@@ -347,13 +347,13 @@ fn block_delimiters_in_strings_and_comments_are_ordinary_text() {
 fn block_and_surrounding_source_share_numeric_labels() {
     let mut machine = Machine::new();
     machine
-        .execute_source("#=10 %=1 |= ^=20 A=99 #=30 =| ^=10 A=3 #=20 ^=30")
+        .execute_source("#=10 %=1 [ ^=20 A=99 #=30 ] ^=10 A=3 #=20 ^=30")
         .unwrap();
     assert_eq!(machine.register(0), Some(99));
 
     let mut machine = Machine::new();
     machine
-        .execute_source("A=0 ^=1 A=A+1 %=A<3 |= #=1 =|\n%=1 |= #=2 A=99 =| ^=2 B=7")
+        .execute_source("A=0 ^=1 A=A+1 %=A<3 [ #=1 ]\n%=1 [ #=2 A=99 ] ^=2 B=7")
         .unwrap();
     assert_eq!(machine.register(0), Some(3));
     assert_eq!(machine.register(1), Some(7));
@@ -363,7 +363,7 @@ fn block_and_surrounding_source_share_numeric_labels() {
 fn block_in_named_handler_uses_its_handlers_label_namespace() {
     let mut machine = Machine::new();
     machine
-        .execute_source("|=p #=10 %=1 |= ^=20 A=99 #=30 =| ^=10 A=3 #=20 ^=30 p=| p=()")
+        .execute_source("|=p #=10 %=1 [ ^=20 A=99 #=30 ] ^=10 A=3 #=20 ^=30 p=| p=()")
         .unwrap();
     assert_eq!(machine.register(0), Some(99));
 }
@@ -374,11 +374,11 @@ fn malformed_or_bare_blocks_and_duplicate_owner_labels_fail() {
         "|= A=1 =|",
         "=|",
         "%=1 |= A=1",
-        "%=1 |= |= A=1 =| =|",
-        "%=1 |= A=1 p=| =|",
-        "%=1 |= A=1+ =|",
-        "^=1 %=1 |= ^=1 =|",
-        "%=1 |= ^=1 =| ^=1",
+        "%=1 [ [ A=1 ]",
+        "%=1 [ A=1 p=| ]",
+        "%=1 [ A=1+ ]",
+        "^=1 %=1 [ ^=1 ]",
+        "%=1 [ ^=1 ] ^=1",
     ] {
         let mut machine = Machine::new();
         assert!(

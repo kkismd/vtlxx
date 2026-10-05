@@ -34,18 +34,18 @@
   |=e
     P=0
     *=()
-    |=
+    [
       [=P<7
-    =|
-    |=
+    ]
+    [
       T=@(P)
       P=P+1
-      %=T>=0 [ [=T ] |=
+      %=T>=0 [ [=T ] [
         %=T==-1 [ a=() ]
         %=T==-2 [ s=() ]
         %=T==-3 [ m=() ]
-      =|
-    =|
+      ]
+    ]
   e=|
 
   ; Initialize the fixed program in indexed storage before evaluation.

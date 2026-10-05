@@ -25,6 +25,7 @@ Extended Classic VTL (ECVTL) は、classic VTL の小さい表面構文を保ち
 - [#187](https://github.com/kkismd/vtlxx/issues/187): 手続き / 関数 / 拡張プロパティ / 拡張演算子という user-facing terminology
 - [#190](https://github.com/kkismd/vtlxx/issues/190): zero-operand invocation
 - [#191](https://github.com/kkismd/vtlxx/issues/191): anonymous block / structured control の設計
+- [#265](https://github.com/kkismd/vtlxx/issues/265): anonymous block の `[ ... ]` 一本化
 - [#194](https://github.com/kkismd/vtlxx/issues/194): EC03 Tracker
 
 ## 実行方法
@@ -363,17 +364,17 @@ label は top-level と source-defined procedure で別 namespace です。
   ]
 ```
 
-then / else はどちらも anonymous block に限ります。`[ ... ]` と `|= ... =|` は同じ block の2表記で、混在できます。単独の ordinary statement は arm にできません。
+then / else はどちらも `[ ... ]` anonymous block に限ります。単独の ordinary statement は arm にできません。
 
 ```vtl
   %=A<10 [
     B=1
-  ] |=
+  ] [
     B=2
-  =|
+  ]
 ```
 
-then block の次の source form が `[` または `|=` なら、その block を else として1つだけ読みます。それ以外の form は IF の後続として残します。改行、空行、comment は else の区切りになりません。else opener の後で block が不正なら IF 全体が compile error です。
+then block の次の source form が `[` なら、その block を else として1つだけ読みます。それ以外の form は IF の後続として残します。改行、空行、comment は else の区切りになりません。else opener の後で block が不正なら IF 全体が compile error です。
 
 ```vtl
   %=A [
@@ -385,7 +386,7 @@ then block の次の source form が `[` または `|=` なら、その block �
   ]
 ```
 
-block は入れ子にでき、各 closer は対応する opener のみを閉じます。`[` / `]` は空白または logical-line separator で独立した token にします。同じ行にも書けますが、複数行形式を推奨します。quoted string や comment 内の delimiter は認識されません。既存 stack surface の `[=expr`, `target=[`, RHS-root `[` は変わりません。body argument を要求していない位置に bare delimiter を置くことはできません。
+block は入れ子にでき、`[` は `]` で閉じます。`[` / `]` は空白または logical-line separator で独立した token にします。同じ行にも書けますが、複数行形式を推奨します。quoted string や comment 内の delimiter は認識されません。既存 stack surface の `[=expr`, `target=[`, RHS-root `[` は変わりません。body argument を要求していない位置に bare delimiter を置くことはできません。`|= ... =|` は anonymous block として使えません。
 
 anonymous block は独立した procedure や runtime value ではありません。surrounding executable owner の code へ inline に構築され、numeric label namespace も surrounding owner と共有します。
 
@@ -393,7 +394,7 @@ statement target の `%=` は IF source command です。expression 中の `%` �
 
 ### While `*=()`
 
-`*=()` は直後に predicate と body の **2つの anonymous block** を取ります。どちらにも単独 statement の省略形はありません。
+`*=()` は直後に predicate と body の **2つの `[ ... ]` anonymous block** を取ります。どちらにも単独 statement の省略形はありません。
 
 ```vtl
   A=0
@@ -563,22 +564,22 @@ trailing comment は code との間に 1 文字以上の ASCII space を置き�
 anonymous block では owner depth に block nesting depth を加えます。block に入るごとに 1 level、つまり 2 spaces 増やします。
 
 ```vtl
-  %=A |=
+  %=A [
     B=1
-    %=B |=
+    %=B [
       C=2
-    =|
-  =|
+    ]
+  ]
 ```
 
 block 内の numeric label は意味論上 surrounding owner の label namespace を共有しますが、表示上は block nesting depth の基準位置へ置きます。
 
 ```vtl
-  %=A |=
+  %=A [
   ^=1
     B=B+1
     %=B<10 [ #=1 ]
-  =|
+  ]
 ```
 
 opener / closer の改行配置には今後評価する余地がありますが、同一 source 内では style を統一し、indentation depth 自体は #200 の rule から一意に決めます。
