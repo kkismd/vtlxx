@@ -42,7 +42,7 @@ impl CompletedBody {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct CodeBuilder {
     owner: usize,
     code: Vec<PendingInstruction>,
