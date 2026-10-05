@@ -1,0 +1,122 @@
+; Search a fixed 4x4 maze with iterative depth-first search and print the path length.
+; Open cells: 0, 1, 2, 5, 9, 13, 14, 15. Start: 0. Goal: 15.
+; Neighbors are tried in the fixed order right, down, left, up.
+; storage[0..15] is the maze (1=open), [16..31] is visited,
+; [32..47] is the current path, and [48..63] is the next direction per depth.
+; These four storage regions do not overlap. Only path[0..D] is live.
+; C is the current cell and D is the path top; both are hot A-Z state.
+; N is a candidate across calls. R and T are procedure scratch.
+
+  ; m: ( cell -- open ). Reads maze[0..15]; writes/clobbers T; storage unchanged.
+  |=m
+    T=[
+    %=T<0 [=0 [=@(T)==1
+  m=|
+
+  ; v: ( cell -- newly visited ). Reads/writes visited[16..31].
+  ; Writes/clobbers T; no other A-Z or storage changes.
+  |=v
+    T=[
+    %=@(16+T)==0 |=
+      @=16+T,1
+      [=1
+    =| [=0
+  v=|
+
+  ; p: ( cell -- ). Reads/writes D and C, path[32..47], directions[48..63].
+  ; Writes/clobbers T. The new frame starts with the right direction.
+  |=p
+    T=[
+    D=D+1
+    @=32+D,T
+    @=48+D,0
+    C=T
+  p=|
+
+  ; n: ( -- candidate ). Reads C, D, directions[48..63]; advances that
+  ; depth's direction and returns the neighbor or -1 when outside the grid.
+  ; Writes/clobbers R and N; writes directions[48..63].
+  |=n
+    R=@(48+D)
+    @=48+D,R+1
+    N=-1
+    &=R==0 |=
+      N=C+1
+      &=C%4==3 N=-1
+    =|
+    &=R==1 |=
+      N=C+4
+      &=C>=12 N=-1
+    =|
+    &=R==2 |=
+      N=C-1
+      &=C%4==0 N=-1
+    =|
+    &=R==3 |=
+      N=C-4
+      &=C<4 N=-1
+    =|
+    [=N
+  n=|
+
+  ; b: ( -- ). Reads path[32..47] and D; writes C and D.
+  ; Does not clear visited or path: visited is global, while D bounds live path.
+  ; No scratch is clobbered and storage is unchanged.
+  |=b
+    D=D-1
+    &=D>=0 C=@(32+D)
+  b=|
+
+  ; s: ( -- ). Reads/writes C, D, N, R, T, visited, path, directions;
+  ; reads maze; calls n, m, v, p, b and clobbers their scratch.
+  ; Each attempted direction advances exactly once, even for a wall or revisit.
+  |=s
+    *=()
+    |=
+      [=(D>=0)*(C!=15)
+    =|
+    |=
+      %=@(48+D)<4 |=
+        n=()
+        N=[
+        m=N
+        &=[ |=
+          v=N
+          &=[ p=N
+        =|
+      =| b=()
+    =|
+  s=|
+
+  ; o: ( -- ). Reads D; writes output; clobbers no A-Z or storage.
+  ; D is zero-based, so the number of cells on the path is D+1.
+  |=o
+    ?=D+1
+    ?=()
+  o=|
+
+  ; Initialize all four storage regions, then mark the fixed open cells.
+  I=0
+  *=()
+  |=
+    [=I<64
+  =|
+  |=
+    @=I,0
+    I=I+1
+  =|
+  @=0,1
+  @=1,1
+  @=2,1
+  @=5,1
+  @=9,1
+  @=13,1
+  @=14,1
+  @=15,1
+
+  D=-1
+  v=0
+  T=[
+  p=0
+  s=()
+  o=()

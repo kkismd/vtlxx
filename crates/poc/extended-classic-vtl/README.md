@@ -649,6 +649,15 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 
 [`examples/eight_queens_storage.vtl`](examples/eight_queens_storage.vtl) は、列ごとの候補と解数を storage に置き、現在の候補だけを短時間 register に読み出す別例です。同じ92解を逐一表示します。
 
+## Example: 固定迷路の DFS
+
+[`examples/maze_dfs.vtl`](examples/maze_dfs.vtl) は、固定 4×4 迷路を再帰を使わずに探索します。迷路、訪問済み状態、現在の経路、各深さで次に試す方向を別々の indexed storage 領域に置きます。右から進んだ cell 2 の行き止まりで一度戻り、goal への経路の cell 数 `7` を表示します。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
+  crates/poc/extended-classic-vtl/examples/maze_dfs.vtl
+```
+
 ## ECVTL source を書くときの確認事項
 
 新しい ECVTL source を追加・変更するときは、少なくとも次を確認してください。
