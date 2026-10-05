@@ -658,6 +658,15 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
   crates/poc/extended-classic-vtl/examples/maze_dfs.vtl
 ```
 
+## Example: 固定 token 列の RPN evaluator
+
+[`examples/rpn_evaluator.vtl`](examples/rpn_evaluator.vtl) は source 自身が indexed storage に `3 4 ADD 2 MUL 7 SUB` を初期化し、共有 value stack を operand stack として評価して `7` を表示します。operator 手続きはそれぞれ `( lhs rhs -- result )` で、token は program counter で順に読みます。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
+  crates/poc/extended-classic-vtl/examples/rpn_evaluator.vtl
+```
+
 ## ECVTL source を書くときの確認事項
 
 新しい ECVTL source を追加・変更するときは、少なくとも次を確認してください。
