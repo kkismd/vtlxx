@@ -10,7 +10,7 @@
   ; m: ( cell -- open ). Reads maze[0..15]; writes/clobbers T; storage unchanged.
   |=m
     T=[
-    %=T<0 [=0 [=@(T)==1
+    %=T<0 [ [=0 ] [ [=@(T)==1 ]
   m=|
 
   ; v: ( cell -- newly visited ). Reads/writes visited[16..31].
@@ -20,7 +20,7 @@
     %=@(16+T)==0 |=
       @=16+T,1
       [=1
-    =| [=0
+    =| [ [=0 ]
   v=|
 
   ; p: ( cell -- ). Reads/writes D and C, path[32..47], directions[48..63].
@@ -40,21 +40,21 @@
     R=@(48+D)
     @=48+D,R+1
     N=-1
-    &=R==0 |=
+    %=R==0 |=
       N=C+1
-      &=C%4==3 N=-1
+      %=C%4==3 [ N=-1 ]
     =|
-    &=R==1 |=
+    %=R==1 |=
       N=C+4
-      &=C>=12 N=-1
+      %=C>=12 [ N=-1 ]
     =|
-    &=R==2 |=
+    %=R==2 |=
       N=C-1
-      &=C%4==0 N=-1
+      %=C%4==0 [ N=-1 ]
     =|
-    &=R==3 |=
+    %=R==3 |=
       N=C-4
-      &=C<4 N=-1
+      %=C<4 [ N=-1 ]
     =|
     [=N
   n=|
@@ -64,7 +64,7 @@
   ; No scratch is clobbered and storage is unchanged.
   |=b
     D=D-1
-    &=D>=0 C=@(32+D)
+    %=D>=0 [ C=@(32+D) ]
   b=|
 
   ; s: ( -- ). Reads/writes C, D, N, R, T, visited, path, directions;
@@ -80,11 +80,11 @@
         n=()
         N=[
         m=N
-        &=[ |=
+        %=[ |=
           v=N
-          &=[ p=N
+          %=[ [ p=N ]
         =|
-      =| b=()
+      =| [ b=() ]
     =|
   s=|
 

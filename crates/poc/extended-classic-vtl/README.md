@@ -350,94 +350,46 @@ label は decimal `0..32767` です。同じ executable owner 内で一意でな
 
 label は top-level と source-defined procedure で別 namespace です。
 
-## Conditional / IfElse / While
+## IF / While
 
-### Conditional `&=`
+### IF `%=`
 
-`&=` の body には、同じ logical line の残りを使う形と anonymous block を使う形があります。
-
-#### Line-tail form
+`%=` は condition に続けて必須の then block と、省略可能な else block を取ります。condition が 0 以外なら then、0 なら else を実行します。else がなければ 0 のときは何も実行しません。
 
 ```vtl
-  &=A<10 B=B+1 #=100
-```
-
-condition が 0 なら、その logical line の後続 statement をすべて飛ばします。0 以外なら後続を実行します。
-
-同一行内にさらに `&=` が現れる場合は、後続 tail が入れ子に条件付けされます。
-
-#### Anonymous block form
-
-複数 logical line の body には `|= ... =|` または `[ ... ]` を使えます。どちらも同じ anonymous block です。推奨する書き方は複数行形式です。
-
-```vtl
-  &=A<10 |=
-    B=B+1
-    ?=B
-  =|
-```
-
-同じ block は bracket 表記でも書けます。
-
-```vtl
-  &=A<10 [
+  %=A<10 [
     B=B+1
     ?=B
   ]
 ```
+
+then / else はどちらも anonymous block に限ります。`[ ... ]` と `|= ... =|` は同じ block の2表記で、混在できます。単独の ordinary statement は arm にできません。
+
+```vtl
+  %=A<10 [
+    B=1
+  ] |=
+    B=2
+  =|
+```
+
+then block の次の source form が `[` または `|=` なら、その block を else として1つだけ読みます。それ以外の form は IF の後続として残します。改行、空行、comment は else の区切りになりません。else opener の後で block が不正なら IF 全体が compile error です。
+
+```vtl
+  %=A [
+    B=1
+  ]
+  ; この comment を挟んでも次の block は else
+  [
+    B=2
+  ]
+```
+
+block は入れ子にでき、各 closer は対応する opener のみを閉じます。`[` / `]` は空白または logical-line separator で独立した token にします。同じ行にも書けますが、複数行形式を推奨します。quoted string や comment 内の delimiter は認識されません。既存 stack surface の `[=expr`, `target=[`, RHS-root `[` は変わりません。body argument を要求していない位置に bare delimiter を置くことはできません。
 
 anonymous block は独立した procedure や runtime value ではありません。surrounding executable owner の code へ inline に構築され、numeric label namespace も surrounding owner と共有します。
 
-block は入れ子にでき、2つの表記を混在できます。各 block は対応する closer だけで閉じます。`[` / `]` は空白または logical-line separator で独立した token にします。同じ行にも書けますが、複数行形式を推奨します。quoted string や comment 内の delimiter は認識されません。既存 stack surface の `[=expr`, `target=[`, RHS-root `[` は変わりません。body argument を要求していない位置に bare delimiter を置くことはできません。
-
-### IfElse `%=`
-
-`%=` は condition に続けて then / else の **2つの body argument** を取ります。condition が 0 以外なら then 側、0 なら else 側だけを実行します。
-
-最小形:
-
-```vtl
-  %=A<10 B=1 B=2
-```
-
-この例では `B=1` が then、`B=2` が else です。
-
-各 arm は **1 source form** を消費します。ordinary statement と anonymous block を混在できます。
-
-```vtl
-  %=A<10 B=1 [
-    B=2
-    ?=B
-  ]
-```
-
-両 arm を block にすることもできます。
-
-```vtl
-  %=A<10 |=
-    B=1
-    ?="then"
-  =| |=
-    B=2
-    ?="else"
-  =|
-```
-
-nested `%=` は condition と2 armを含む全体で1 source formとして扱われます。
-
-```vtl
-  %=A %=B C=1 C=2 C=3
-```
-
-一方、legacy line-tail `&=` は同じ logical line の残り全体を所有するため、`%=` の unbraced arm には置けません。arm 内で `&=` を使う場合は anonymous block で包みます。
-
-```vtl
-  %=A |=
-    &=B C=1
-  =| C=2
-```
-
-statement target の `%=` は native IfElse source command です。expression 中の `%` は従来どおり remainder operator であり、意味は変わりません。
+statement target の `%=` は IF source command です。expression 中の `%` は従来どおり remainder operator であり、意味は変わりません。
 
 ### While `*=()`
 
@@ -560,7 +512,7 @@ column 4  procedure body statement
   ^=1
     ?=A
     A=A-1
-    &=A #=1
+    %=A [ #=1 ]
   q=|
 
   A=3
@@ -574,7 +526,7 @@ top-level label:
 ^=1
   ?=A
   A=A-1
-  &=A #=1
+  %=A [ #=1 ]
 ```
 
 ### Comment indentation
@@ -585,7 +537,7 @@ top-level label:
 ^=1
   ; decrement A until zero
   A=A-1
-  &=A #=1
+  %=A [ #=1 ]
 ```
 
 procedure body の説明なら body と同じ位置です。
@@ -601,7 +553,7 @@ trailing comment は code との間に 1 文字以上の ASCII space を置き�
 
 ```vtl
   A=A-1    ; decrement
-  &=A #=1  ; continue while nonzero
+  %=A [ #=1 ]  ; continue while nonzero
 ```
 
 必要なら comment の `;` を局所的に揃えてかまいませんが、固定 comment column は設けません。
@@ -611,9 +563,9 @@ trailing comment は code との間に 1 文字以上の ASCII space を置き�
 anonymous block では owner depth に block nesting depth を加えます。block に入るごとに 1 level、つまり 2 spaces 増やします。
 
 ```vtl
-  &=A |=
+  %=A |=
     B=1
-    &=B |=
+    %=B |=
       C=2
     =|
   =|
@@ -622,10 +574,10 @@ anonymous block では owner depth に block nesting depth を加えます。blo
 block 内の numeric label は意味論上 surrounding owner の label namespace を共有しますが、表示上は block nesting depth の基準位置へ置きます。
 
 ```vtl
-  &=A |=
+  %=A |=
   ^=1
     B=B+1
-    &=B<10 #=1
+    %=B<10 [ #=1 ]
   =|
 ```
 
@@ -641,7 +593,7 @@ opener / closer の改行配置には今後評価する余地がありますが�
 - storage
 - source-defined procedures for board writes, collision checks, output, and search
 - shared value stack
-- `&=` anonymous block, IfElse `%=` and While `*=()`
+- IF `%=` and While `*=()` with anonymous blocks
 - decimal / newline output
 - formatting / indentation rule
 

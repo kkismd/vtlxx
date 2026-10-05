@@ -19,7 +19,7 @@
   ; writes/clobbers: D
   |=a
     D=[
-    &=D<0 D=0-D
+    %=D<0 [ D=0-D ]
     [=D
   a=|
 
@@ -41,7 +41,7 @@
       =| |=
         a=P-R
         D=[
-        &=D==(C-J) |=
+        %=D==(C-J) |=
           F=1
           J=C
         =|
@@ -93,15 +93,15 @@
     |=
       ; Advance this column's row candidate. Exhaustion backtracks.
       R=@(C)+1
-      %=R>8 b=() |=
+      %=R>8 [ b=() ] |=
         p=C,R
         c=()
         ; A clear candidate completes a solution or descends.
-        &=F==0 |=
+        %=F==0 |=
           %=C==7 |=
             S=S+1
             o=()
-          =| d=()
+          =| [ d=() ]
         =|
       =|
     =|

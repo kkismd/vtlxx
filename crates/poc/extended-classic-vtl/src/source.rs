@@ -67,7 +67,6 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
 #[derive(Clone, Copy)]
 struct Token<'a> {
     text: &'a str,
-    line: usize,
 }
 
 struct SourceReader<'a> {
@@ -88,10 +87,7 @@ impl<'a> SourceReader<'a> {
     fn next(&mut self) -> Result<Option<Token<'a>>, CompileError> {
         while let Some(line) = self.lines.get(self.line) {
             if let Some(text) = next_statement(line, &mut self.offset)? {
-                return Ok(Some(Token {
-                    text,
-                    line: self.line,
-                }));
+                return Ok(Some(Token { text }));
             }
             self.line += 1;
             self.offset = 0;
@@ -104,10 +100,7 @@ impl<'a> SourceReader<'a> {
         let mut offset = self.offset;
         while let Some(line) = self.lines.get(line_index) {
             if let Some(text) = next_statement(line, &mut offset)? {
-                return Ok(Some(Token {
-                    text,
-                    line: line_index,
-                }));
+                return Ok(Some(Token { text }));
             }
             line_index += 1;
             offset = 0;
@@ -153,58 +146,35 @@ fn compile_source_statement(
         // The complete form belongs to the surrounding code and label owner.
         let mut staged = builder.clone();
         compile_rhs(rhs, machine, &mut staged)?;
-        let else_target = staged.new_target();
-        let end_target = staged.new_target();
+        let false_target = staged.new_target();
         staged
-            .emit_jump_if_zero(else_target)
+            .emit_jump_if_zero(false_target)
             .map_err(|_| CompileError::Builder)?;
-        compile_body_argument(reader, machine, &mut staged)?;
-        staged
-            .emit_jump(end_target)
-            .map_err(|_| CompileError::Builder)?;
-        staged
-            .complete_target(else_target)
-            .map_err(|_| CompileError::Builder)?;
-        compile_body_argument(reader, machine, &mut staged)?;
-        staged
-            .complete_target(end_target)
-            .map_err(|_| CompileError::Builder)?;
+        compile_required_block(reader, machine, &mut staged)?;
+        if reader
+            .peek()?
+            .is_some_and(|next| matches!(next.text, "|=" | "["))
+        {
+            let end_target = staged.new_target();
+            staged
+                .emit_jump(end_target)
+                .map_err(|_| CompileError::Builder)?;
+            staged
+                .complete_target(false_target)
+                .map_err(|_| CompileError::Builder)?;
+            compile_required_block(reader, machine, &mut staged)?;
+            staged
+                .complete_target(end_target)
+                .map_err(|_| CompileError::Builder)?;
+        } else {
+            staged
+                .complete_target(false_target)
+                .map_err(|_| CompileError::Builder)?;
+        }
         *builder = staged;
         return Ok(());
     }
-    if target != '&' {
-        return compile_tail(&[token.text], 0, machine, builder);
-    }
-
-    // All code, generated targets, and numeric labels in the form share the
-    // surrounding owner's identity. Commit them together only after success.
-    let mut staged = builder.clone();
-    if reader
-        .peek()?
-        .is_some_and(|next| matches!(next.text, "|=" | "["))
-    {
-        compile_rhs(rhs, machine, &mut staged)?;
-        let end = staged.new_target();
-        staged
-            .emit_jump_if_zero(end)
-            .map_err(|_| CompileError::Builder)?;
-        let opener = reader.next()?.expect("peeked block opener").text;
-        compile_block(reader, machine, &mut staged, block_closer(opener)?)?;
-        staged
-            .complete_target(end)
-            .map_err(|_| CompileError::Builder)?;
-    } else {
-        let mut tail = vec![token.text];
-        while reader
-            .peek()?
-            .is_some_and(|next| next.line == token.line && !matches!(next.text, "=|" | "]"))
-        {
-            tail.push(reader.next()?.expect("peeked token").text);
-        }
-        compile_tail(&tail, 0, machine, &mut staged)?;
-    }
-    *builder = staged;
-    Ok(())
+    compile_statement(token.text, machine, builder)
 }
 
 fn compile_required_block(
@@ -214,24 +184,6 @@ fn compile_required_block(
 ) -> Result<(), CompileError> {
     let opener = reader.next()?.ok_or(CompileError::Syntax)?.text;
     compile_block(reader, machine, builder, block_closer(opener)?)
-}
-
-fn compile_body_argument(
-    reader: &mut SourceReader<'_>,
-    machine: &Machine,
-    builder: &mut CodeBuilder,
-) -> Result<(), CompileError> {
-    let token = reader.next()?.ok_or(CompileError::Syntax)?;
-    if matches!(token.text, "|=" | "[") {
-        return compile_block(reader, machine, builder, block_closer(token.text)?);
-    }
-    let (target, _) = split_statement(token.text)?;
-    // A legacy conditional owns the rest of its logical line, so its sibling
-    // arm can only be distinguished when the conditional is inside a block.
-    if target == '&' {
-        return Err(CompileError::Syntax);
-    }
-    compile_source_statement(token, reader, machine, builder)
 }
 
 fn compile_block(
@@ -323,82 +275,67 @@ fn scan_line(line: &str) -> Result<Vec<&str>, CompileError> {
     Ok(statements)
 }
 
-fn compile_tail(
-    statements: &[&str],
-    mut index: usize,
+fn compile_statement(
+    statement: &str,
     machine: &Machine,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
-    while let Some(statement) = statements.get(index) {
-        let (target, rhs) = split_statement(statement)?;
-        if target == '|' || rhs.starts_with('|') {
-            return Err(CompileError::Syntax);
+    let (target, rhs) = split_statement(statement)?;
+    if target == '|' || rhs.starts_with('|') {
+        return Err(CompileError::Syntax);
+    }
+    match target {
+        '^' | '#' => {
+            if rhs.is_empty() || !rhs.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err(CompileError::Syntax);
+            }
+            let label: i32 = rhs.parse().map_err(|_| CompileError::Syntax)?;
+            let result = if target == '^' {
+                builder.define_numeric_label(label)
+            } else {
+                builder.emit_numeric_jump(label)
+            };
+            result.map_err(|_| CompileError::Builder)?;
         }
-        match target {
-            '^' | '#' => {
-                if rhs.is_empty() || !rhs.bytes().all(|byte| byte.is_ascii_digit()) {
-                    return Err(CompileError::Syntax);
-                }
-                let label: i32 = rhs.parse().map_err(|_| CompileError::Syntax)?;
-                let result = if target == '^' {
-                    builder.define_numeric_label(label)
-                } else {
-                    builder.emit_numeric_jump(label)
-                };
-                result.map_err(|_| CompileError::Builder)?;
+        '&' => return Err(CompileError::Syntax),
+        '?' if rhs.starts_with('"') => {
+            let bytes = rhs.as_bytes();
+            if bytes.len() < 2 || bytes.last() != Some(&b'"') {
+                return Err(CompileError::Syntax);
             }
-            '&' => {
-                compile_rhs(rhs, machine, builder)?;
-                let end = builder.new_target();
-                builder
-                    .emit_jump_if_zero(end)
-                    .map_err(|_| CompileError::Builder)?;
-                compile_tail(statements, index + 1, machine, builder)?;
-                builder
-                    .complete_target(end)
-                    .map_err(|_| CompileError::Builder)?;
-                return Ok(());
+            let content = &rhs[1..rhs.len() - 1];
+            if !content.is_ascii() || content.contains('"') {
+                return Err(CompileError::Syntax);
             }
-            '?' if rhs.starts_with('"') => {
-                let bytes = rhs.as_bytes();
-                if bytes.len() < 2 || bytes.last() != Some(&b'"') {
-                    return Err(CompileError::Syntax);
-                }
-                let content = &rhs[1..rhs.len() - 1];
-                if !content.is_ascii() || content.contains('"') {
-                    return Err(CompileError::Syntax);
-                }
-                let output = machine
-                    .resolve('$', SourceRole::Write)
-                    .ok_or(CompileError::UndefinedBinding)?;
-                for byte in content.bytes() {
-                    builder
-                        .emit(Instruction::PushConst(byte.into()))
-                        .map_err(|_| CompileError::Builder)?;
-                    builder.emit_call(output);
-                }
-            }
-            '?' if rhs == "()" => {
-                let output = machine
-                    .resolve('$', SourceRole::Write)
-                    .ok_or(CompileError::UndefinedBinding)?;
+            let output = machine
+                .resolve('$', SourceRole::Write)
+                .ok_or(CompileError::UndefinedBinding)?;
+            for byte in content.bytes() {
                 builder
-                    .emit(Instruction::PushConst(10))
+                    .emit(Instruction::PushConst(byte.into()))
                     .map_err(|_| CompileError::Builder)?;
                 builder.emit_call(output);
             }
-            '[' => compile_rhs(rhs, machine, builder)?,
-            _ => {
-                if rhs != "()" {
-                    compile_rhs(rhs, machine, builder)?;
-                }
-                let id = machine
-                    .resolve(target, SourceRole::Write)
-                    .ok_or(CompileError::UndefinedBinding)?;
-                builder.emit_call(id);
-            }
         }
-        index += 1;
+        '?' if rhs == "()" => {
+            let output = machine
+                .resolve('$', SourceRole::Write)
+                .ok_or(CompileError::UndefinedBinding)?;
+            builder
+                .emit(Instruction::PushConst(10))
+                .map_err(|_| CompileError::Builder)?;
+            builder.emit_call(output);
+        }
+        '[' => compile_rhs(rhs, machine, builder)?,
+        _ => {
+            if rhs != "()" {
+                compile_rhs(rhs, machine, builder)?;
+            }
+            let id = machine
+                .resolve(target, SourceRole::Write)
+                .ok_or(CompileError::UndefinedBinding)?;
+            builder.emit_call(id);
+        }
     }
     Ok(())
 }
@@ -435,13 +372,15 @@ mod tests {
         let machine = Machine::new();
         let mut builder = CodeBuilder::new();
         builder.emit(Instruction::PushConst(7)).unwrap();
+        let original = builder.clone();
         let before = builder.clone().finish().unwrap().into_instructions();
-        let mut reader = SourceReader::new("&=1 |= ^=8 A=1+ =|");
+        let mut reader = SourceReader::new("%=1 |= ^=8 A=1+ =|");
         let token = reader.next().unwrap().unwrap();
         assert_eq!(
             compile_source_statement(token, &mut reader, &machine, &mut builder),
             Err(CompileError::Syntax)
         );
+        assert_eq!(builder, original);
         assert_eq!(
             builder.clone().finish().unwrap().into_instructions(),
             before
@@ -459,19 +398,24 @@ mod tests {
     }
 
     #[test]
-    fn failed_if_else_keeps_parent_code_labels_and_targets_unchanged() {
+    fn failed_if_keeps_parent_code_labels_and_targets_unchanged() {
         let machine = Machine::new();
         for source in [
-            "%=1+ A=1 A=2",
-            "%=1 A=1+ A=2",
-            "%=1 |= ^=8 A=1 =| A=2+",
-            "%=1 A=1 |= ^=8 A=2+ =|",
-            "%=1 |= ^=8 =|",
+            "%=1+ [ A=1 ]",
+            "%=1 [ ^=8 A=1+ ]",
+            "%=1 |= ^=8 A=1 =| [ A=2+ ]",
+            "%=1 [ %=0 [ A=1+ ] ]",
+            "%=1 |= ^=8 A=1+ =|",
             "%=1 [ ^=8 A=1 ] [ B=2+ ]",
+            "%=1 [ ^=8 A=1 ] [ B=2",
             "%=1 [ ^=8 A=1 =| ] [ B=2 ]",
         ] {
             let mut builder = CodeBuilder::new();
             builder.emit(Instruction::PushConst(7)).unwrap();
+            builder.define_numeric_label(3).unwrap();
+            let existing_target = builder.new_target();
+            builder.complete_target(existing_target).unwrap();
+            let original = builder.clone();
             let before = builder.clone().finish().unwrap().into_instructions();
             let mut reader = SourceReader::new(source);
             let token = reader.next().unwrap().unwrap();
@@ -479,6 +423,7 @@ mod tests {
                 compile_source_statement(token, &mut reader, &machine, &mut builder).is_err(),
                 "{source}"
             );
+            assert_eq!(builder, original, "{source}");
             assert_eq!(
                 builder.clone().finish().unwrap().into_instructions(),
                 before,
