@@ -26,6 +26,7 @@ Extended Classic VTL (ECVTL) は、classic VTL の小さい表面構文を保ち
 - [#190](https://github.com/kkismd/vtlxx/issues/190): zero-operand invocation
 - [#191](https://github.com/kkismd/vtlxx/issues/191): anonymous block / structured control の設計
 - [#265](https://github.com/kkismd/vtlxx/issues/265): anonymous block の `[ ... ]` 一本化
+- [#280](https://github.com/kkismd/vtlxx/issues/280): value stack 接続記号を `~` に変更
 - [#194](https://github.com/kkismd/vtlxx/issues/194): EC03 Tracker
 
 ## 実行方法
@@ -286,12 +287,12 @@ RHS を評価して stack に置く
 target の Write binding が消費する
 ```
 
-という形です。`[` はこの途中状態を source から直接使うための surface です。
+という形です。`~` はこの途中状態を source から直接使うための surface です。
 
-### `[=expr`: 結果を stack に残す
+### `~=expr`: 結果を stack に残す
 
 ```vtl
-  [=A+1
+  ~=A+1
 ```
 
 RHS を評価しますが、Write target へ渡しません。そのため結果は stack に残ります。
@@ -299,13 +300,13 @@ RHS を評価しますが、Write target へ渡しません。そのため結果
 comma と組み合わせれば複数値を残せます。
 
 ```vtl
-  [=10,20
+  ~=10,20
 ```
 
-### `target=[`: 既存 stack を target へ渡す
+### `target=~`: 既存 stack を target へ渡す
 
 ```vtl
-  A=[
+  A=~
 ```
 
 新しい RHS value を生成せず、現在の stack top を `A` の Write semantics へ渡します。
@@ -313,22 +314,22 @@ comma と組み合わせれば複数値を残せます。
 source-defined procedure に対しても同じです。
 
 ```vtl
-  p=[
+  p=~
 ```
 
 procedure が何値を消費するかは、その procedure の stack-effect contract に従います。
 
-### RHS root の `[`
+### RHS root の `~`
 
-RHS の先頭に `[` を置くと、既存 stack top を最初の value として expression を続けられます。
+RHS の先頭に `~` を置くと、既存 stack top を最初の value として expression を続けられます。
 
 ```vtl
-  A=[+2
+  A=~+2
 ```
 
 既存 stack top が `10` なら、`A` は `12` になります。
 
-この `[` は expression の任意位置で使える一般 value ではありません。RHS root の先頭に限定された structural surface です。
+この `~` は expression の任意位置で使える一般 value ではありません。RHS root の先頭に限定された structural surface です。
 
 ## Numeric label と jump
 
@@ -386,7 +387,7 @@ then block の次の source form が `[` なら、その block を else とし�
   ]
 ```
 
-block は入れ子にでき、`[` は `]` で閉じます。`[` / `]` は空白または logical-line separator で独立した token にします。同じ行にも書けますが、複数行形式を推奨します。quoted string や comment 内の delimiter は認識されません。既存 stack surface の `[=expr`, `target=[`, RHS-root `[` は変わりません。body argument を要求していない位置に bare delimiter を置くことはできません。`|= ... =|` は anonymous block として使えません。
+block は入れ子にでき、`[` は `]` で閉じます。`[` / `]` は空白または logical-line separator で独立した token にします。同じ行にも書けますが、複数行形式を推奨します。quoted string や comment 内の delimiter は認識されません。stack 接続には `~` を使います。body argument を要求していない位置に bare delimiter を置くことはできません。`|= ... =|` は anonymous block として使えません。
 
 anonymous block は独立した procedure や runtime value ではありません。surrounding executable owner の code へ inline に構築され、numeric label namespace も surrounding owner と共有します。
 
@@ -400,7 +401,7 @@ statement target の `%=` は IF source command です。expression 中の `%` �
   A=0
   *=()
   [
-    [=A<10
+    ~=A<10
   ]
   [
     A=A+1
@@ -434,8 +435,8 @@ current implementation では identity は 1 文字の lowercase ASCII letter �
 ```vtl
   ; ( address value -- )
   &=p [
-    V=[
-    I=[
+    V=~
+    I=~
     @=I,V
   ]
 
@@ -509,7 +510,7 @@ column 4  procedure body statement
 
 ```vtl
   &=q [
-    A=[
+    A=~
   ^=1
     ?=A
     A=A-1
@@ -546,7 +547,7 @@ procedure body の説明なら body と同じ位置です。
 ```vtl
   &=q [
     ; consume the top value
-    A=[
+    A=~
   ]
 ```
 

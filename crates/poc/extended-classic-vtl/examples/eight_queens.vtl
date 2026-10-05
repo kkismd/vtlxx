@@ -9,8 +9,8 @@
   ; reads: value stack
   ; writes/clobbers: I, V, indexed storage at address
   &=p [
-    V=[
-    I=[
+    V=~
+    I=~
     @=I,V
   ]
 
@@ -18,9 +18,9 @@
   ; reads: value stack
   ; writes/clobbers: D
   &=a [
-    D=[
+    D=~
     %=D<0 [ D=0-D ]
-    [=D
+    ~=D
   ]
 
   ; c: ( -- ). Set F when the current candidate collides with an earlier queen.
@@ -31,7 +31,7 @@
     J=0
     *=()
     [
-      [=J<C
+      ~=J<C
     ]
     [
       P=@(J)
@@ -40,7 +40,7 @@
         J=C
       ] [
         a=P-R
-        D=[
+        D=~
         %=D==(C-J) [
           F=1
           J=C
@@ -57,7 +57,7 @@
     J=0
     *=()
     [
-      [=J<8
+      ~=J<8
     ]
     [
       ?=@(J)
@@ -88,7 +88,7 @@
   &=s [
     *=()
     [
-      [=C>=0
+      ~=C>=0
     ]
     [
       ; Advance this column's row candidate. Exhaustion backtracks.

@@ -14,7 +14,7 @@ pub(crate) fn compile_rhs(
         machine,
         instructions: Vec::new(),
     };
-    let seeded = parser.consume('[');
+    let seeded = parser.consume('~');
     parser.operand_list(None, seeded)?;
     builder
         .append_fragment(parser.instructions)
@@ -94,7 +94,7 @@ impl Parser<'_> {
         {
             return self.literal();
         }
-        if matches!(current, '[' | ')' | ',' | '=' | '"') {
+        if matches!(current, '[' | '~' | ')' | ',' | '=' | '"') {
             return Err(CompileError::Syntax);
         }
         self.position += 1;
@@ -143,7 +143,7 @@ impl Parser<'_> {
                 .builtin_id(primitive)
                 .ok_or(CompileError::UndefinedBinding);
         }
-        if matches!(current, '=' | '(' | ')' | '[' | '"' | ';') {
+        if matches!(current, '=' | '(' | ')' | '[' | '~' | '"' | ';') {
             return Err(CompileError::Syntax);
         }
         self.position += 1;
@@ -245,14 +245,14 @@ mod tests {
         let machine = Machine::new();
         let eq = machine.builtin_id(Primitive::Eq).unwrap();
         assert_eq!(
-            instructions(&machine, "[==0"),
+            instructions(&machine, "~==0"),
             vec![
                 Instruction::PushConst(0),
                 Instruction::Call(eq),
                 Instruction::Return,
             ]
         );
-        assert_eq!(instructions(&machine, "["), vec![Instruction::Return]);
+        assert_eq!(instructions(&machine, "~"), vec![Instruction::Return]);
         for (source, expected) in [
             ("1!=2", Primitive::Ne),
             ("1<=2", Primitive::Le),
