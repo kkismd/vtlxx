@@ -179,14 +179,17 @@ fn compile_source_statement(
     // All code, generated targets, and numeric labels in the form share the
     // surrounding owner's identity. Commit them together only after success.
     let mut staged = builder.clone();
-    if reader.peek()?.is_some_and(|next| next.text == "|=") {
+    if reader
+        .peek()?
+        .is_some_and(|next| matches!(next.text, "|=" | "["))
+    {
         compile_rhs(rhs, machine, &mut staged)?;
         let end = staged.new_target();
         staged
             .emit_jump_if_zero(end)
             .map_err(|_| CompileError::Builder)?;
-        reader.next()?; // consume the anonymous block opener
-        compile_block(reader, machine, &mut staged)?;
+        let opener = reader.next()?.expect("peeked block opener").text;
+        compile_block(reader, machine, &mut staged, block_closer(opener)?)?;
         staged
             .complete_target(end)
             .map_err(|_| CompileError::Builder)?;
@@ -194,7 +197,7 @@ fn compile_source_statement(
         let mut tail = vec![token.text];
         while reader
             .peek()?
-            .is_some_and(|next| next.line == token.line && next.text != "=|")
+            .is_some_and(|next| next.line == token.line && !matches!(next.text, "=|" | "]"))
         {
             tail.push(reader.next()?.expect("peeked token").text);
         }
@@ -209,10 +212,8 @@ fn compile_required_block(
     machine: &Machine,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
-    if reader.next()?.ok_or(CompileError::Syntax)?.text != "|=" {
-        return Err(CompileError::Syntax);
-    }
-    compile_block(reader, machine, builder)
+    let opener = reader.next()?.ok_or(CompileError::Syntax)?.text;
+    compile_block(reader, machine, builder, block_closer(opener)?)
 }
 
 fn compile_body_argument(
@@ -221,8 +222,8 @@ fn compile_body_argument(
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     let token = reader.next()?.ok_or(CompileError::Syntax)?;
-    if token.text == "|=" {
-        return compile_block(reader, machine, builder);
+    if matches!(token.text, "|=" | "[") {
+        return compile_block(reader, machine, builder, block_closer(token.text)?);
     }
     let (target, _) = split_statement(token.text)?;
     // A legacy conditional owns the rest of its logical line, so its sibling
@@ -237,14 +238,26 @@ fn compile_block(
     reader: &mut SourceReader<'_>,
     machine: &Machine,
     builder: &mut CodeBuilder,
+    closer: &str,
 ) -> Result<(), CompileError> {
     while let Some(token) = reader.next()? {
-        if token.text == "=|" {
+        if token.text == closer {
             return Ok(());
+        }
+        if matches!(token.text, "=|" | "]") {
+            return Err(CompileError::Syntax);
         }
         compile_source_statement(token, reader, machine, builder)?;
     }
     Err(CompileError::Syntax)
+}
+
+fn block_closer(opener: &str) -> Result<&'static str, CompileError> {
+    match opener {
+        "|=" => Ok("=|"),
+        "[" => Ok("]"),
+        _ => Err(CompileError::Syntax),
+    }
 }
 
 fn flush_top_level(
@@ -454,6 +467,8 @@ mod tests {
             "%=1 |= ^=8 A=1 =| A=2+",
             "%=1 A=1 |= ^=8 A=2+ =|",
             "%=1 |= ^=8 =|",
+            "%=1 [ ^=8 A=1 ] [ B=2+ ]",
+            "%=1 [ ^=8 A=1 =| ] [ B=2 ]",
         ] {
             let mut builder = CodeBuilder::new();
             builder.emit(Instruction::PushConst(7)).unwrap();
@@ -490,6 +505,8 @@ mod tests {
             "*=() |= ^=8 A=1+ =| |= A=1 =|",
             "*=() |= [=1 =| |= ^=8 A=1+ =|",
             "*=() |= ^=8 [=1 =| |= ^=8 =|",
+            "*=() [ ^=8 A=1+ ] [ B=1 ]",
+            "*=() [ [=1 ] [ ^=8 A=1+ ]",
         ] {
             let mut builder = CodeBuilder::new();
             builder.emit(Instruction::PushConst(7)).unwrap();
