@@ -163,6 +163,8 @@ fn malformed_source_never_starts_runtime() {
     }
     let source = "A=1 ".repeat(300);
     expect(&source, 4, b"");
+    let source = format!("{}A=~ A=~", "A=1 ".repeat(170));
+    expect(&source, 4, b"");
     let truncated = build_and_run_input(&[4, 0, b'?', b'=', b'1']);
     assert_eq!(truncated.status.code(), Some(1), "{truncated:?}");
     assert!(truncated.stdout.is_empty(), "{truncated:?}");

@@ -6,8 +6,8 @@
 .export fe_compile_run
 .exportzp fe_compile_status
 .import fe_init, fe_next, cc_init, cc_begin_owner, cc_complete_owner
-.import cc_push_const, cc_call, cc_emit_byte
-.import rt_init, rt_load_reg, rt_store_reg, rt_load_storage, rt_store_storage
+.import cc_push_const, cc_call, cc_load_reg, cc_store_reg
+.import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
 .import rt_print_number, rt_print_char
@@ -230,14 +230,8 @@ statement:
     bcs @write_special
     sec
     sbc #'A'
-    pha
-    lda #$a2                 ; LDX #register index
-    jsr cc_emit_byte
-    pla
-    jsr cc_emit_byte
-    lda #<rt_store_reg
-    ldx #>rt_store_reg
-    jmp cc_call
+    tax
+    jmp cc_store_reg
 @write_special:
     cmp #'@'
     bne @number
@@ -363,14 +357,8 @@ value:
     beq @invalid_register_apply
 @register:
     pla
-    pha
-    lda #$a2
-    jsr cc_emit_byte
-    pla
-    jsr cc_emit_byte
-    lda #<rt_load_reg
-    ldx #>rt_load_reg
-    jmp cc_call
+    tax
+    jmp cc_load_reg
 @invalid_register_apply:
     pla
     jmp syntax_error
