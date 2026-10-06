@@ -70,7 +70,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_
 
 `frontend/basic.s` は `fe_init` / `fe_next` の 1 byte 先読みだけで basic top-level statement を読み、`cc_begin_owner` から `cc_complete_owner` までの 1 owner に native code を生成してから実行する。`fe_compile_run` は成功時 carry clear、compile 失敗時 carry set で返し、`fe_compile_status` は source/transport = 1、syntax = 2、literal range = 3、backend = 4 を示す。失敗時は生成途中の code を実行しない。source frame の終端以降は reader を呼ばず、残りの serial bytes は runtime input として保持する。
 
-現在の対象は signed i16 literal、A-Z register、`@(address)` read / `@=address,value` write、算術・比較、`?` / `$` output、grouping、左結合の式、左から右への comma operand、RHS 先頭だけの `~` である。`[` の旧 stack surface、named integer、label、block、user-defined Write は後続 issue の対象である。
+現在の対象は signed i16 literal、A-Z register、`@(address)` read / `@=address,value` write、算術・比較、`?` / `$` output、grouping、左結合の式、左から右への comma operand、RHS 先頭だけの `~`、top-level named integer 定義と RHS 参照である。named integer は `==NAME,value` で定義し、名前は ASCII uppercase の2〜16 byte、値は単一の signed i16 decimal literal、compile-run あたり16件までである。定義後のみ参照でき、重複定義は compile failure となる。constant table / spelling は compile-only で runtime code へ出力しない。`[` の旧 stack surface、numeric label / GOTO、block、user-defined Write は後続 issue の対象である。
 
 ```sh
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_frontend -- --ignored

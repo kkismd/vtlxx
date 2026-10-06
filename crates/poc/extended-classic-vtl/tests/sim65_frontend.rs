@@ -134,6 +134,20 @@ fn basic_source_compiles_and_executes() {
     expect("?=2==2 ?=2!=3 ?=2<3 ?=2<=2 ?=3>2 ?=3>=3", 0, b"111111Z");
     expect("?=2==3 ?=2!=2 ?=3<2 ?=3<=2 ?=2>3 ?=2>=3", 0, b"000000Z");
     expect("?=7/2 ?=7%2 ?=3-8", 0, b"31-5Z");
+    expect("==BOARD_BASE,16 A=BOARD_BASE+2 ?=A", 0, b"18Z");
+    expect("==NEG_ONE,-1 A=NEG_ONE ?=A", 0, b"-1Z");
+    expect(
+        "==SAME_ONE,1 ==SAME_TWO,1 A=SAME_ONE+SAME_TWO ?=A",
+        0,
+        b"2Z",
+    );
+    expect("==ABCDEFGHIJKLMNOP,32767 ?=ABCDEFGHIJKLMNOP", 0, b"32767Z");
+    expect(
+        "==C0,0 ==C1,1 ==C2,2 ==C3,3 ==C4,4 ==C5,5 ==C6,6 ==C7,7 ==C8,8 ==C9,9 ==C10,10 ==C11,11 ==C12,12 ==C13,13 ==C14,14 ==C15,15 A=C15 ?=A",
+        0,
+        b"15Z",
+    );
+    expect("==ZERO,0 ?=2==2", 0, b"1Z");
     expect("A=1 ; a comment\n\tA=A+1 ?=A", 0, b"2Z");
     let long_source = format!("{}?=42", " ".repeat(254));
     expect(&long_source, 0, b"42Z");
@@ -158,8 +172,28 @@ fn malformed_source_never_starts_runtime() {
         "A=1 garbage",
         "?=1 ?=",
         "A=1+z",
+        "A=BEFORE\n==BEFORE,1",
+        "==DUP,1 ==DUP,2",
+        "==A,1",
+        "==aB,1",
+        "==AB$,1",
+        "==ABCDEFGHIJKLMNOPQ,1",
+        "==LOW,-32769",
+        "==HIGH,32768",
+        "==EXPR,1+2",
+        "==REF,OTHER",
+        "==C0,0 ==C1,1 ==C2,2 ==C3,3 ==C4,4 ==C5,5 ==C6,6 ==C7,7 ==C8,8 ==C9,9 ==C10,10 ==C11,11 ==C12,12 ==C13,13 ==C14,14 ==C15,15 ==C16,16",
+        "A=UNKNOWN",
     ] {
-        expect(source, if source.contains("3276") { 3 } else { 2 }, b"");
+        expect(
+            source,
+            if source.contains("3276") || source.contains("32768") || source == "==REF,OTHER" {
+                3
+            } else {
+                2
+            },
+            b"",
+        );
     }
     let source = "A=1 ".repeat(300);
     expect(&source, 4, b"");
