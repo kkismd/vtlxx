@@ -1,7 +1,7 @@
 ; EC07 target-private runtime state. Cells are little-endian signed 16-bit words.
 .setcpu "6502"
 
-.export rt_init, rt_push, rt_load_reg, rt_store_reg
+.export rt_init, rt_push, rt_pop_condition, rt_load_reg, rt_store_reg
 .export rt_load_storage, rt_store_storage
 .export rt_need_one, rt_need_two, rt_commit_binary
 .export rt_underflow, rt_overflow, rt_div_zero, rt_rem_zero
@@ -57,6 +57,20 @@ rt_push:
     pla
     sta rt_stack,y
     inc rt_depth
+    rts
+
+; Backend-only stack operation: consume one Cell and return Z=1 iff it was 0.
+; Keep the condition's bytes intact until the underflow check succeeds.
+rt_pop_condition:
+    jsr rt_need_one
+    lda rt_depth
+    sec
+    sbc #1
+    asl a
+    tay
+    dec rt_depth
+    lda rt_stack,y
+    ora rt_stack+1,y
     rts
 
 rt_need_one:

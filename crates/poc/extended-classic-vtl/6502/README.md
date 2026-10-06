@@ -32,3 +32,26 @@ sim65 の失敗時状態確認だけに `RT_TEST_PROBE` を指定すると、HAL
 ```sh
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_runtime -- --ignored
 ```
+
+## Native compiler backend（#275）
+
+`compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 2048 B の code arena、binding、owner、source work stack を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。compiler の失敗は `cc_status` に保持し、後続の compile-run driver が runtime を開始せず HALT する。
+
+target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_publish` は A=role（0 Write、1 SourceProcedure）、X=`a..z`、`cc_arg`=completed target を取る。`cc_resolve` は同じ role と identity から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
+
+| 操作 | 役割 |
+| --- | --- |
+| `cc_mark`、`cc_emit_byte`、`cc_emit_u16`、`cc_patch` | append と既存 operand の little-endian patch |
+| `cc_push_const`、`cc_call`、`cc_return`、`cc_jump`、`cc_jz` | fixed native template |
+| `cc_jump_placeholder`、`cc_jz_placeholder`、`cc_patch_here`、`cc_jump_to` | absolute target の後方 patch と直接 jump |
+| `cc_begin_owner`、`cc_complete_owner` | owner の開始、未解決参照の検証、final RTS、completed target |
+| `cc_define_label`、`cc_label_jump` | owner-local の numeric label と forward fixup |
+| `cc_work_push`、`cc_work_pop`、`cc_work_swap`、`cc_work_reset` | runtime value stack と別の 16×u16 source work stack |
+
+`cc_status = 0` は成功。非ゼロは compile-run failure で、1 arena full、2 invalid patch、3 owner misuse、4 duplicate label、5 label full、6 fixup full、7 unresolved reference、8 binding error、9 work stack error。失敗後の継続は契約に含めない。placeholder は patch 完了まで追跡し、未解決のまま owner を完了できない。完了済み owner の bytes は patch できない。binding には完了済み owner の entry だけを登録できる。
+
+JZ template が呼ぶ `rt_pop_condition` は runtime value stack の top Cell を 1 つ consume し、0 の場合に zero flag を立てる target 内 helper。source control の解釈は持たない。
+
+```sh
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_backend -- --ignored
+```
