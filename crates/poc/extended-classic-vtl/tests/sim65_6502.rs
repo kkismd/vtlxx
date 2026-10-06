@@ -1,0 +1,179 @@
+use std::ffi::OsStr;
+use std::fs;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const CYCLE_LIMIT: &str = "100000";
+static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new() -> Result<Self, String> {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| format!("temporary directory clock: {error}"))?
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "vtlxx-sim65-{}-{nonce}-{}",
+            std::process::id(),
+            NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&path).map_err(|error| {
+            format!(
+                "create temporary build directory {}: {error}",
+                path.display()
+            )
+        })?;
+        Ok(Self(path))
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn run_tool(tool: &str, stage: &str, args: &[&OsStr], input: &[u8]) -> Result<Output, String> {
+    let mut child = Command::new(tool)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("{stage}: could not start {tool}: {error}"))?;
+    if !input.is_empty() {
+        child
+            .stdin
+            .take()
+            .expect("piped stdin")
+            .write_all(input)
+            .map_err(|error| format!("{stage}: could not write stdin to {tool}: {error}"))?;
+    }
+    child
+        .wait_with_output()
+        .map_err(|error| format!("{stage}: could not collect {tool} output: {error}"))
+}
+
+fn require_success(stage: &str, tool: &str, output: &Output) -> Result<(), String> {
+    if output.status.success() {
+        return Ok(());
+    }
+    Err(format!(
+        "{stage}: {tool} exited with {}\nstdout: {}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ))
+}
+
+fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
+    let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let adapter = crate_root.join("6502/target/sim65_adapter.s");
+    let fixture = crate_root
+        .join("tests/fixtures/sim65")
+        .join(format!("{fixture}.s"));
+    let temp = TempDir::new()?;
+    let adapter_object = temp.0.join("adapter.o");
+    let fixture_object = temp.0.join("fixture.o");
+    let executable = temp.0.join("smoke.prg");
+
+    for (source, object) in [(&adapter, &adapter_object), (&fixture, &fixture_object)] {
+        let output = run_tool(
+            "ca65",
+            "assemble",
+            &[
+                OsStr::new("-t"),
+                OsStr::new("sim6502"),
+                source.as_os_str(),
+                OsStr::new("-o"),
+                object.as_os_str(),
+            ],
+            &[],
+        )?;
+        require_success("assemble", "ca65", &output)?;
+    }
+
+    let output = run_tool(
+        "ld65",
+        "link",
+        &[
+            OsStr::new("-t"),
+            OsStr::new("sim6502"),
+            OsStr::new("-o"),
+            executable.as_os_str(),
+            fixture_object.as_os_str(),
+            adapter_object.as_os_str(),
+            OsStr::new("sim6502.lib"),
+        ],
+        &[],
+    )?;
+    require_success("link", "ld65", &output)?;
+
+    run_tool(
+        "sim65",
+        "sim65 execute",
+        &[
+            OsStr::new("-x"),
+            OsStr::new(CYCLE_LIMIT),
+            executable.as_os_str(),
+        ],
+        input,
+    )
+}
+
+fn validate_run(output: &Output, status: i32, stdout: &[u8]) -> Result<(), String> {
+    if output.status.code() != Some(status) || output.stdout != stdout {
+        return Err(format!(
+            "sim65 execute / stdout/status validation: expected status {status} and stdout {stdout:?}; got status {}, stdout {:?}, stderr {}",
+            output.status,
+            output.stdout,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+fn missing_tool_reports_start_failure_with_stage_and_tool() {
+    let tool = "vtlxx-sim65-tool-that-does-not-exist";
+    let error = run_tool(tool, "assemble", &[], &[]).unwrap_err();
+    assert!(error.contains("assemble"), "{error}");
+    assert!(error.contains(tool), "{error}");
+    assert!(error.contains("could not start"), "{error}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn normal_halt_reports_status() {
+    let output = build_and_run("normal_halt", &[]).unwrap();
+    validate_run(&output, 7, b"").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn serial_out_is_exact() {
+    let output = build_and_run("serial_out", &[]).unwrap();
+    validate_run(&output, 0, b"OK").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn serial_input_round_trips() {
+    let output = build_and_run("serial_echo", b"Z").unwrap();
+    validate_run(&output, 0, b"Z").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn infinite_loop_is_bounded_by_cycle_limit() {
+    let output = build_and_run("infinite_loop", &[]).unwrap();
+    assert!(
+        !output.status.success(),
+        "sim65 execute: infinite loop unexpectedly succeeded"
+    );
+}
