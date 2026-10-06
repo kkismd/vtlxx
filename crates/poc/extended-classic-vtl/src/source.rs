@@ -23,7 +23,13 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
     let mut builder = CodeBuilder::new();
     let mut has_statements = false;
     let mut reader = SourceReader::new(source);
+    // This namespace belongs to one source compilation, not to Machine.
+    let mut constants = Constants::default();
     while let Some(token) = reader.next().map_err(SourceError::Compile)? {
+        if let Some(definition) = token.text.strip_prefix("==") {
+            constants.define(definition).map_err(SourceError::Compile)?;
+            continue;
+        }
         let (target, rhs) = split_statement(token.text).map_err(SourceError::Compile)?;
         if target == '&' {
             if rhs.len() != 1 || !rhs.as_bytes()[0].is_ascii_lowercase() {
@@ -40,7 +46,7 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
                 return Err(SourceError::Compile(CompileError::Syntax));
             }
             let mut definition_builder = CodeBuilder::new();
-            compile_required_block(&mut reader, machine, &mut definition_builder)
+            compile_required_block(&mut reader, machine, &constants, &mut definition_builder)
                 .map_err(SourceError::Compile)?;
             let completed = definition_builder
                 .finish()
@@ -49,12 +55,95 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
                 .publish_initial(identity, SourceRole::Write, completed)
                 .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
         } else {
-            compile_source_statement(token, &mut reader, machine, &mut builder)
+            compile_source_statement(token, &mut reader, machine, &constants, &mut builder)
                 .map_err(SourceError::Compile)?;
             has_statements = true;
         }
     }
     flush_top_level(machine, builder, has_statements)
+}
+
+#[derive(Default)]
+struct Constants(Vec<(String, i16)>);
+
+impl Constants {
+    fn valid_name(name: &str) -> bool {
+        (2..=16).contains(&name.len())
+            && name.is_ascii()
+            && name.as_bytes()[0].is_ascii_uppercase()
+            && name.as_bytes()[1..]
+                .iter()
+                .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
+    }
+
+    fn define(&mut self, definition: &str) -> Result<(), CompileError> {
+        let (name, value) = definition.split_once(',').ok_or(CompileError::Syntax)?;
+        if !Self::valid_name(name)
+            || self.0.iter().any(|(existing, _)| existing == name)
+            || value.is_empty()
+            || value == "-"
+            || !value
+                .strip_prefix('-')
+                .unwrap_or(value)
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
+        {
+            return Err(CompileError::Syntax);
+        }
+        let value = value.parse::<i16>().map_err(|_| CompileError::Syntax)?;
+        self.0.push((name.to_owned(), value));
+        Ok(())
+    }
+
+    fn resolve(&self, name: &str) -> Result<i16, CompileError> {
+        if !Self::valid_name(name) {
+            return Err(CompileError::Syntax);
+        }
+        self.0
+            .iter()
+            .find(|(candidate, _)| candidate == name)
+            .map(|(_, value)| *value)
+            .ok_or(CompileError::Syntax)
+    }
+
+    fn expand_rhs(&self, rhs: &str) -> Result<String, CompileError> {
+        let mut expanded = String::new();
+        let mut offset = 0;
+        while offset < rhs.len() {
+            let byte = rhs.as_bytes()[offset];
+            if byte.is_ascii_uppercase() {
+                let start = offset;
+                offset += 1;
+                while offset < rhs.len()
+                    && (rhs.as_bytes()[offset].is_ascii_uppercase()
+                        || rhs.as_bytes()[offset].is_ascii_digit()
+                        || rhs.as_bytes()[offset] == b'_')
+                {
+                    offset += 1;
+                }
+                let name = &rhs[start..offset];
+                if name.len() == 1 {
+                    expanded.push_str(name);
+                } else {
+                    expanded.push_str(&self.resolve(name)?.to_string());
+                }
+            } else {
+                let ch = rhs[offset..].chars().next().ok_or(CompileError::Syntax)?;
+                expanded.push(ch);
+                offset += ch.len_utf8();
+            }
+        }
+        Ok(expanded)
+    }
+}
+
+fn compile_resolved_rhs(
+    rhs: &str,
+    machine: &Machine,
+    constants: &Constants,
+    builder: &mut CodeBuilder,
+) -> Result<(), CompileError> {
+    compile_rhs(&constants.expand_rhs(rhs)?, machine, builder)
 }
 
 #[derive(Clone, Copy)]
@@ -106,6 +195,7 @@ fn compile_source_statement(
     token: Token<'_>,
     reader: &mut SourceReader<'_>,
     machine: &Machine,
+    constants: &Constants,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     let (target, rhs) = split_statement(token.text)?;
@@ -121,11 +211,11 @@ fn compile_source_statement(
         staged
             .complete_target(loop_target)
             .map_err(|_| CompileError::Builder)?;
-        compile_required_block(reader, machine, &mut staged)?;
+        compile_required_block(reader, machine, constants, &mut staged)?;
         staged
             .emit_jump_if_zero(end_target)
             .map_err(|_| CompileError::Builder)?;
-        compile_required_block(reader, machine, &mut staged)?;
+        compile_required_block(reader, machine, constants, &mut staged)?;
         staged
             .emit_jump(loop_target)
             .map_err(|_| CompileError::Builder)?;
@@ -138,12 +228,12 @@ fn compile_source_statement(
     if target == '%' {
         // The complete form belongs to the surrounding code and label owner.
         let mut staged = builder.clone();
-        compile_rhs(rhs, machine, &mut staged)?;
+        compile_resolved_rhs(rhs, machine, constants, &mut staged)?;
         let false_target = staged.new_target();
         staged
             .emit_jump_if_zero(false_target)
             .map_err(|_| CompileError::Builder)?;
-        compile_required_block(reader, machine, &mut staged)?;
+        compile_required_block(reader, machine, constants, &mut staged)?;
         if reader.peek()?.is_some_and(|next| next.text == "[") {
             let end_target = staged.new_target();
             staged
@@ -152,7 +242,7 @@ fn compile_source_statement(
             staged
                 .complete_target(false_target)
                 .map_err(|_| CompileError::Builder)?;
-            compile_required_block(reader, machine, &mut staged)?;
+            compile_required_block(reader, machine, constants, &mut staged)?;
             staged
                 .complete_target(end_target)
                 .map_err(|_| CompileError::Builder)?;
@@ -164,30 +254,32 @@ fn compile_source_statement(
         *builder = staged;
         return Ok(());
     }
-    compile_statement(token.text, machine, builder)
+    compile_statement(token.text, machine, constants, builder)
 }
 
 fn compile_required_block(
     reader: &mut SourceReader<'_>,
     machine: &Machine,
+    constants: &Constants,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     if reader.next()?.ok_or(CompileError::Syntax)?.text != "[" {
         return Err(CompileError::Syntax);
     }
-    compile_block(reader, machine, builder)
+    compile_block(reader, machine, constants, builder)
 }
 
 fn compile_block(
     reader: &mut SourceReader<'_>,
     machine: &Machine,
+    constants: &Constants,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     while let Some(token) = reader.next()? {
         if token.text == "]" {
             return Ok(());
         }
-        compile_source_statement(token, reader, machine, builder)?;
+        compile_source_statement(token, reader, machine, constants, builder)?;
     }
     Err(CompileError::Syntax)
 }
@@ -258,18 +350,20 @@ fn scan_line(line: &str) -> Result<Vec<&str>, CompileError> {
 fn compile_statement(
     statement: &str,
     machine: &Machine,
+    constants: &Constants,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     let (target, rhs) = split_statement(statement)?;
-    if matches!(target, '&' | '[') {
+    if matches!(target, '&' | '[' | '=') {
         return Err(CompileError::Syntax);
     }
     match target {
         '^' | '#' => {
-            if rhs.is_empty() || !rhs.bytes().all(|byte| byte.is_ascii_digit()) {
-                return Err(CompileError::Syntax);
-            }
-            let label: i32 = rhs.parse().map_err(|_| CompileError::Syntax)?;
+            let label: i32 = if rhs.bytes().all(|byte| byte.is_ascii_digit()) && !rhs.is_empty() {
+                rhs.parse().map_err(|_| CompileError::Syntax)?
+            } else {
+                i32::from(constants.resolve(rhs)?)
+            };
             let result = if target == '^' {
                 builder.define_numeric_label(label)
             } else {
@@ -305,10 +399,10 @@ fn compile_statement(
                 .map_err(|_| CompileError::Builder)?;
             builder.emit_call(output);
         }
-        '~' => compile_rhs(rhs, machine, builder)?,
+        '~' => compile_resolved_rhs(rhs, machine, constants, builder)?,
         _ => {
             if rhs != "()" {
-                compile_rhs(rhs, machine, builder)?;
+                compile_resolved_rhs(rhs, machine, constants, builder)?;
             }
             let id = machine
                 .resolve(target, SourceRole::Write)
@@ -322,6 +416,24 @@ fn compile_statement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitive::Primitive;
+
+    #[test]
+    fn lowercase_operator_ends_constant_name() {
+        let mut machine = Machine::new();
+        let mut operator = CodeBuilder::new();
+        operator
+            .emit(Instruction::Call(
+                machine.builtin_id(Primitive::Add).unwrap(),
+            ))
+            .unwrap();
+        machine
+            .publish_initial('a', SourceRole::BinaryOperator, operator.finish().unwrap())
+            .unwrap();
+
+        machine.execute_source("==MAX,2 B=3 A=MAXaB").unwrap();
+        assert_eq!(machine.register(0), Some(5));
+    }
 
     #[test]
     fn scan_keeps_quotes_and_discards_comment() {
@@ -356,7 +468,13 @@ mod tests {
         let mut reader = SourceReader::new("%=1 [ ^=8 A=1+ ]");
         let token = reader.next().unwrap().unwrap();
         assert_eq!(
-            compile_source_statement(token, &mut reader, &machine, &mut builder),
+            compile_source_statement(
+                token,
+                &mut reader,
+                &machine,
+                &Constants::default(),
+                &mut builder
+            ),
             Err(CompileError::Syntax)
         );
         assert_eq!(builder, original);
@@ -399,7 +517,14 @@ mod tests {
             let mut reader = SourceReader::new(source);
             let token = reader.next().unwrap().unwrap();
             assert!(
-                compile_source_statement(token, &mut reader, &machine, &mut builder).is_err(),
+                compile_source_statement(
+                    token,
+                    &mut reader,
+                    &machine,
+                    &Constants::default(),
+                    &mut builder
+                )
+                .is_err(),
                 "{source}"
             );
             assert_eq!(builder, original, "{source}");
@@ -438,7 +563,14 @@ mod tests {
             let mut reader = SourceReader::new(source);
             let token = reader.next().unwrap().unwrap();
             assert!(
-                compile_source_statement(token, &mut reader, &machine, &mut builder).is_err(),
+                compile_source_statement(
+                    token,
+                    &mut reader,
+                    &machine,
+                    &Constants::default(),
+                    &mut builder
+                )
+                .is_err(),
                 "{source}"
             );
             assert_eq!(
@@ -466,7 +598,14 @@ mod tests {
         let mut builder = CodeBuilder::new();
         let mut reader = SourceReader::new("*=() [ ~=0 ] [ A=1 ] [ A=2 ]");
         let token = reader.next().unwrap().unwrap();
-        compile_source_statement(token, &mut reader, &machine, &mut builder).unwrap();
+        compile_source_statement(
+            token,
+            &mut reader,
+            &machine,
+            &Constants::default(),
+            &mut builder,
+        )
+        .unwrap();
         assert_eq!(reader.peek().unwrap().unwrap().text, "[");
     }
 }

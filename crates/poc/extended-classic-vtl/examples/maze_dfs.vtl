@@ -7,6 +7,10 @@
 ; C is the current cell and D is the path top; both are hot A-Z state.
 ; N is a candidate across calls. R and T are procedure scratch.
 
+==VISITED_BASE,16
+==PATH_BASE,32
+==DIRECTION_BASE,48
+
   ; m: ( cell -- open ). Reads maze[0..15]; writes/clobbers T; storage unchanged.
   &=m [
     T=~
@@ -17,8 +21,8 @@
   ; Writes/clobbers T; no other A-Z or storage changes.
   &=v [
     T=~
-    %=@(16+T)==0 [
-      @=16+T,1
+    %=@(VISITED_BASE+T)==0 [
+      @=VISITED_BASE+T,1
       ~=1
     ] [ ~=0 ]
   ]
@@ -28,8 +32,8 @@
   &=p [
     T=~
     D=D+1
-    @=32+D,T
-    @=48+D,0
+    @=PATH_BASE+D,T
+    @=DIRECTION_BASE+D,0
     C=T
   ]
 
@@ -37,8 +41,8 @@
   ; depth's direction and returns the neighbor or -1 when outside the grid.
   ; Writes/clobbers R and N; writes directions[48..63].
   &=n [
-    R=@(48+D)
-    @=48+D,R+1
+    R=@(DIRECTION_BASE+D)
+    @=DIRECTION_BASE+D,R+1
     N=-1
     %=R==0 [
       N=C+1
@@ -64,7 +68,7 @@
   ; No scratch is clobbered and storage is unchanged.
   &=b [
     D=D-1
-    %=D>=0 [ C=@(32+D) ]
+    %=D>=0 [ C=@(PATH_BASE+D) ]
   ]
 
   ; s: ( -- ). Reads/writes C, D, N, R, T, visited, path, directions;
@@ -76,7 +80,7 @@
       ~=(D>=0)*(C!=15)
     ]
     [
-      %=@(48+D)<4 [
+      %=@(DIRECTION_BASE+D)<4 [
         n=()
         N=~
         m=N

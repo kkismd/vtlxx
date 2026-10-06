@@ -27,6 +27,7 @@ Extended Classic VTL (ECVTL) は、classic VTL の小さい表面構文を保ち
 - [#191](https://github.com/kkismd/vtlxx/issues/191): anonymous block / structured control の設計
 - [#265](https://github.com/kkismd/vtlxx/issues/265): anonymous block の `[ ... ]` 一本化
 - [#280](https://github.com/kkismd/vtlxx/issues/280): value stack 接続記号を `~` に変更
+- [#241](https://github.com/kkismd/vtlxx/issues/241), [#242](https://github.com/kkismd/vtlxx/issues/242), [#255](https://github.com/kkismd/vtlxx/issues/255), [#283](https://github.com/kkismd/vtlxx/issues/283): 名前付き整数
 - [#194](https://github.com/kkismd/vtlxx/issues/194): EC03 Tracker
 
 ## 実行方法
@@ -210,6 +211,24 @@ ECVTL の expression は、小さい parser と source role binding で構成さ
 これは `14` です。
 
 単項 minus 演算子はありません。`-7` のような負の integer literal は使えますが、`-A` は使えません。
+
+### 名前付き整数
+
+トップレベルの source sequence で `==NAME,value` と書くと、整数に名前を付けられます。定義コマンドは runtime code を生成しません。
+
+```vtl
+==BOARD_BASE,16
+==LOOP,1
+  A=BOARD_BASE+2
+^=LOOP
+  #=LOOP
+```
+
+名前は ASCII 大文字で始まる 2〜16 byte の `[A-Z][A-Z0-9_]+` です。1文字の `A`〜`Z` は従来どおり register です。値は `-32768`〜`32767` の符号付き decimal literal 1個に限ります。定数名や式を値には書けません。
+
+定義後の RHS 式、数値ラベルの `^=` と `#=` から参照できます。手続きや anonymous block の中で定義することはできません。未定義名の参照と同名の再定義は compile error です。異なる名前に同じ値を指定できます。`^=` / `#=` で使う値には既存のラベル範囲 `0..32767` が適用されます。
+
+定数表は `execute_source` 1回の source processing 中だけ存在します。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで定数名を再利用するには再定義が必要です。runtime の binding や object にはなりません。
 
 ### Comma operand
 
@@ -615,6 +634,8 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 ## Example: 固定迷路の DFS
 
 [`examples/maze_dfs.vtl`](examples/maze_dfs.vtl) は、固定 4×4 迷路を再帰を使わずに探索します。迷路、訪問済み状態、現在の経路、各深さで次に試す方向を別々の indexed storage 領域に置きます。右から進んだ cell 2 の行き止まりで一度戻り、goal への経路の cell 数 `7` を表示します。
+
+この例では `VISITED_BASE`、`PATH_BASE`、`DIRECTION_BASE` を定義し、storage 領域の基点を手続き内から参照します。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
