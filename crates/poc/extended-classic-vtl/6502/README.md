@@ -56,11 +56,21 @@ JZ template が呼ぶ `rt_pop_condition` は runtime value stack の top Cell �
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_backend -- --ignored
 ```
 
-## Frontend framing reader（#276）
+## Frontend framing reader（#290）
 
 `frontend/source.s` は `u16` little-endian length headerを読み、指定 byte 数だけ `serial_in` から取得する bounded reader (`fe_init` / `fe_next`) を提供する。sourceを保存せず、remaining countが0になった後は入力 helperを呼ばない。premature EOFは `fe_status = 1` と carry setで返す。`frontend_framing` sim65 fixture は source bytesの後ろにある runtime input sentinelを読めることと、truncated sourceをfailureにすることを確認する。
 
 ```sh
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 source_framing -- --ignored
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_frame -- --ignored
+```
+
+## Basic source frontend（#276）
+
+`frontend/basic.s` は `fe_init` / `fe_next` の 1 byte 先読みだけで basic top-level statement を読み、`cc_begin_owner` から `cc_complete_owner` までの 1 owner に native code を生成してから実行する。`fe_compile_run` は成功時 carry clear、compile 失敗時 carry set で返し、`fe_compile_status` は source/transport = 1、syntax = 2、literal range = 3、backend = 4 を示す。失敗時は生成途中の code を実行しない。source frame の終端以降は reader を呼ばず、残りの serial bytes は runtime input として保持する。
+
+現在の対象は signed i16 literal、A-Z register、`@(address)` read / `@=address,value` write、算術・比較、`?` / `$` output、grouping、左結合の式、左から右への comma operand、RHS 先頭だけの `~` である。`[` の旧 stack surface、named integer、label、block、user-defined Write は後続 issue の対象である。
+
+```sh
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_frontend -- --ignored
 ```
