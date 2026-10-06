@@ -56,11 +56,22 @@ JZ template が呼ぶ `rt_pop_condition` は runtime value stack の top Cell �
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_backend -- --ignored
 ```
 
-## Frontend framing reader（#276）
+## Frontend framing reader and scalar compile-run proof（#276）
 
 `frontend/source.s` は `u16` little-endian length headerを読み、指定 byte 数だけ `serial_in` から取得する bounded reader (`fe_init` / `fe_next`) を提供する。sourceを保存せず、remaining countが0になった後は入力 helperを呼ばない。premature EOFは `fe_status = 1` と carry setで返す。`frontend_framing` sim65 fixture は source bytesの後ろにある runtime input sentinelを読めることと、truncated sourceをfailureにすることを確認する。
 
 ```sh
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 source_framing -- --ignored
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_frame -- --ignored
+```
+
+`frontend/compile.s` is an initial end-to-end proof for scalar register writes,
+decimal literals, left-to-right `+ - * / % < >` expressions, and numeric output.
+It consumes the bounded frame and emits calls through the #275 backend before
+running the completed top-level owner. This does not yet implement the full
+#276 surface (blocks, control flow, definitions, named integers, and labels).
+Run the proof with:
+
+```sh
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 -- --ignored source_compile_run_executes_native_output
 ```

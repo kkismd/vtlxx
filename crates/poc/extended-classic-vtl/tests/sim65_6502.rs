@@ -78,10 +78,23 @@ fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
         .join("tests/fixtures/sim65")
         .join(format!("{fixture}.s"));
     let frontend = crate_root.join("6502/frontend/source.s");
+    let frontend_compile = crate_root.join("6502/frontend/compile.s");
+    let compiler_sources = [
+        crate_root.join("6502/compiler/arena.s"),
+        crate_root.join("6502/compiler/binding.s"),
+        crate_root.join("6502/compiler/emitter.s"),
+        crate_root.join("6502/compiler/owner.s"),
+        crate_root.join("6502/compiler/work_stack.s"),
+        crate_root.join("6502/runtime/state.s"),
+        crate_root.join("6502/runtime/arithmetic.s"),
+        crate_root.join("6502/runtime/primitives.s"),
+    ];
     let temp = TempDir::new()?;
     let adapter_object = temp.0.join("adapter.o");
     let fixture_object = temp.0.join("fixture.o");
     let frontend_object = temp.0.join("frontend.o");
+    let compile_object = temp.0.join("compile.o");
+    let mut compiler_objects = Vec::new();
     let executable = temp.0.join("smoke.prg");
 
     for (source, object) in [(&adapter, &adapter_object), (&fixture, &fixture_object)] {
@@ -116,6 +129,46 @@ fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
         )?;
         require_success("assemble frontend", "ca65", &output)?;
         objects.push(frontend_object.as_os_str());
+    }
+    if fixture.file_stem().and_then(|name| name.to_str()) == Some("frontend_compile") {
+        for (index, source) in compiler_sources.iter().enumerate() {
+            let object = temp.0.join(format!("compiler-{index}.o"));
+            let output = run_tool(
+                "ca65",
+                "assemble compiler",
+                &[
+                    OsStr::new("-t"),
+                    OsStr::new("sim6502"),
+                    source.as_os_str(),
+                    OsStr::new("-o"),
+                    object.as_os_str(),
+                ],
+                &[],
+            )?;
+            require_success("assemble compiler", "ca65", &output)?;
+            compiler_objects.push(object);
+        }
+        for (source, object) in [
+            (&frontend, &frontend_object),
+            (&frontend_compile, &compile_object),
+        ] {
+            let output = run_tool(
+                "ca65",
+                "assemble frontend compiler",
+                &[
+                    OsStr::new("-t"),
+                    OsStr::new("sim6502"),
+                    source.as_os_str(),
+                    OsStr::new("-o"),
+                    object.as_os_str(),
+                ],
+                &[],
+            )?;
+            require_success("assemble frontend compiler", "ca65", &output)?;
+        }
+        objects.push(frontend_object.as_os_str());
+        objects.push(compile_object.as_os_str());
+        objects.extend(compiler_objects.iter().map(|path| path.as_os_str()));
     }
 
     let mut link_args = vec![
@@ -192,6 +245,28 @@ fn source_framing_stops_before_runtime_input() {
     validate_run(&output, 0, b"ABCZ").unwrap();
     let output = build_and_run("frontend_framing", &[0, 0, b'Z']).unwrap();
     validate_run(&output, 0, b"Z").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn source_compile_run_executes_native_output() {
+    let source = b"A=40\nA=A+2\n?=A\n";
+    let mut input = vec![source.len() as u8, 0];
+    input.extend_from_slice(source);
+    input.push(b'Z');
+    let output = build_and_run("frontend_compile", &input).unwrap();
+    validate_run(&output, 0, b"42").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn malformed_source_does_not_start_runtime() {
+    let source = b"A=1+\n";
+    let mut input = vec![source.len() as u8, 0];
+    input.extend_from_slice(source);
+    input.push(b'Z');
+    let output = build_and_run("frontend_compile", &input).unwrap();
+    validate_run(&output, 1, b"").unwrap();
 }
 
 #[test]
