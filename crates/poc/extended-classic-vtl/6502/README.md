@@ -55,3 +55,12 @@ JZ template が呼ぶ `rt_pop_condition` は runtime value stack の top Cell �
 ```sh
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_backend -- --ignored
 ```
+
+## Frontend framing reader（#276）
+
+`frontend/source.s` は `u16` little-endian length headerを読み、指定 byte 数だけ `serial_in` から取得する bounded reader (`fe_init` / `fe_next`) を提供する。sourceを保存せず、remaining countが0になった後は入力 helperを呼ばない。premature EOFは `fe_status = 1` と carry setで返す。`frontend_framing` sim65 fixture は source bytesの後ろにある runtime input sentinelを読めることと、truncated sourceをfailureにすることを確認する。
+
+```sh
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 source_framing -- --ignored
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_frame -- --ignored
+```

@@ -77,9 +77,11 @@ fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
     let fixture = crate_root
         .join("tests/fixtures/sim65")
         .join(format!("{fixture}.s"));
+    let frontend = crate_root.join("6502/frontend/source.s");
     let temp = TempDir::new()?;
     let adapter_object = temp.0.join("adapter.o");
     let fixture_object = temp.0.join("fixture.o");
+    let frontend_object = temp.0.join("frontend.o");
     let executable = temp.0.join("smoke.prg");
 
     for (source, object) in [(&adapter, &adapter_object), (&fixture, &fixture_object)] {
@@ -98,20 +100,33 @@ fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
         require_success("assemble", "ca65", &output)?;
     }
 
-    let output = run_tool(
-        "ld65",
-        "link",
-        &[
-            OsStr::new("-t"),
-            OsStr::new("sim6502"),
-            OsStr::new("-o"),
-            executable.as_os_str(),
-            fixture_object.as_os_str(),
-            adapter_object.as_os_str(),
-            OsStr::new("sim6502.lib"),
-        ],
-        &[],
-    )?;
+    let mut objects = vec![fixture_object.as_os_str(), adapter_object.as_os_str()];
+    if fixture.file_stem().and_then(|name| name.to_str()) == Some("frontend_framing") {
+        let output = run_tool(
+            "ca65",
+            "assemble frontend",
+            &[
+                OsStr::new("-t"),
+                OsStr::new("sim6502"),
+                frontend.as_os_str(),
+                OsStr::new("-o"),
+                frontend_object.as_os_str(),
+            ],
+            &[],
+        )?;
+        require_success("assemble frontend", "ca65", &output)?;
+        objects.push(frontend_object.as_os_str());
+    }
+
+    let mut link_args = vec![
+        OsStr::new("-t"),
+        OsStr::new("sim6502"),
+        OsStr::new("-o"),
+        executable.as_os_str(),
+    ];
+    link_args.extend(objects);
+    link_args.push(OsStr::new("sim6502.lib"));
+    let output = run_tool("ld65", "link", &link_args, &[])?;
     require_success("link", "ld65", &output)?;
 
     run_tool(
@@ -166,6 +181,20 @@ fn serial_out_is_exact() {
 fn serial_input_round_trips() {
     let output = build_and_run("serial_echo", b"Z").unwrap();
     validate_run(&output, 0, b"Z").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn source_framing_stops_before_runtime_input() {
+    let output = build_and_run("frontend_framing", &[3, 0, b'A', b'B', b'C', b'Z']).unwrap();
+    validate_run(&output, 0, b"ABCZ").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn truncated_source_frame_fails_without_reading_past_eof() {
+    let output = build_and_run("frontend_framing", &[3, 0, b'A', b'B']).unwrap();
+    validate_run(&output, 1, b"AB").unwrap();
 }
 
 #[test]
