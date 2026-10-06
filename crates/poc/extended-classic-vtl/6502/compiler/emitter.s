@@ -2,14 +2,16 @@
 .setcpu "6502"
 
 .export cc_push_const, cc_call, cc_return, cc_jump, cc_jz
+.export cc_load_reg, cc_store_reg
 .export cc_jump_placeholder, cc_jz_placeholder, cc_patch_here, cc_jump_to
 .import cc_reserve, cc_write_byte_raw, cc_mark, cc_patch, cc_track_patch
-.import rt_push, rt_pop_condition
+.import rt_push, rt_pop_condition, rt_load_reg, rt_store_reg
 .importzp cc_status, cc_arg, cc_cursor
 
 .segment "ZEROPAGE"
 em_word:  .res 2
 em_patch: .res 2
+em_index: .res 1
 
 .segment "CODE"
 ; A/X = raw Cell bits. LDA #low; LDX #high; JSR rt_push.
@@ -45,6 +47,39 @@ cc_call:
     jsr cc_reserve
     lda cc_status
     bne @done
+    lda #$20
+    jsr cc_write_byte_raw
+    lda em_word
+    jsr cc_write_byte_raw
+    lda em_word+1
+    jsr cc_write_byte_raw
+@done:
+    rts
+
+; X = fixed register index 0..25. The backend owns the LDX immediate and
+; helper-call encoding; source classification stays in the frontend.
+cc_load_reg:
+    lda #<rt_load_reg
+    ldy #>rt_load_reg
+    jmp cc_indexed_call
+
+cc_store_reg:
+    lda #<rt_store_reg
+    ldy #>rt_store_reg
+    jmp cc_indexed_call
+
+cc_indexed_call:
+    stx em_index
+    sta em_word
+    sty em_word+1
+    lda #5
+    jsr cc_reserve
+    lda cc_status
+    bne @done
+    lda #$a2
+    jsr cc_write_byte_raw
+    lda em_index
+    jsr cc_write_byte_raw
     lda #$20
     jsr cc_write_byte_raw
     lda em_word
