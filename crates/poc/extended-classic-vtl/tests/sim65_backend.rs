@@ -158,3 +158,10 @@ fn completed_owner_binding_and_owner_local_labels() {
 fn source_work_stack_capacity_and_order() {
     expect(14, b"K");
 }
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn register_templates_cover_index_bounds_and_atomic_reserve_failure() {
+    expect(18, b"AZK");
+    expect(19, b"K");
+}

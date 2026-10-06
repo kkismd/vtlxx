@@ -43,6 +43,7 @@ target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は
 | --- | --- |
 | `cc_mark`、`cc_emit_byte`、`cc_emit_u16`、`cc_patch` | append と既存 operand の little-endian patch |
 | `cc_push_const`、`cc_call`、`cc_return`、`cc_jump`、`cc_jz` | fixed native template |
+| `cc_load_reg`、`cc_store_reg` | X = register index 0..25 を受け取り、index setup と register helper call を backend で emit |
 | `cc_jump_placeholder`、`cc_jz_placeholder`、`cc_patch_here`、`cc_jump_to` | absolute target の後方 patch と直接 jump |
 | `cc_begin_owner`、`cc_complete_owner` | owner の開始、未解決参照の検証、final RTS、completed target |
 | `cc_define_label`、`cc_label_jump` | owner-local の numeric label と forward fixup |
