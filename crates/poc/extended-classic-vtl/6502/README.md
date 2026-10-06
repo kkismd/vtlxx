@@ -1,6 +1,6 @@
 # 6502 target PoC
 
-このディレクトリは EC07 の sim6502 固有コードを置く。`target/sim65_adapter.s` が 1 byte の `serial_in` / `serial_out` と 8-bit status の `halt` を提供する。A register を受け渡しに使う呼び出し規約と `sim6502.lib` への接続はこの target 内だけの取り決めであり、portable ECVTL runtime ABI ではない。入力終端の扱いは後続 issue が定める。
+このディレクトリは EC07 の sim6502 固有コードを置く。`target/sim65_adapter.s` が byte と EOF を carry flag で区別する `serial_in`、1 byte の `serial_out`、8-bit status の `halt` を提供する。`serial_in` は A に任意の byte（`$ff` を含む）を返し carry clear、EOF は carry setで返す。A register を受け渡しに使う呼び出し規約と `sim6502.lib` への接続はこの target 内だけの取り決めであり、portable ECVTL runtime ABI ではない。
 
 host 側の `tests/sim65_6502.rs` が `ca65 -t sim6502`、`ld65 -t sim6502`、`sim65 -x` を起動する。生成物は OS の一時ディレクトリに作られ、テスト終了時に削除される。
 
@@ -54,4 +54,13 @@ JZ template が呼ぶ `rt_pop_condition` は runtime value stack の top Cell �
 
 ```sh
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_backend -- --ignored
+```
+
+## Frontend framing reader（#276）
+
+`frontend/source.s` は `u16` little-endian length headerを読み、指定 byte 数だけ `serial_in` から取得する bounded reader (`fe_init` / `fe_next`) を提供する。sourceを保存せず、remaining countが0になった後は入力 helperを呼ばない。premature EOFは `fe_status = 1` と carry setで返す。`frontend_framing` sim65 fixture は source bytesの後ろにある runtime input sentinelを読めることと、truncated sourceをfailureにすることを確認する。
+
+```sh
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 source_framing -- --ignored
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_frame -- --ignored
 ```
