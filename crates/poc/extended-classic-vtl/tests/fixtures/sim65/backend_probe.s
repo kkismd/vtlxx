@@ -3,6 +3,7 @@
 .export _main
 .import cc_init, cc_mark, cc_emit_byte, cc_emit_u16, cc_patch
 .import cc_push_const, cc_call, cc_return, cc_jump, cc_jz
+.import cc_load_reg, cc_store_reg
 .import cc_jump_placeholder, cc_jz_placeholder, cc_patch_here, cc_jump_to
 .import cc_begin_owner, cc_complete_owner, cc_publish, cc_resolve
 .import cc_define_label, cc_label_jump
@@ -29,6 +30,9 @@
     jmp bad
 :
 .endmacro
+
+.segment "ZEROPAGE"
+probe_ptr:   .res 2
 
 .segment "BSS"
 entry:       .res 2
@@ -537,6 +541,110 @@ _main:
     jsr cc_complete_owner
     OK
     jsr invoke
+.elseif TEST_CASE = 18
+    ; Both ends of the register index range execute load/store templates.
+    jsr cc_begin_owner
+    sta entry
+    stx entry+1
+    WORD 'A'
+    jsr cc_push_const
+    ldx #0
+    jsr cc_store_reg
+    OK
+    WORD 'Z'
+    jsr cc_push_const
+    ldx #25
+    jsr cc_store_reg
+    OK
+    ldx #0
+    jsr cc_load_reg
+    WORD rt_print_char
+    jsr cc_call
+    ldx #25
+    jsr cc_load_reg
+    WORD rt_print_char
+    jsr cc_call
+    jsr cc_complete_owner
+    OK
+    jsr invoke
+    lda rt_depth
+    beq :+
+    jmp bad
+:
+.elseif TEST_CASE = 19
+    ; With four arena bytes remaining, either five-byte template fails
+    ; before changing the cursor or the bytes in that remaining space.
+    lda #0
+    sta call_count
+@stage:
+    jsr cc_init
+    lda #0
+    sta counter
+    sta counter+1
+@fill:
+    lda #$ea
+    jsr cc_emit_byte
+    inc counter
+    bne :+
+    inc counter+1
+:
+    lda counter+1
+    cmp #7
+    bne @fill
+    lda counter
+    cmp #$fc                 ; 0x07fc = 2044
+    bne @fill
+    OK
+    jsr cc_mark
+    sta address
+    stx address+1
+    sta probe_ptr
+    stx probe_ptr+1
+    ldy #0
+@seed:
+    lda #$a5
+    sta (probe_ptr),y
+    iny
+    cpy #4
+    bne @seed
+    ldx #25
+    lda call_count
+    bne @load
+    jsr cc_store_reg
+    jmp @check
+@load:
+    jsr cc_load_reg
+@check:
+    lda cc_status
+    cmp #1
+    beq :+
+    jmp bad
+:
+    jsr cc_mark
+    cmp address
+    beq :+
+    jmp bad
+:
+    cpx address+1
+    beq :+
+    jmp bad
+:
+    ldy #0
+@verify:
+    lda (probe_ptr),y
+    cmp #$a5
+    beq :+
+    jmp bad
+:
+    iny
+    cpy #4
+    bne @verify
+    inc call_count
+    lda call_count
+    cmp #2
+    beq :+
+    jmp @stage
+:
 .else
     .error "unknown backend probe case"
 .endif
