@@ -115,7 +115,8 @@ impl Constants {
                 let start = offset;
                 offset += 1;
                 while offset < rhs.len()
-                    && (rhs.as_bytes()[offset].is_ascii_alphanumeric()
+                    && (rhs.as_bytes()[offset].is_ascii_uppercase()
+                        || rhs.as_bytes()[offset].is_ascii_digit()
                         || rhs.as_bytes()[offset] == b'_')
                 {
                     offset += 1;
@@ -415,6 +416,24 @@ fn compile_statement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::primitive::Primitive;
+
+    #[test]
+    fn lowercase_operator_ends_constant_name() {
+        let mut machine = Machine::new();
+        let mut operator = CodeBuilder::new();
+        operator
+            .emit(Instruction::Call(
+                machine.builtin_id(Primitive::Add).unwrap(),
+            ))
+            .unwrap();
+        machine
+            .publish_initial('a', SourceRole::BinaryOperator, operator.finish().unwrap())
+            .unwrap();
+
+        machine.execute_source("==MAX,2 B=3 A=MAXaB").unwrap();
+        assert_eq!(machine.register(0), Some(5));
+    }
 
     #[test]
     fn scan_keeps_quotes_and_discards_comment() {
