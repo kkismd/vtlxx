@@ -15,12 +15,10 @@ fe_status:    .res 1
 ; Read the frame length. Carry is clear on success, set on truncated header.
 fe_init:
     jsr serial_in
-    cmp #$ff
-    beq @truncated
+    bcs @truncated
     sta fe_remaining
     jsr serial_in
-    cmp #$ff
-    beq @truncated
+    bcs @truncated
     sta fe_remaining+1
     lda #0
     sta fe_status
@@ -32,9 +30,10 @@ fe_init:
     sec
     rts
 
-; Return A=next source byte with carry clear; carry set means exact frame end.
-; A source read returning $ff is premature EOF and latches failure status 1.
-; The caller must not call serial_in after carry is set.
+; serial_in returns a byte with carry clear; carry set indicates transport EOF.
+; Return A=next source byte with carry clear; carry set means frame end or error.
+; fe_status distinguishes successful frame end (0) from premature EOF (1).
+; The caller must not call serial_in after frame end.
 fe_next:
     lda fe_status
     bne @failed
@@ -42,8 +41,7 @@ fe_next:
     ora fe_remaining+1
     beq @end
     jsr serial_in
-    cmp #$ff
-    beq @truncated
+    bcs @truncated
     pha
     lda fe_remaining
     bne @dec_low

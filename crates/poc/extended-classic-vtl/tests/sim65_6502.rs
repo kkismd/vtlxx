@@ -6,7 +6,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const CYCLE_LIMIT: &str = "100000";
+const CYCLE_LIMIT: &str = "4000000";
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 struct TempDir(PathBuf);
@@ -181,6 +181,8 @@ fn serial_out_is_exact() {
 fn serial_input_round_trips() {
     let output = build_and_run("serial_echo", b"Z").unwrap();
     validate_run(&output, 0, b"Z").unwrap();
+    let output = build_and_run("serial_echo", &[0xff]).unwrap();
+    validate_run(&output, 0, &[0xff]).unwrap();
 }
 
 #[test]
@@ -188,6 +190,22 @@ fn serial_input_round_trips() {
 fn source_framing_stops_before_runtime_input() {
     let output = build_and_run("frontend_framing", &[3, 0, b'A', b'B', b'C', b'Z']).unwrap();
     validate_run(&output, 0, b"ABCZ").unwrap();
+    let output = build_and_run("frontend_framing", &[0, 0, b'Z']).unwrap();
+    validate_run(&output, 0, b"Z").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn source_framing_accepts_ff_and_256_byte_lengths() {
+    for length in [255usize, 256] {
+        let mut input = vec![length as u8, (length >> 8) as u8];
+        input.extend(std::iter::repeat_n(b'A', length));
+        input.push(b'Z');
+        let output = build_and_run("frontend_framing", &input).unwrap();
+        let mut expected = vec![b'A'; length];
+        expected.push(b'Z');
+        validate_run(&output, 0, &expected).unwrap();
+    }
 }
 
 #[test]

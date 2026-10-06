@@ -9,6 +9,12 @@
 
 serial_in:
     jsr _getchar                 ; cc65 int result is in A/X; smoke uses one byte
+    cpx #$ff                     ; getchar returns -1 (EOF) as $ffff
+    beq @eof
+    clc                          ; carry clear: A contains a byte, including $ff
+    rts
+@eof:
+    sec                          ; carry set: transport ended, A is not a byte
     rts
 
 serial_out:
