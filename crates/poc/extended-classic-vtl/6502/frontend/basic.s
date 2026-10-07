@@ -7,6 +7,8 @@
 .exportzp fe_compile_status
 .import fe_init, fe_next, cc_init, cc_begin_owner, cc_complete_owner
 .import cc_define_label, cc_label_jump
+.import cc_jz_placeholder, cc_jump_placeholder, cc_patch_here
+.import cc_work_push, cc_work_pop
 .import cc_push_const, cc_call, cc_load_reg, cc_store_reg
 .import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
@@ -20,6 +22,8 @@ look_state:        .res 1       ; 0 empty, 1 byte, 2 frame end, 3 transport erro
 look_byte:         .res 1
 target_index:      .res 1
 nesting:           .res 1
+structured_depth:  .res 1
+patch_scratch:     .res 2
 negative:          .res 1
 literal:           .res 2
 digit:             .res 1
@@ -49,6 +53,7 @@ fe_compile_run:
     sta fe_compile_status
     sta look_state
     sta nesting
+    sta structured_depth
     sta constant_count
     jsr fe_init
     jcs source_error
@@ -142,7 +147,7 @@ skip_separators:
     jsr peek
     lda look_state
     cmp #1
-    bne @done
+    jne @done
     lda look_byte
     cmp #';'
     beq @comment
@@ -153,7 +158,7 @@ skip_separators:
     cmp #10
     beq @skip
     cmp #13
-    bne @done
+    jne @done
 @skip:
     jsr take
     jmp skip_separators
@@ -192,6 +197,8 @@ statement:
     jeq @label
     cmp #'#'
     jeq @label
+    cmp #'%'
+    jeq @conditional
     lda target_index
     cmp #'~'
     beq @target_ok
@@ -222,7 +229,7 @@ statement:
 @operand:
     jsr operand
     lda fe_compile_status
-    bne @done
+    jne @done
 @comma:
     jsr peek
     lda look_state
@@ -240,10 +247,10 @@ statement:
 @end:
     jsr statement_end
     lda fe_compile_status
-    bne @done
+    jne @done
     lda target_index
     cmp #'~'
-    beq @done
+    jeq @done
     cmp #'A'
     bcc @write_special
     cmp #'Z'+1
@@ -268,6 +275,75 @@ statement:
     lda #<rt_print_char
     ldx #>rt_print_char
     jmp cc_call
+@conditional:
+    lda structured_depth
+    cmp #16
+    jcs syntax_error
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'['
+    jeq @condition_empty
+    lda #0
+    jsr operand
+    lda fe_compile_status
+    jne @conditional_done
+    lda cc_status
+    jne backend_error
+    jsr statement_end
+    lda fe_compile_status
+    jne @conditional_done
+    jsr cc_jz_placeholder
+    jsr cc_work_push
+    lda cc_status
+    jne backend_error
+    jsr required_block
+    lda fe_compile_status
+    bne @conditional_done
+    jsr skip_separators
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    bne @one_arm
+    lda look_byte
+    cmp #'['
+    bne @one_arm
+    ; Keep this IF's work-stack depth constant while replacing false with end.
+    jsr cc_work_pop
+    sta patch_scratch
+    stx patch_scratch+1
+    lda cc_status
+    jne backend_error
+    jsr cc_jump_placeholder
+    jsr cc_work_push
+    lda cc_status
+    jne backend_error
+    lda patch_scratch
+    ldx patch_scratch+1
+    jsr cc_patch_here
+    lda cc_status
+    jne backend_error
+    jsr required_block
+    lda fe_compile_status
+    bne @conditional_done
+    jsr cc_work_pop
+    jsr cc_patch_here
+    lda cc_status
+    jne backend_error
+    rts
+@one_arm:
+    jsr cc_work_pop
+    jsr cc_patch_here
+    lda cc_status
+    jne backend_error
+    rts
+@condition_empty:
+    jmp syntax_error
+@conditional_done:
+    rts
 @done:
     rts
 
@@ -547,6 +623,77 @@ statement_end:
     cmp #';'
     jne syntax_error
 @ok:
+    rts
+
+; Check the byte after a consumed delimiter without consuming a separator.
+; Frame end is a valid boundary; opener callers reject it separately.
+require_form_boundary:
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #2
+    beq @ok
+    lda look_byte
+    cmp #' '
+    beq @ok
+    cmp #9
+    beq @ok
+    cmp #10
+    beq @ok
+    cmp #13
+    beq @ok
+    cmp #';'
+    jne syntax_error
+@ok:
+    rts
+
+; Required source block, compiled inline into the current owner.
+required_block:
+    jsr skip_separators
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'['
+    jne syntax_error
+    lda structured_depth
+    cmp #16
+    jcs syntax_error
+    inc structured_depth
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @block_done
+    lda look_state
+    cmp #2
+    jeq syntax_error
+@block_next:
+    jsr skip_separators
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #2
+    jeq syntax_error
+    lda look_byte
+    cmp #']'
+    beq @block_close
+    jsr statement
+    lda fe_compile_status
+    bne @block_done
+    lda cc_status
+    jne backend_error
+    jmp @block_next
+@block_close:
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @block_done
+    dec structured_depth
+    rts
+@block_done:
     rts
 
 ; A=1 means the existing stack top seeds this operand. Operators are emitted
