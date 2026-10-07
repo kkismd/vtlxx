@@ -138,6 +138,9 @@ fn basic_source_compiles_and_executes() {
     expect("A=0 *=() [ ~=A<1 ] [ A=A+1 ] ?=A", 0, b"1Z");
     expect("A=0 *=() [ ~=A<4 ] [ A=A+1 ] ?=A", 0, b"4Z");
     expect("A=0 *=() [ ~=A<3 ] [ A=A+1 ] A=A+5 ?=A", 0, b"8Z");
+    // A jump from an inline While body resolves in the surrounding owner's
+    // label namespace and reaches the label after the loop.
+    expect("A=0 *=() [ ~=A<1 ] [ #=9 A=99 ] ^=9 ?=A", 0, b"0Z");
     expect("==LIMIT,3 A=0 *=() [ ~=A<LIMIT ] [ A=A+1 ] ?=A", 0, b"3Z");
     expect("A=0 *=() [ ~=A<2 ] [ %=1 [ A=A+1 ] ] ?=A", 0, b"2Z");
     expect("A=0 %=1 [ *=() [ ~=A<2 ] [ A=A+1 ] ] ?=A", 0, b"2Z");
@@ -152,6 +155,16 @@ fn basic_source_compiles_and_executes() {
     expect(&nested_16, 0, b"9Z");
     let nested_while_16 = format!("~=0 {}?=9{}", "*=() [ ~=0 ] [ ".repeat(16), " ]".repeat(16));
     expect(&nested_while_16, 0, b"Z");
+    // Keep expression grouping at its independent limit while all sixteen
+    // While frames are active during source compilation.
+    let mut nested_while_grouping = "*=() [ ~=0 ] [ ".repeat(15);
+    nested_while_grouping.push_str(&format!(
+        "*=() [ ~={}0{} ] [ ]",
+        "(".repeat(16),
+        ")".repeat(16)
+    ));
+    nested_while_grouping.push_str(&" ]".repeat(15));
+    expect(&nested_while_grouping, 0, b"Z");
     let grouped_condition = format!("%={}1{} [ ?=9 ]", "(".repeat(16), ")".repeat(16));
     expect(&grouped_condition, 0, b"9Z");
     expect("A=2+3*4 ?=A $=65", 0, b"20AZ");
