@@ -7,7 +7,8 @@
 .exportzp fe_compile_status
 .import fe_init, fe_next, cc_init, cc_begin_owner, cc_complete_owner
 .import cc_define_label, cc_label_jump
-.import cc_jz_placeholder, cc_jump_placeholder, cc_patch_here
+.import cc_mark, cc_jz_placeholder, cc_jump_placeholder, cc_patch_here
+.import cc_jump_to
 .import cc_work_push, cc_work_pop
 .import cc_push_const, cc_call, cc_load_reg, cc_store_reg
 .import rt_init, rt_load_storage, rt_store_storage
@@ -23,7 +24,11 @@ look_byte:         .res 1
 target_index:      .res 1
 nesting:           .res 1
 structured_depth:  .res 1
+while_depth:       .res 1
+while_slot:        .res 1
+while_offset:      .res 1
 patch_scratch:     .res 2
+while_word:        .res 2
 negative:          .res 1
 literal:           .res 2
 digit:             .res 1
@@ -44,6 +49,8 @@ operator_high:  .byte >rt_add,>rt_sub,>rt_mul,>rt_div,>rt_rem,>rt_lt,>rt_gt
 .segment "BSS"
 constant_name: .res 16
 constant_table: .res 16*19 ; 16-byte NUL-terminated name + signed i16
+while_loop_targets: .res 16*2
+while_exit_patches: .res 16*2
 
 .segment "CODE"
 ; Carry clear on success; A/X is the completed entry. Compile errors never
@@ -54,6 +61,7 @@ fe_compile_run:
     sta look_state
     sta nesting
     sta structured_depth
+    sta while_depth
     sta constant_count
     jsr fe_init
     jcs source_error
@@ -199,6 +207,8 @@ statement:
     jeq @label
     cmp #'%'
     jeq @conditional
+    cmp #'*'
+    jeq @while
     lda target_index
     cmp #'~'
     beq @target_ok
@@ -343,6 +353,106 @@ statement:
 @condition_empty:
     jmp syntax_error
 @conditional_done:
+    rts
+@while:
+    ; `*=()` is an exact header. Keep the expression multiplication operator
+    ; untouched; only statement target `*=` enters this source form.
+    lda while_depth
+    cmp #16
+    jcs syntax_error
+    lda while_depth
+    sta while_slot
+    inc while_depth
+
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @while_syntax
+    lda look_byte
+    cmp #'('
+    jne @while_syntax
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @while_syntax
+    lda look_byte
+    cmp #')'
+    jne @while_syntax
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    jne @while_done
+
+    ; Frame arrays are indexed independently of the IF work stack, preserving
+    ; sixteen nested While forms without using two work-stack words per level.
+    lda while_slot
+    asl a
+    sta while_offset
+    jsr cc_mark
+    sta while_word
+    stx while_word+1
+    ldy while_offset
+    lda while_word
+    sta while_loop_targets,y
+    iny
+    lda while_word+1
+    sta while_loop_targets,y
+
+    jsr required_block
+    lda fe_compile_status
+    bne @while_done
+    lda while_depth
+    sec
+    sbc #1
+    asl a
+    sta while_offset
+    jsr cc_jz_placeholder
+    sta while_word
+    stx while_word+1
+    lda while_offset
+    tay
+    lda while_word
+    sta while_exit_patches,y
+    iny
+    lda while_word+1
+    sta while_exit_patches,y
+
+    jsr required_block
+    lda fe_compile_status
+    bne @while_done
+    lda while_depth
+    sec
+    sbc #1
+    asl a
+    sta while_offset
+    ldy while_offset
+    lda while_loop_targets,y
+    sta while_word
+    iny
+    lda while_loop_targets,y
+    tax
+    lda while_word
+    jsr cc_jump_to
+    lda cc_status
+    jne @while_backend
+    ldy while_offset
+    lda while_exit_patches,y
+    sta while_word
+    iny
+    lda while_exit_patches,y
+    tax
+    lda while_word
+    jsr cc_patch_here
+    lda cc_status
+    jne @while_backend
+    dec while_depth
+    rts
+@while_syntax:
+    jmp syntax_error
+@while_backend:
+    jmp backend_error
+@while_done:
     rts
 @done:
     rts
