@@ -143,9 +143,9 @@ fn basic_source_compiles_and_executes() {
     );
     expect("==ABCDEFGHIJKLMNOP,32767 ?=ABCDEFGHIJKLMNOP", 0, b"32767Z");
     expect(
-        "==C0,0 ==C1,1 ==C2,2 ==C3,3 ==C4,4 ==C5,5 ==C6,6 ==C7,7 ==C8,8 ==C9,9 ==C10,10 ==C11,11 ==C12,12 ==C13,13 ==C14,14 ==C15,15 A=C15 ?=A",
+        "==C0,100 ==C1,101 ==C2,102 ==C3,103 ==C4,104 ==C5,105 ==C6,106 ==C7,107 ==C8,108 ==C9,109 ==C10,110 ==C11,111 ==C12,112 ==C13,113 ==ABCDEFGHIJKLMNOP,114 ==C15,115 ?=C0 ?=C7 ?=C13 ?=ABCDEFGHIJKLMNOP ?=C15",
         0,
-        b"15Z",
+        b"100107113114115Z",
     );
     expect("==ZERO,0 ?=2==2", 0, b"1Z");
     expect("A=1 ; a comment\n\tA=A+1 ?=A", 0, b"2Z");

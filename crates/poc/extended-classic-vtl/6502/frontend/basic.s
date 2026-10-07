@@ -29,6 +29,7 @@ constant_length:   .res 1
 constant_slot:     .res 1
 constant_index:    .res 1
 constant_char:     .res 1
+constant_ptr:      .res 2
 
 .segment "RODATA"
 operator_chars: .byte '+','-','*','/','%','<','>'
@@ -303,34 +304,26 @@ statement:
     ; Validate everything before publishing a table entry.
     lda constant_count
     sta constant_slot
-    asl a
-    sta constant_index           ; 2 * slot
-    asl a
-    asl a                         ; 8 * slot
-    clc
-    adc constant_index            ; 10 * slot
-    asl a                         ; 20 * slot
-    sec
-    sbc constant_slot             ; 19 * slot
-    tay
+    jsr constant_address
+    ldy #0
     ldx #0
 @copy_name:
     cpx constant_length
     beq @store_value
     lda constant_name,x
-    sta constant_table,y
+    sta (constant_ptr),y
     iny
     inx
     bne @copy_name
 @store_value:
     lda #0
-    sta constant_table,y          ; terminator (not needed for compare)
+    sta (constant_ptr),y          ; terminator (not needed for compare)
     iny
     lda literal
-    sta constant_table,y
+    sta (constant_ptr),y
     iny
     lda literal+1
-    sta constant_table,y
+    sta (constant_ptr),y
     inc constant_count
 @definition_done:
     rts
@@ -406,31 +399,20 @@ constant_find:
     lda constant_slot
     cmp constant_count
     beq @not_found
-    ; Compute the fixed 19-byte entry address in Y.
-    lda constant_slot
-    sta constant_index
-    asl a
-    sta constant_index
-    asl a
-    asl a
-    asl a
-    clc
-    adc constant_index
-    clc
-    adc constant_slot
-    tay
+    jsr constant_address
+    ldy #0
     ldx #0
 @compare:
     cpx constant_length
     beq @check_end
-    lda constant_table,y
+    lda (constant_ptr),y
     cmp constant_name,x
     bne @next_slot
     iny
     inx
     bne @compare
 @check_end:
-    lda constant_table,y
+    lda (constant_ptr),y
     beq @found
 @next_slot:
     inc constant_slot
@@ -444,26 +426,39 @@ constant_find:
 
 constant_load_value:
     ; Move from name start to the saved two-byte value.
-    lda constant_slot
-    sta constant_index
-    asl a
-    sta constant_index
-    asl a
-    asl a
-    asl a
-    clc
-    adc constant_index
-    clc
-    adc constant_slot
-    clc
-    adc constant_length
+    jsr constant_address
+    lda constant_length
     tay
     iny
-    lda constant_table,y
+    lda (constant_ptr),y
     sta literal
     iny
-    lda constant_table,y
+    lda (constant_ptr),y
     sta literal+1
+    rts
+
+; Convert constant_slot to a full 16-bit address. Entry offsets are 19 bytes;
+; repeated pointer increments avoid truncating offsets above 255 into Y.
+constant_address:
+    lda #<constant_table
+    sta constant_ptr
+    lda #>constant_table
+    sta constant_ptr+1
+    lda constant_slot
+    sta constant_index
+@advance:
+    lda constant_index
+    beq @address_ready
+    clc
+    lda constant_ptr
+    adc #19
+    sta constant_ptr
+    lda constant_ptr+1
+    adc #0
+    sta constant_ptr+1
+    dec constant_index
+    jmp @advance
+@address_ready:
     rts
 
 ; Whitespace, newline, comment, or frame end terminates one statement.
