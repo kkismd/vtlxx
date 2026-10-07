@@ -24,11 +24,21 @@ literal:           .res 2
 digit:             .res 1
 operator_index:    .res 1
 entry:             .res 2
+constant_count:    .res 1
+constant_length:   .res 1
+constant_slot:     .res 1
+constant_index:    .res 1
+constant_char:     .res 1
+constant_ptr:      .res 2
 
 .segment "RODATA"
 operator_chars: .byte '+','-','*','/','%','<','>'
 operator_low:   .byte <rt_add,<rt_sub,<rt_mul,<rt_div,<rt_rem,<rt_lt,<rt_gt
 operator_high:  .byte >rt_add,>rt_sub,>rt_mul,>rt_div,>rt_rem,>rt_lt,>rt_gt
+
+.segment "BSS"
+constant_name: .res 16
+constant_table: .res 16*19 ; 16-byte NUL-terminated name + signed i16
 
 .segment "CODE"
 ; Carry clear on success; A/X is the completed entry. Compile errors never
@@ -38,6 +48,7 @@ fe_compile_run:
     sta fe_compile_status
     sta look_state
     sta nesting
+    sta constant_count
     jsr fe_init
     jcs source_error
     jsr cc_init
@@ -162,6 +173,9 @@ skip_separators:
 
 statement:
     lda look_byte
+    cmp #'='
+    jeq @definition
+    lda look_byte
     sta target_index
     jsr take
     jsr peek
@@ -251,6 +265,202 @@ statement:
 @done:
     rts
 
+; Top-level `==NAME,value`. The table is compile-run local and never emitted.
+@definition:
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'='
+    jne syntax_error
+    jsr take
+    jsr scan_constant_name
+    lda fe_compile_status
+    bne @definition_done
+    jsr constant_find
+    bcc :+
+    jmp syntax_error             ; duplicate
+:
+    lda constant_count
+    cmp #16
+    bcc :+
+    jmp syntax_error
+:
+    jsr expect_comma
+    lda fe_compile_status
+    bne @definition_done
+    jsr peek
+    lda look_state
+    cmp #1
+    jne literal_error
+    jsr parse_literal
+    lda fe_compile_status
+    bne @definition_done
+    jsr statement_end
+    lda fe_compile_status
+    bne @definition_done
+    ; Validate everything before publishing a table entry.
+    lda constant_count
+    sta constant_slot
+    jsr constant_address
+    ldy #0
+    ldx #0
+@copy_name:
+    cpx constant_length
+    beq @store_value
+    lda constant_name,x
+    sta (constant_ptr),y
+    iny
+    inx
+    bne @copy_name
+@store_value:
+    lda #0
+    sta (constant_ptr),y          ; terminator (not needed for compare)
+    iny
+    lda literal
+    sta (constant_ptr),y
+    iny
+    lda literal+1
+    sta (constant_ptr),y
+    inc constant_count
+@definition_done:
+    rts
+
+expect_comma:
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #','
+    jne syntax_error
+    jmp take
+
+; Scan [A-Z][A-Z0-9_]+ into a 16-byte temporary with a bounded lookahead.
+scan_constant_name:
+    lda #0
+    sta constant_length
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'A'
+    jcc syntax_error
+    cmp #'Z'+1
+    jcs syntax_error
+    lda #0
+    sta constant_length
+scan_constant_tail:
+@name_byte:
+    lda look_byte
+    sta constant_char
+    lda constant_length
+    cmp #16
+    bcc :+
+    jmp syntax_error
+:
+    tax
+    lda constant_char
+    sta constant_name,x
+    inc constant_length
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    bne @name_end
+    lda look_byte
+    cmp #'A'
+    bcc @not_upper
+    cmp #'Z'+1
+    bcc @name_byte
+@not_upper:
+    cmp #'0'
+    bcc @name_end
+    cmp #'9'+1
+    bcc @name_byte
+    cmp #'_'
+    beq @name_byte
+@name_end:
+    lda constant_length
+    cmp #2
+    bcs :+
+    jmp syntax_error
+:
+    rts
+
+; Carry set means the bounded name is already present.
+constant_find:
+    lda #0
+    sta constant_slot
+@find_slot:
+    lda constant_slot
+    cmp constant_count
+    beq @not_found
+    jsr constant_address
+    ldy #0
+    ldx #0
+@compare:
+    cpx constant_length
+    beq @check_end
+    lda (constant_ptr),y
+    cmp constant_name,x
+    bne @next_slot
+    iny
+    inx
+    bne @compare
+@check_end:
+    lda (constant_ptr),y
+    beq @found
+@next_slot:
+    inc constant_slot
+    jmp @find_slot
+@found:
+    sec
+    rts
+@not_found:
+    clc
+    rts
+
+constant_load_value:
+    ; Move from name start to the saved two-byte value.
+    jsr constant_address
+    lda constant_length
+    tay
+    iny
+    lda (constant_ptr),y
+    sta literal
+    iny
+    lda (constant_ptr),y
+    sta literal+1
+    rts
+
+; Convert constant_slot to a full 16-bit address. Entry offsets are 19 bytes;
+; repeated pointer increments avoid truncating offsets above 255 into Y.
+constant_address:
+    lda #<constant_table
+    sta constant_ptr
+    lda #>constant_table
+    sta constant_ptr+1
+    lda constant_slot
+    sta constant_index
+@advance:
+    lda constant_index
+    beq @address_ready
+    clc
+    lda constant_ptr
+    adc #19
+    sta constant_ptr
+    lda constant_ptr+1
+    adc #0
+    sta constant_ptr+1
+    dec constant_index
+    jmp @advance
+@address_ready:
+    rts
+
 ; Whitespace, newline, comment, or frame end terminates one statement.
 statement_end:
     lda look_state
@@ -336,10 +546,10 @@ value:
     cmp #'0'
     bcc @minus
     cmp #'9'+1
-    jcc parse_literal
+    jcc @literal
 @minus:
     cmp #'-'
-    jeq parse_literal
+    jeq @literal
     cmp #'A'
     bcc @applied
     cmp #'Z'+1
@@ -353,15 +563,42 @@ value:
     cmp #1
     bne @register
     lda look_byte
-    cmp #'('
-    beq @invalid_register_apply
+    cmp #'A'
+    bcc @name_digit
+    cmp #'Z'+1
+    bcc @named
+@name_digit:
+    lda look_byte
+    cmp #'0'
+    bcc @register
+    cmp #'9'+1
+    bcc @named
+    cmp #'_'
+    bne @register
+@named:
+    pla
+    clc
+    adc #'A'
+    sta constant_name
+    lda #1
+    sta constant_length
+    jsr scan_constant_tail
+    lda fe_compile_status
+    beq :+
+    jmp @done
+:
+    jsr constant_find
+    bcs :+
+    jmp syntax_error
+:
+    jsr constant_load_value
+    lda literal
+    ldx literal+1
+    jmp cc_push_const
 @register:
     pla
     tax
     jmp cc_load_reg
-@invalid_register_apply:
-    pla
-    jmp syntax_error
 @applied:
     cmp #'@'
     jne syntax_error
@@ -403,6 +640,13 @@ value:
     lda #<rt_load_storage
     ldx #>rt_load_storage
     jmp cc_call
+@literal:
+    jsr parse_literal
+    lda fe_compile_status
+    bne @done
+    lda literal
+    ldx literal+1
+    jmp cc_push_const
 @group:
     jsr take
     jsr enter_nesting
@@ -529,9 +773,7 @@ parse_literal:
     sbc literal+1
     sta literal+1
 @emit:
-    lda literal
-    ldx literal+1
-    jmp cc_push_const
+    rts
 
 ; Built-in binary role resolution. Composite comparison consumes two bytes.
 operator:
