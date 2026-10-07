@@ -125,6 +125,21 @@ fn basic_source_compiles_and_executes() {
     expect("A=40", 0, b"Z");
     expect("A=40 ?=A", 0, b"40Z");
     expect("A=40\nA=A+2\n?=A", 0, b"42Z");
+    expect("%=1 [ ] ?=7", 0, b"7Z");
+    expect("%=1 [ ?=1 ]", 0, b"1Z");
+    expect("%=0 [ ?=1 ]", 0, b"Z");
+    expect("%=1 [ ?=1 ] [ ?=2 ]", 0, b"1Z");
+    expect("%=0 [ ?=1 ] [ ?=2 ]", 0, b"2Z");
+    expect("%=1 [ ?=1 ] ; else follows comment\n [ ?=2 ]", 0, b"1Z");
+    expect("%=1 [ ] ?=3", 0, b"3Z");
+    expect("%=1 [ %=0 [ ?=1 ] [ ?=2 ] ] [ ?=3 ]", 0, b"2Z");
+    expect("%=0 [ %=1 [ ?=1 ] ] [ ?=2 ]", 0, b"2Z");
+    expect("==VALUE,42 %=1 [ ?=VALUE ]", 0, b"42Z");
+    expect("%=1 [ #=2 ?=1 ^=2 ?=8 ]", 0, b"8Z");
+    let nested_16 = format!("{}?=9{}", "%=1 [ ".repeat(16), " ]".repeat(16));
+    expect(&nested_16, 0, b"9Z");
+    let grouped_condition = format!("%={}1{} [ ?=9 ]", "(".repeat(16), ")".repeat(16));
+    expect(&grouped_condition, 0, b"9Z");
     expect("A=2+3*4 ?=A $=65", 0, b"20AZ");
     expect("A=2+(3*4) ?=A", 0, b"14Z");
     expect("@=10,42 ?=@(10)", 0, b"42Z");
@@ -196,6 +211,14 @@ fn malformed_source_never_starts_runtime() {
         "#=",
         "^=12x",
         "#=UNKNOWN",
+        "%=1 A=2",
+        "%=1 [ A=2",
+        "%=1 [ ] [ A=",
+        "%=1 [ ] [",
+        "%= [ ]",
+        "[ ]",
+        "]",
+        "%=1 [ ] ]",
         "==NEG,-1 ^=NEG",
         "^=-1",
         "#=32768",
@@ -220,6 +243,8 @@ fn malformed_source_never_starts_runtime() {
             b"",
         );
     }
+    let nested_17 = format!("{}?=9{}", "%=1 [ ".repeat(17), " ]".repeat(17));
+    expect(&nested_17, 2, b"");
     let mut too_many_labels = String::new();
     for label in 0..33 {
         too_many_labels.push_str(&format!("^={label} "));
