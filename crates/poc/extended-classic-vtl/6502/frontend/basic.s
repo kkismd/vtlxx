@@ -6,6 +6,7 @@
 .export fe_compile_run
 .exportzp fe_compile_status
 .import fe_init, fe_next, cc_init, cc_begin_owner, cc_complete_owner
+.import cc_define_label, cc_label_jump
 .import cc_push_const, cc_call, cc_load_reg, cc_store_reg
 .import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
@@ -187,6 +188,11 @@ statement:
     jne syntax_error
     jsr take
     lda target_index
+    cmp #'^'
+    jeq @label
+    cmp #'#'
+    jeq @label
+    lda target_index
     cmp #'~'
     beq @target_ok
     cmp #'A'
@@ -265,6 +271,26 @@ statement:
 @done:
     rts
 
+; Numeric label operands reuse the compile-run constant table, then delegate
+; all owner-local definition/fixup behavior to the backend.
+@label:
+    jsr resolve_label_operand
+    lda fe_compile_status
+    bne @done
+    jsr statement_end
+    lda fe_compile_status
+    bne @done
+    lda target_index
+    cmp #'^'
+    bne @jump
+    lda literal
+    ldx literal+1
+    jmp cc_define_label
+@jump:
+    lda literal
+    ldx literal+1
+    jmp cc_label_jump
+
 ; Top-level `==NAME,value`. The table is compile-run local and never emitted.
 @definition:
     jsr take
@@ -337,6 +363,47 @@ expect_comma:
     cmp #','
     jne syntax_error
     jmp take
+
+; Resolve decimal or named integer label operand into literal, restricted to
+; the non-negative signed-i16 range shared with the portable numeric labels.
+resolve_label_operand:
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'-'
+    beq @decimal
+    cmp #'0'
+    bcc @named
+    cmp #'9'+1
+    bcc @decimal
+@named:
+    jsr scan_constant_name
+    lda fe_compile_status
+    bne @done
+    jsr constant_find
+    bcs :+
+    jmp syntax_error
+:
+    jsr constant_load_value
+    jmp @range
+@decimal:
+    jsr parse_literal
+    lda fe_compile_status
+    bne @done
+    lda negative
+    bne @bad_range
+@range:
+    ; A set high bit is either a negative named value or >32767.
+    lda literal+1
+    bmi @bad_range
+    clc
+    rts
+@bad_range:
+    jmp literal_error
+@done:
+    rts
 
 ; Scan [A-Z][A-Z0-9_]+ into a 16-byte temporary with a bounded lookahead.
 scan_constant_name:

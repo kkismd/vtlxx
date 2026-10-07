@@ -136,6 +136,14 @@ fn basic_source_compiles_and_executes() {
     expect("?=7/2 ?=7%2 ?=3-8", 0, b"31-5Z");
     expect("==BOARD_BASE,16 A=BOARD_BASE+2 ?=A", 0, b"18Z");
     expect("==NEG_ONE,-1 A=NEG_ONE ?=A", 0, b"-1Z");
+    // The first jump reaches END; the later backward jump is compiled and
+    // patched but remains unreachable, keeping this fixture finite.
+    expect(
+        "==LOOP,1 ==END,2 A=LOOP #=END ^=LOOP #=LOOP ^=END ?=A",
+        0,
+        b"1Z",
+    );
+    expect("#=32767 ^=32767 #=0 ^=0 ?=7", 0, b"7Z");
     expect(
         "==SAME_ONE,1 ==SAME_TWO,1 A=SAME_ONE+SAME_TWO ?=A",
         0,
@@ -184,10 +192,27 @@ fn malformed_source_never_starts_runtime() {
         "==REF,OTHER",
         "==C0,0 ==C1,1 ==C2,2 ==C3,3 ==C4,4 ==C5,5 ==C6,6 ==C7,7 ==C8,8 ==C9,9 ==C10,10 ==C11,11 ==C12,12 ==C13,13 ==C14,14 ==C15,15 ==C16,16",
         "A=UNKNOWN",
+        "^=",
+        "#=",
+        "^=12x",
+        "#=UNKNOWN",
+        "==NEG,-1 ^=NEG",
+        "^=-1",
+        "#=32768",
+        "^=32768",
+        "^=12 ^=12",
+        "#=12",
     ] {
         expect(
             source,
-            if source.contains("3276") || source.contains("32768") || source == "==REF,OTHER" {
+            if source == "^=12 ^=12" || source == "#=12" {
+                4
+            } else if source.contains("3276")
+                || source.contains("32768")
+                || source == "==REF,OTHER"
+                || source == "==NEG,-1 ^=NEG"
+                || source == "^=-1"
+            {
                 3
             } else {
                 2
@@ -195,6 +220,17 @@ fn malformed_source_never_starts_runtime() {
             b"",
         );
     }
+    let mut too_many_labels = String::new();
+    for label in 0..33 {
+        too_many_labels.push_str(&format!("^={label} "));
+    }
+    expect(&too_many_labels, 4, b"");
+
+    let mut too_many_fixups = String::new();
+    for label in 0..33 {
+        too_many_fixups.push_str(&format!("#={label} "));
+    }
+    expect(&too_many_fixups, 4, b"");
     let source = "A=1 ".repeat(300);
     expect(&source, 4, b"");
     let source = format!("{}A=~ A=~", "A=1 ".repeat(170));
