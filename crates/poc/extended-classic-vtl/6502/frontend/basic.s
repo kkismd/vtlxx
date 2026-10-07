@@ -292,7 +292,7 @@ statement:
     jne @conditional_done
     lda cc_status
     jne backend_error
-    jsr statement_end_if_not_block
+    jsr statement_end
     lda fe_compile_status
     jne @conditional_done
     jsr cc_jz_placeholder
@@ -625,16 +625,26 @@ statement_end:
 @ok:
     rts
 
-statement_end_if_not_block:
+; Check the byte after a consumed delimiter without consuming a separator.
+; Frame end is a valid boundary; opener callers reject it separately.
+require_form_boundary:
+    jsr peek
     lda look_state
     cmp #3
     jeq source_error
     cmp #2
     beq @ok
     lda look_byte
-    cmp #'['
+    cmp #' '
     beq @ok
-    jmp statement_end
+    cmp #9
+    beq @ok
+    cmp #10
+    beq @ok
+    cmp #13
+    beq @ok
+    cmp #';'
+    jne syntax_error
 @ok:
     rts
 
@@ -654,6 +664,12 @@ required_block:
     jcs syntax_error
     inc structured_depth
     jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @block_done
+    lda look_state
+    cmp #2
+    jeq syntax_error
 @block_next:
     jsr skip_separators
     lda look_state
@@ -672,6 +688,9 @@ required_block:
     jmp @block_next
 @block_close:
     jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @block_done
     dec structured_depth
     rts
 @block_done:
@@ -695,8 +714,6 @@ operand:
     cmp #','
     beq @done
     cmp #')'
-    beq @done
-    cmp #'['
     beq @done
     cmp #' '
     beq @done
