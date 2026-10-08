@@ -16,7 +16,7 @@
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
 .import rt_print_number, rt_print_char
-.importzp fe_status, cc_status, cc_arg
+.importzp fe_status, cc_status, cc_arg, cc_work_depth
 
 .segment "ZEROPAGE"
 fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
@@ -40,6 +40,11 @@ chunk_index:       .res 1
 chunk_target:      .res 2
 definition_identity: .res 1
 call_target:       .res 2
+sourceproc_body:   .res 1
+invocation_depth:  .res 1
+invocation_slot:   .res 1
+invocation_state:  .res 1       ; 0 consumed, 1 pending
+invocation_work:   .res 1
 constant_count:    .res 1
 constant_length:   .res 1
 constant_slot:     .res 1
@@ -57,6 +62,8 @@ constant_name: .res 16
 constant_table: .res 16*19 ; 16-byte NUL-terminated name + signed i16
 while_loop_targets: .res 16*2
 while_exit_patches: .res 16*2
+invocation_states: .res 16
+invocation_work_depths: .res 16
 top_level_chunk_targets: .res 53*2
 
 .segment "CODE"
@@ -71,6 +78,8 @@ fe_compile_run:
     sta while_depth
     sta chunk_count
     sta constant_count
+    sta sourceproc_body
+    sta invocation_depth
     jsr fe_init
     jcs source_error
     jsr cc_init
@@ -281,6 +290,10 @@ skip_separators:
     rts
 
 statement:
+    lda sourceproc_body
+    beq @ordinary_statement
+    jmp sourceproc_body_statement
+@ordinary_statement:
     lda look_byte
     cmp #'='
     jeq @definition
@@ -291,6 +304,18 @@ statement:
     lda look_state
     cmp #1
     jne syntax_error
+    lda look_byte
+    ; Lowercase identity followed by ':' selects SourceProcedure. `=` remains
+    ; the independent Write role, regardless of either binding's presence.
+    lda target_index
+    cmp #'a'
+    jcc @assignment_delimiter
+    cmp #'z'+1
+    jcs @assignment_delimiter
+    lda look_byte
+    cmp #':'
+    jeq @source_call_start
+@assignment_delimiter:
     lda look_byte
     cmp #'='
     jne syntax_error
@@ -632,7 +657,7 @@ statement:
 ; Write target only after required-block compilation and owner completion.
 @write_definition:
     lda structured_depth
-    bne @write_definition_syntax
+    jne @write_definition_syntax
     jsr peek
     lda look_state
     cmp #1
@@ -644,27 +669,34 @@ statement:
     jcs @write_definition_syntax
     sta definition_identity
     jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @write_definition_syntax
+    lda look_byte
+    cmp #':'
+    jeq @sourceproc_definition
     jsr require_form_boundary
     lda fe_compile_status
-    bne @write_definition_done
+    jne @write_definition_done
     lda #0
     ldx definition_identity
     jsr cc_is_bound
     lda cc_status
     jne @write_definition_backend
-    bcs @write_definition_syntax
+    jcs @write_definition_syntax
 
     ; Preserve source order by finishing the prior chunk before the named
     ; owner, then resume with a fresh chunk after publication.
     jsr fe_finish_chunk
     lda fe_compile_status
-    bne @write_definition_done
+    jne @write_definition_done
     jsr cc_begin_owner
     lda cc_status
     jne @write_definition_backend
     jsr required_block
     lda fe_compile_status
-    bne @write_definition_done
+    jne @write_definition_done
     jsr cc_complete_owner
     sta cc_arg
     stx cc_arg+1
@@ -677,12 +709,55 @@ statement:
     jne @write_definition_backend
     jsr fe_start_chunk
     rts
+@sourceproc_definition:
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @write_definition_done
+    lda #1
+    ldx definition_identity
+    jsr cc_is_bound
+    lda cc_status
+    jne @write_definition_backend
+    bcs @write_definition_syntax
+    jsr fe_finish_chunk
+    lda fe_compile_status
+    bne @write_definition_done
+    jsr cc_begin_owner
+    lda cc_status
+    jne @write_definition_backend
+    lda #1
+    sta sourceproc_body
+    jsr required_block
+    lda #0
+    sta sourceproc_body
+    lda fe_compile_status
+    bne @write_definition_done
+    jsr cc_complete_owner
+    sta cc_arg
+    stx cc_arg+1
+    lda cc_status
+    jne @write_definition_backend
+    lda #1
+    ldx definition_identity
+    jsr cc_publish
+    lda cc_status
+    jne @write_definition_backend
+    jsr fe_start_chunk
+    rts
 @write_definition_syntax:
     jmp syntax_error
 @write_definition_backend:
     jmp backend_error
 @write_definition_done:
     rts
+
+; The colon is already visible in lookahead. Ordinary source calls run the
+; completed target now; calls inside a definition body emit a direct native
+; call and share the surrounding dynamic invocation frame.
+@source_call_start:
+    jsr take
+    jmp source_procedure_invoke
 
 ; Numeric label operands reuse the compile-run constant table, then delegate
 ; all owner-local definition/fixup behavior to the backend.
@@ -940,6 +1015,150 @@ constant_address:
     jmp @advance
 @address_ready:
     rts
+
+source_procedure_invoke:
+    lda #1
+    ldx target_index
+    jsr cc_resolve
+    sta call_target
+    stx call_target+1
+    lda cc_status
+    jne backend_error
+    lda sourceproc_body
+    beq @dynamic_call
+    lda call_target
+    ldx call_target+1
+    jmp cc_call
+@dynamic_call:
+    lda invocation_depth
+    cmp #16
+    jcs syntax_error
+    lda structured_depth
+    cmp #16
+    jcs syntax_error
+    lda invocation_depth
+    sta invocation_slot
+    lda cc_work_depth
+    sta invocation_work
+    lda #1
+    sta invocation_state
+    jsr skip_separators
+    lda fe_compile_status
+    beq :+
+    rts
+:
+    jsr peek
+    lda look_state
+    cmp #1
+    bne @frame_ready
+    lda look_byte
+    cmp #'('
+    bne @frame_ready
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #')'
+    jne syntax_error
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    beq :+
+    rts
+:
+    lda #0
+    sta invocation_state
+@frame_ready:
+    ldx invocation_slot
+    lda invocation_state
+    sta invocation_states,x
+    lda invocation_work
+    sta invocation_work_depths,x
+    inc invocation_depth
+    inc structured_depth
+    ; NMOS 6502 has no indirect JSR; synthesize a hardware-stack return.
+    lda #>(@callee_return-1)
+    pha
+    lda #<(@callee_return-1)
+    pha
+    jmp (call_target)
+@callee_return:
+    lda cc_status
+    jne backend_error
+    ; A nested invocation may have used the scratch slot; recover this frame
+    ; from the still-live invocation depth after the nested call has returned.
+    lda invocation_depth
+    jeq backend_error
+    sec
+    sbc #1
+    sta invocation_slot
+    ldx invocation_slot
+    lda invocation_states,x
+    bne @unconsumed_rhs
+    lda cc_work_depth
+    cmp invocation_work_depths,x
+    jne backend_error
+    dec structured_depth
+    dec invocation_depth
+    rts
+@unconsumed_rhs:
+    jmp backend_error
+
+sourceproc_body_statement:
+    lda look_byte
+    cmp #'a'
+    jcc @bad
+    cmp #'z'+1
+    jcs @bad
+    sta target_index
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @bad
+    lda look_byte
+    cmp #':'
+    jne @bad
+    jsr take
+    jsr skip_separators
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @bad
+    lda look_byte
+    cmp #'('
+    jne @bad
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @bad
+    lda look_byte
+    cmp #')'
+    jne @bad
+    jsr take
+    jsr peek
+    jsr statement_end
+    lda fe_compile_status
+    beq :+
+    rts
+:
+    lda #1
+    ldx target_index
+    jsr cc_resolve
+    sta call_target
+    stx call_target+1
+    lda cc_status
+    jne backend_error
+    lda call_target
+    ldx call_target+1
+    jmp cc_call
+@bad:
+    jmp syntax_error
 
 ; Whitespace, newline, comment, or frame end terminates one statement.
 statement_end:
