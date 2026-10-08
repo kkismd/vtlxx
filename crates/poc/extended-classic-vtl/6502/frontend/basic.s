@@ -10,12 +10,13 @@
 .import cc_mark, cc_jz_placeholder, cc_jump_placeholder, cc_patch_here
 .import cc_jump_to
 .import cc_work_push, cc_work_pop
+.import cc_is_bound, cc_publish, cc_resolve
 .import cc_push_const, cc_call, cc_load_reg, cc_store_reg
 .import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
 .import rt_print_number, rt_print_char
-.importzp fe_status, cc_status
+.importzp fe_status, cc_status, cc_arg
 
 .segment "ZEROPAGE"
 fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
@@ -37,6 +38,8 @@ entry:             .res 2
 chunk_count:       .res 1
 chunk_index:       .res 1
 chunk_target:      .res 2
+definition_identity: .res 1
+call_target:       .res 2
 constant_count:    .res 1
 constant_length:   .res 1
 constant_slot:     .res 1
@@ -301,12 +304,18 @@ statement:
     jeq @conditional
     cmp #'*'
     jeq @while
+    cmp #'&'
+    jeq @write_definition
     lda target_index
     cmp #'~'
     beq @target_ok
     cmp #'A'
     bcc @special
     cmp #'Z'+1
+    bcc @target_ok
+    cmp #'a'
+    bcc @special
+    cmp #'z'+1
     bcc @target_ok
 @special:
     cmp #'@'
@@ -316,6 +325,66 @@ statement:
     cmp #'$'
     jne syntax_error
 @target_ok:
+    lda target_index
+    cmp #'a'
+    jcc @compile_operand
+    cmp #'z'+1
+    jcs @compile_operand
+    ; Resolve at compile time. Runtime code calls only the resolved target.
+    lda #0
+    ldx target_index
+    jsr cc_resolve
+    sta call_target
+    stx call_target+1
+    lda cc_status
+    jne backend_error
+    ; `p=()` has no operands; keep its parentheses out of value().
+    jsr peek
+    lda look_state
+    cmp #1
+    bne @compile_operand
+    lda look_byte
+    cmp #'('
+    bne @compile_operand
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #')'
+    bne @call_group
+    jsr take
+    jsr peek
+    jsr statement_end
+    lda fe_compile_status
+    jne @done
+    lda call_target
+    ldx call_target+1
+    jmp cc_call
+@call_group:
+    ; The opening parenthesis was consumed to distinguish `()` from a normal
+    ; grouped operand. Compile the group contents, then continue the ordinary
+    ; operator/comma path with its result already on the value stack.
+    jsr enter_nesting
+    lda fe_compile_status
+    jne @done
+    lda #0
+    jsr operand
+    lda fe_compile_status
+    jne @done
+    jsr close_group
+    dec nesting
+    lda fe_compile_status
+    jne @done
+    lda #1
+    jsr operand
+    lda fe_compile_status
+    jne @done
+    jmp @operands_ready
+@compile_operand:
     jsr peek
     lda look_state
     cmp #1
@@ -332,6 +401,7 @@ statement:
     jsr operand
     lda fe_compile_status
     jne @done
+@operands_ready:
 @comma:
     jsr peek
     lda look_state
@@ -353,6 +423,11 @@ statement:
     lda target_index
     cmp #'~'
     jeq @done
+    cmp #'a'
+    bcc @ordinary_store
+    cmp #'z'+1
+    bcc @write_call
+@ordinary_store:
     cmp #'A'
     bcc @write_special
     cmp #'Z'+1
@@ -376,6 +451,10 @@ statement:
 @char:
     lda #<rt_print_char
     ldx #>rt_print_char
+    jmp cc_call
+@write_call:
+    lda call_target
+    ldx call_target+1
     jmp cc_call
 @conditional:
     lda structured_depth
@@ -549,15 +628,71 @@ statement:
 @done:
     rts
 
+; Top-level `&=p [ ... ]` creates a fresh owner and publishes its completed
+; Write target only after required-block compilation and owner completion.
+@write_definition:
+    lda structured_depth
+    bne @write_definition_syntax
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @write_definition_syntax
+    lda look_byte
+    cmp #'a'
+    jcc @write_definition_syntax
+    cmp #'z'+1
+    jcs @write_definition_syntax
+    sta definition_identity
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @write_definition_done
+    lda #0
+    ldx definition_identity
+    jsr cc_is_bound
+    lda cc_status
+    jne @write_definition_backend
+    bcs @write_definition_syntax
+
+    ; Preserve source order by finishing the prior chunk before the named
+    ; owner, then resume with a fresh chunk after publication.
+    jsr fe_finish_chunk
+    lda fe_compile_status
+    bne @write_definition_done
+    jsr cc_begin_owner
+    lda cc_status
+    jne @write_definition_backend
+    jsr required_block
+    lda fe_compile_status
+    bne @write_definition_done
+    jsr cc_complete_owner
+    sta cc_arg
+    stx cc_arg+1
+    lda cc_status
+    jne @write_definition_backend
+    lda #0
+    ldx definition_identity
+    jsr cc_publish
+    lda cc_status
+    jne @write_definition_backend
+    jsr fe_start_chunk
+    rts
+@write_definition_syntax:
+    jmp syntax_error
+@write_definition_backend:
+    jmp backend_error
+@write_definition_done:
+    rts
+
 ; Numeric label operands reuse the compile-run constant table, then delegate
 ; all owner-local definition/fixup behavior to the backend.
 @label:
     jsr resolve_label_operand
     lda fe_compile_status
-    bne @done
+    jne @done
     jsr statement_end
     lda fe_compile_status
-    bne @done
+    jne @done
     lda target_index
     cmp #'^'
     bne @jump

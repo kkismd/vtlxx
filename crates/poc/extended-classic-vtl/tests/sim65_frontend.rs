@@ -126,6 +126,22 @@ fn basic_source_compiles_and_executes() {
     expect("A=40 ?=A", 0, b"40Z");
     expect("A=40\nA=A+2\n?=A", 0, b"42Z");
     expect("?=1 ?=2 A=3 ?=A ?=4", 0, b"1234Z");
+    expect("&=p [ ] p=()", 0, b"Z");
+    expect("&=p [ ?=~ ] p=42", 0, b"42Z");
+    expect("&=p [ ?=~ ] p=(40+2)", 0, b"42Z");
+    expect("&=p [ ?=~ ?=~ ] p=10,42", 0, b"4210Z");
+    expect("&=p [ ] &=q [ ] p=() q=()", 0, b"Z");
+    expect("&=p [ ?=1 ] &=q [ ?=2 ] q=() p=()", 0, b"21Z");
+    expect("&=p [ ?=1 ] &=q [ p=() ] q=()", 0, b"1Z");
+    expect("==VALUE,42 &=p [ ?=VALUE ] p=()", 0, b"42Z");
+    expect("~=42 &=p [ ] p=~ ?=~", 0, b"42Z");
+    expect("A=0 &=p [ A=A+1 ] p=() ?=A", 0, b"1Z");
+    expect("&=p [ %=1 [ ?=7 ] ] p=()", 0, b"7Z");
+    expect("&=p [ A=0 *=() [ ~=A<2 ] [ A=A+1 ] ?=A ] p=()", 0, b"2Z");
+    expect("&=p [ #=3 ?=1 ^=3 ?=9 ] p=()", 0, b"9Z");
+    expect("&=p [ ^=3 ?=9 ] ^=3 ?=8 p=()", 0, b"89Z");
+    expect("?=1 &=p [ ?=8 ] ?=2 p=() ?=3", 0, b"1283Z");
+    expect("&=p [ ?=1 ] ?=2 &=q [ ?=3 ] ?=4 q=() p=()", 0, b"2431Z");
     expect("%=1 [ ] ?=7", 0, b"7Z");
     expect("%=1 [ ?=1 ]", 0, b"1Z");
     expect("%=0 [ ?=1 ]", 0, b"Z");
@@ -236,6 +252,24 @@ fn malformed_source_never_starts_runtime() {
         "==REF,OTHER",
         "==C0,0 ==C1,1 ==C2,2 ==C3,3 ==C4,4 ==C5,5 ==C6,6 ==C7,7 ==C8,8 ==C9,9 ==C10,10 ==C11,11 ==C12,12 ==C13,13 ==C14,14 ==C15,15 ==C16,16",
         "A=UNKNOWN",
+        "&=",
+        "&=P [ ]",
+        "&=pq [ ]",
+        "&=p[ ]",
+        "&=p",
+        "&=p [",
+        "&=p []",
+        "&=p [ ?=1",
+        "&=p [ &=q [ ] ]",
+        "&=p [ %=1 [ &=q [ ] ] ]",
+        "&=p [ ^=1 #=2 ]",
+        "#=2 &=p [ ] ^=2",
+        "?=7 &=p [ A= ]",
+        "p=() &=p [ ]",
+        "&=p [ ] &=p [ ]",
+        "&=p [ p=() ]",
+        "&=p [ q=() ] &=q [ ]",
+        "p=1",
         "^=",
         "#=",
         "^=12x",
@@ -281,6 +315,14 @@ fn malformed_source_never_starts_runtime() {
                 || source == "^=-1"
             {
                 3
+            } else if source == "&=p [ ^=1 #=2 ]"
+                || source == "p=() &=p [ ]"
+                || source == "&=p [ p=() ]"
+                || source == "&=p [ q=() ] &=q [ ]"
+                || source == "#=2 &=p [ ] ^=2"
+                || source == "p=1"
+            {
+                4
             } else {
                 2
             },
