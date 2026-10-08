@@ -40,7 +40,6 @@ chunk_index:       .res 1
 chunk_target:      .res 2
 definition_identity: .res 1
 call_target:       .res 2
-sourceproc_body:   .res 1
 invocation_depth:  .res 1
 invocation_slot:   .res 1
 invocation_state:  .res 1       ; 0 consumed, 1 pending
@@ -78,7 +77,6 @@ fe_compile_run:
     sta while_depth
     sta chunk_count
     sta constant_count
-    sta sourceproc_body
     sta invocation_depth
     jsr fe_init
     jcs source_error
@@ -290,10 +288,6 @@ skip_separators:
     rts
 
 statement:
-    lda sourceproc_body
-    beq @ordinary_statement
-    jmp sourceproc_body_statement
-@ordinary_statement:
     lda look_byte
     cmp #'='
     jeq @definition
@@ -726,11 +720,7 @@ statement:
     jsr cc_begin_owner
     lda cc_status
     jne @write_definition_backend
-    lda #1
-    sta sourceproc_body
-    jsr required_block
-    lda #0
-    sta sourceproc_body
+    jsr compile_sourceproc_body
     lda fe_compile_status
     bne @write_definition_done
     jsr cc_complete_owner
@@ -1024,12 +1014,6 @@ source_procedure_invoke:
     stx call_target+1
     lda cc_status
     jne backend_error
-    lda sourceproc_body
-    beq @dynamic_call
-    lda call_target
-    ldx call_target+1
-    jmp cc_call
-@dynamic_call:
     lda invocation_depth
     cmp #16
     jcs syntax_error
@@ -1108,45 +1092,44 @@ source_procedure_invoke:
 @unconsumed_rhs:
     jmp backend_error
 
-sourceproc_body_statement:
+; Parse a SourceProcedure's dedicated source-word body. Unlike required_block,
+; this never enters the ordinary statement or invocation parser.
+compile_sourceproc_body:
+    jsr skip_separators
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
     lda look_byte
+    cmp #'['
+    jne syntax_error
+    lda structured_depth
+    cmp #16
+    jcs syntax_error
+    inc structured_depth
+    jsr take
+@next_word:
+    jsr skip_separators
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #2
+    jeq syntax_error
+    lda look_byte
+    cmp #']'
+    beq @close
     cmp #'a'
-    jcc @bad
+    jcc syntax_error
     cmp #'z'+1
-    jcs @bad
+    jcs syntax_error
     sta target_index
     jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @bad
-    lda look_byte
-    cmp #':'
-    jne @bad
-    jsr take
-    jsr skip_separators
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @bad
-    lda look_byte
-    cmp #'('
-    jne @bad
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @bad
-    lda look_byte
-    cmp #')'
-    jne @bad
-    jsr take
-    jsr peek
-    jsr statement_end
+    jsr source_word_boundary
     lda fe_compile_status
-    beq :+
-    rts
-:
+    bne @failed
+    ; Bindings are resolved at this source site; only the target address is
+    ; emitted into this completed SourceProcedure owner.
     lda #1
     ldx target_index
     jsr cc_resolve
@@ -1156,9 +1139,46 @@ sourceproc_body_statement:
     jne backend_error
     lda call_target
     ldx call_target+1
-    jmp cc_call
-@bad:
-    jmp syntax_error
+    jsr cc_call
+    lda cc_status
+    jne backend_error
+    jmp @next_word
+@close:
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @failed
+    dec structured_depth
+    clc
+    rts
+@failed:
+    sec
+    rts
+
+; A bare source word ends at an ordinary source separator, comment, frame end,
+; or its enclosing block closer. Adjacent identities are a syntax error.
+source_word_boundary:
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #2
+    beq @ok
+    lda look_byte
+    cmp #']'
+    beq @ok
+    cmp #' '
+    beq @ok
+    cmp #9
+    beq @ok
+    cmp #10
+    beq @ok
+    cmp #13
+    beq @ok
+    cmp #';'
+    jne syntax_error
+@ok:
+    rts
 
 ; Whitespace, newline, comment, or frame end terminates one statement.
 statement_end:

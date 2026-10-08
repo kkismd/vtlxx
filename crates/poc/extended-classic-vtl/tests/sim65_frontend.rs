@@ -130,7 +130,7 @@ fn basic_source_compiles_and_executes() {
     expect("&=p: [ ]", 0, b"Z");
     expect("&=p: [ ] p:()", 0, b"Z");
     expect("&=p [ ] &=p: [ ] p=() p:()", 0, b"Z");
-    expect("&=p: [ ] &=q: [ p:() ] q:()", 0, b"Z");
+    expect("&=p: [ ] &=q: [ p ] q:()", 0, b"Z");
     expect("&=p: [ ] %=1 [ p:() ]", 0, b"Z");
     let shared_depth_16 = format!("&=p: [ ] {}p:(){}", "%=1 [ ".repeat(15), " ]".repeat(15));
     expect(&shared_depth_16, 0, b"Z");
@@ -270,6 +270,8 @@ fn malformed_source_never_starts_runtime() {
         "&=p [ ?=1",
         "&=p [ &=q [ ] ]",
         "&=p: [ ] p:() &=p: [ ]",
+        "&=p: [ ] &=q: [ p:() ] q:()",
+        "&=q: [ p ]",
         "p:() &=p: [ ]",
         "&=p:[]",
         "&=p:",
@@ -348,6 +350,7 @@ fn malformed_source_never_starts_runtime() {
                 || source == "p:1"
                 || source == "&=p: [ ] p:1"
                 || source == "?=7 &=p: [ ] p:1"
+                || source == "&=q: [ p ]"
             {
                 4
             } else {
