@@ -37,7 +37,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_runtime -- --ignored
 
 `compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 2048 B の code arena、binding、owner、source work stack を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。compiler の失敗は `cc_status` に保持し、後続の compile-run driver が runtime を開始せず HALT する。
 
-target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_publish` は A=role（0 Write、1 SourceProcedure）、X=`a..z`、`cc_arg`=completed target を取る。`cc_resolve` は同じ role と identity から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
+target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_is_bound`、`cc_publish`、`cc_resolve` は A=role（0 Write、1 SourceProcedure）、X=`a..z` を取る。`cc_is_bound` は bound なら carry set、unbound なら carry clear を返し、有効な問い合わせでは `cc_status` と binding table を変更しない。`cc_publish` は `cc_arg`=completed target を取り、`cc_resolve` は同じ role と identity から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
 
 | 操作 | 役割 |
 | --- | --- |

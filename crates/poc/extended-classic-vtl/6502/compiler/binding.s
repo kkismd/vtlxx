@@ -1,7 +1,7 @@
 ; Direct Write / SourceProcedure bindings for lowercase source identities.
 .setcpu "6502"
 
-.export cc_binding_reset, cc_publish, cc_resolve
+.export cc_binding_reset, cc_is_bound, cc_publish, cc_resolve
 .import cc_is_completed
 .importzp cc_status, cc_arg
 
@@ -20,6 +20,22 @@ cc_binding_reset:
     sta binding_valid,x
     dex
     bpl @clear
+    rts
+
+; A = role (0 Write, 1 SourceProcedure), X = ASCII identity a..z.
+; Returns carry set when bound, clear when unbound. A valid query does not
+; change cc_status or the binding table.
+cc_is_bound:
+    jsr binding_select
+    lda cc_status
+    bne @unbound
+    ldx binding_slot
+    lda binding_valid,x
+    beq @unbound
+    sec
+    rts
+@unbound:
+    clc
     rts
 
 ; A = role (0 Write, 1 SourceProcedure), X = ASCII identity a..z.

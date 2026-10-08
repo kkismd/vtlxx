@@ -5,7 +5,7 @@
 .import cc_push_const, cc_call, cc_return, cc_jump, cc_jz
 .import cc_load_reg, cc_store_reg
 .import cc_jump_placeholder, cc_jz_placeholder, cc_patch_here, cc_jump_to
-.import cc_begin_owner, cc_complete_owner, cc_publish, cc_resolve
+.import cc_begin_owner, cc_complete_owner, cc_is_bound, cc_publish, cc_resolve
 .import cc_define_label, cc_label_jump
 .import cc_work_push, cc_work_pop, cc_work_swap, cc_work_reset
 .import rt_init, rt_print_number, rt_print_char, rt_push
@@ -645,6 +645,102 @@ _main:
     beq :+
     jmp @stage
 :
+.elseif TEST_CASE = 20
+    ; Availability queries are non-destructive and isolated by role/identity.
+    lda #0
+    ldx #'a'
+    jsr cc_is_bound
+    bcc :+
+    jmp bad
+:
+    lda cc_status
+    beq :+
+    jmp bad
+:
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    sta address
+    stx address+1
+    sta cc_arg
+    stx cc_arg+1
+    OK
+    lda #0
+    ldx #'a'
+    jsr cc_publish
+    OK
+    lda #0
+    ldx #'a'
+    jsr cc_is_bound
+    bcs :+
+    jmp bad
+:
+    lda #0
+    ldx #'a'
+    jsr cc_is_bound
+    bcs :+
+    jmp bad
+:
+    lda cc_status
+    beq :+
+    jmp bad
+:
+    lda #0
+    ldx #'b'
+    jsr cc_is_bound
+    bcc :+
+    jmp bad
+:
+    lda #1
+    ldx #'a'
+    jsr cc_is_bound
+    bcc :+
+    jmp bad
+:
+    lda cc_status
+    beq :+
+    jmp bad
+:
+    ; The query leaves the published target usable and duplicate publish fails.
+    lda #0
+    ldx #'a'
+    jsr cc_resolve
+    cmp address
+    beq :+
+    jmp bad
+:
+    cpx address+1
+    beq :+
+    jmp bad
+:
+    lda #0
+    ldx #'a'
+    jsr cc_publish
+    ERROR
+    jsr cc_init
+    lda #0
+    ldx #'b'
+    jsr cc_is_bound
+    bcc :+
+    jmp bad
+:
+    lda cc_status
+    beq :+
+    jmp bad
+:
+    lda #2
+    ldx #'a'
+    jsr cc_is_bound
+    ERROR
+    jsr cc_init
+    lda #0
+    ldx #'A'
+    jsr cc_is_bound
+    ERROR
+    jsr cc_init
+    lda #0
+    ldx #'a'
+    jsr cc_resolve
+    ERROR
 .else
     .error "unknown backend probe case"
 .endif
