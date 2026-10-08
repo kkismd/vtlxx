@@ -18,7 +18,7 @@
 .importzp fe_status, cc_status
 
 .segment "ZEROPAGE"
-fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 backend
+fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
 look_state:        .res 1       ; 0 empty, 1 byte, 2 frame end, 3 transport error
 look_byte:         .res 1
 target_index:      .res 1
@@ -132,9 +132,11 @@ fe_finish_chunk:
     lda chunk_count
     cmp #53
     bcc @capacity_available
-    lda #10                    ; top-level chunk table full
-    sta cc_status
-    jmp backend_error
+    ; Chunk targets are frontend-owned compile state, not backend status.
+    lda #4
+    sta fe_compile_status
+    sec
+    rts
 @capacity_available:
     jsr cc_complete_owner
     sta chunk_target
