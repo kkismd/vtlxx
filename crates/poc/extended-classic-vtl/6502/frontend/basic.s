@@ -18,7 +18,7 @@
 .importzp fe_status, cc_status
 
 .segment "ZEROPAGE"
-fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 backend
+fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
 look_state:        .res 1       ; 0 empty, 1 byte, 2 frame end, 3 transport error
 look_byte:         .res 1
 target_index:      .res 1
@@ -34,6 +34,9 @@ literal:           .res 2
 digit:             .res 1
 operator_index:    .res 1
 entry:             .res 2
+chunk_count:       .res 1
+chunk_index:       .res 1
+chunk_target:      .res 2
 constant_count:    .res 1
 constant_length:   .res 1
 constant_slot:     .res 1
@@ -51,6 +54,7 @@ constant_name: .res 16
 constant_table: .res 16*19 ; 16-byte NUL-terminated name + signed i16
 while_loop_targets: .res 16*2
 while_exit_patches: .res 16*2
+top_level_chunk_targets: .res 53*2
 
 .segment "CODE"
 ; Carry clear on success; A/X is the completed entry. Compile errors never
@@ -62,11 +66,14 @@ fe_compile_run:
     sta nesting
     sta structured_depth
     sta while_depth
+    sta chunk_count
     sta constant_count
     jsr fe_init
     jcs source_error
     jsr cc_init
-    jsr cc_begin_owner
+    jsr fe_start_chunk
+    lda fe_compile_status
+    bne @failed
 @next_statement:
     jsr skip_separators
     lda look_state
@@ -81,16 +88,16 @@ fe_compile_run:
     jne backend_error
     jmp @next_statement
 @complete:
-    jsr cc_complete_owner
-    pha
-    lda cc_status
-    beq @entry_ready
-    pla
-    jmp backend_error
-@entry_ready:
-    pla
-    sta entry
-    stx entry+1
+    ; Close and retain the final source chunk, then make the final driver the
+    ; only runtime entry. No chunk executes until the whole source compiles.
+    jsr fe_finish_chunk
+    lda fe_compile_status
+    bne @failed
+    jsr fe_build_driver
+    lda fe_compile_status
+    bne @failed
+    lda entry
+    ldx entry+1
     jsr rt_init
     ; JSR through a completed entry, preserving a normal return address.
     lda #>(@returned-1)
@@ -105,6 +112,91 @@ fe_compile_run:
     rts
 @failed:
     sec
+    rts
+
+; Start one top-level runtime chunk. #294 uses the same operation after a
+; named definition owner has completed and published.
+fe_start_chunk:
+    jsr cc_begin_owner
+    lda cc_status
+    beq @started
+    jmp backend_error
+@started:
+    clc
+    rts
+
+; Complete the active top-level chunk and retain only its completed u16 entry.
+; The fixed table supports 52 possible named owners plus the surrounding
+; source chunks before, between, and after their definitions.
+fe_finish_chunk:
+    lda chunk_count
+    cmp #53
+    bcc @capacity_available
+    ; Chunk targets are frontend-owned compile state, not backend status.
+    lda #4
+    sta fe_compile_status
+    sec
+    rts
+@capacity_available:
+    jsr cc_complete_owner
+    sta chunk_target
+    stx chunk_target+1
+    lda cc_status
+    beq @completed
+    jmp backend_error
+@completed:
+    lda chunk_count
+    asl a
+    tay
+    lda chunk_target
+    sta top_level_chunk_targets,y
+    iny
+    lda chunk_target+1
+    sta top_level_chunk_targets,y
+    inc chunk_count
+    clc
+    rts
+
+; Build a completed executable that calls every top-level chunk in source order.
+; Named definition owners are deliberately absent from this runtime sequence.
+fe_build_driver:
+    jsr cc_begin_owner
+    lda cc_status
+    beq @driver_started
+    jmp backend_error
+@driver_started:
+    lda #0
+    sta chunk_index
+@next_chunk:
+    lda chunk_index
+    cmp chunk_count
+    beq @complete_driver
+    asl a
+    tay
+    lda top_level_chunk_targets,y
+    sta chunk_target
+    iny
+    lda top_level_chunk_targets,y
+    tax
+    lda chunk_target
+    jsr cc_call
+    lda cc_status
+    beq @chunk_called
+    jmp backend_error
+@chunk_called:
+    inc chunk_index
+    jmp @next_chunk
+@complete_driver:
+    jsr cc_complete_owner
+    sta entry
+    stx entry+1
+    lda cc_status
+    beq @driver_completed
+    jmp backend_error
+@driver_completed:
+    lda entry
+    ldx entry+1
+    clc
     rts
 
 source_error:

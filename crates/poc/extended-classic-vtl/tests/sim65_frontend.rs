@@ -125,6 +125,7 @@ fn basic_source_compiles_and_executes() {
     expect("A=40", 0, b"Z");
     expect("A=40 ?=A", 0, b"40Z");
     expect("A=40\nA=A+2\n?=A", 0, b"42Z");
+    expect("?=1 ?=2 A=3 ?=A ?=4", 0, b"1234Z");
     expect("%=1 [ ] ?=7", 0, b"7Z");
     expect("%=1 [ ?=1 ]", 0, b"1Z");
     expect("%=0 [ ?=1 ]", 0, b"Z");
@@ -220,6 +221,7 @@ fn malformed_source_never_starts_runtime() {
         "A=Q(1)",
         "A=@(1",
         "A=1 garbage",
+        "?=7 A=",
         "?=1 ?=",
         "A=1+z",
         "A=BEFORE\n==BEFORE,1",
@@ -300,8 +302,11 @@ fn malformed_source_never_starts_runtime() {
         too_many_fixups.push_str(&format!("#={label} "));
     }
     expect(&too_many_fixups, 4, b"");
-    let source = "A=1 ".repeat(300);
+    let source = format!("?=7 {}", "A=1 ".repeat(300));
     expect(&source, 4, b"");
+    let mut driver_arena_full = "A=1 ".repeat(169);
+    driver_arena_full.push_str("?=7 #=1 ^=1 #=2 ^=2");
+    expect(&driver_arena_full, 4, b"");
     let source = format!("{}A=~ A=~", "A=1 ".repeat(170));
     expect(&source, 4, b"");
     let truncated = build_and_run_input(&[4, 0, b'?', b'=', b'1']);
