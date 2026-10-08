@@ -132,6 +132,8 @@ fn basic_source_compiles_and_executes() {
     expect("&=p [ ?=~ ?=~ ] p=10,42", 0, b"4210Z");
     expect("&=p [ ] &=q [ ] p=() q=()", 0, b"Z");
     expect("&=p [ ?=1 ] &=q [ ?=2 ] q=() p=()", 0, b"21Z");
+    expect("&=p [ ?=1 ] &=q [ p=() ] q=()", 0, b"1Z");
+    expect("==VALUE,42 &=p [ ?=VALUE ] p=()", 0, b"42Z");
     expect("~=42 &=p [ ] p=~ ?=~", 0, b"42Z");
     expect("A=0 &=p [ A=A+1 ] p=() ?=A", 0, b"1Z");
     expect("&=p [ %=1 [ ?=7 ] ] p=()", 0, b"7Z");
