@@ -1109,6 +1109,9 @@ compile_sourceproc_body:
     jcs syntax_error
     inc structured_depth
     jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @failed
 @next_word:
     jsr skip_separators
     lda look_state
@@ -1165,8 +1168,6 @@ source_word_boundary:
     cmp #2
     beq @ok
     lda look_byte
-    cmp #']'
-    beq @ok
     cmp #' '
     beq @ok
     cmp #9
