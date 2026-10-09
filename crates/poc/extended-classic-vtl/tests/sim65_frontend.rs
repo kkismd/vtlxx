@@ -127,13 +127,6 @@ fn basic_source_compiles_and_executes() {
     expect("A=40\nA=A+2\n?=A", 0, b"42Z");
     expect("?=1 ?=2 A=3 ?=A ?=4", 0, b"1234Z");
     expect("&=p [ ] p=()", 0, b"Z");
-    expect("&=p: [ ]", 0, b"Z");
-    expect("&=p: [ ] p:()", 0, b"Z");
-    expect("&=p [ ] &=p: [ ] p=() p:()", 0, b"Z");
-    expect("&=p: [ ] &=q: [ p ] q:()", 0, b"Z");
-    expect("&=p: [ ] %=1 [ p:() ]", 0, b"Z");
-    let shared_depth_16 = format!("&=p: [ ] {}p:(){}", "%=1 [ ".repeat(15), " ]".repeat(15));
-    expect(&shared_depth_16, 0, b"Z");
     expect("&=p [ ?=~ ] p=42", 0, b"42Z");
     expect("&=p [ ?=~ ] p=(40+2)", 0, b"42Z");
     expect("&=p [ ?=~ ?=~ ] p=10,42", 0, b"4210Z");
@@ -149,7 +142,6 @@ fn basic_source_compiles_and_executes() {
     expect("&=p [ ^=3 ?=9 ] ^=3 ?=8 p=()", 0, b"89Z");
     expect("?=1 &=p [ ?=8 ] ?=2 p=() ?=3", 0, b"1283Z");
     expect("&=p [ ?=1 ] ?=2 &=q [ ?=3 ] ?=4 q=() p=()", 0, b"2431Z");
-    expect("?=1 &=p: [ ] ?=2 p:() ?=3 &=q: [ ] ?=4 q:()", 0, b"1234Z");
     expect("%=1 [ ] ?=7", 0, b"7Z");
     expect("%=1 [ ?=1 ]", 0, b"1Z");
     expect("%=0 [ ?=1 ]", 0, b"Z");
@@ -269,30 +261,12 @@ fn malformed_source_never_starts_runtime() {
         "&=p []",
         "&=p [ ?=1",
         "&=p [ &=q [ ] ]",
-        "&=p: [ ] p:() &=p: [ ]",
-        "&=p: [ ] &=q: [ p:() ] q:()",
-        "&=q: [ p ]",
-        "&=p: [ ] &=q: [p ] q:()",
-        "&=p: [ ] &=q: [ p] q:()",
-        "&=p: []",
-        "p:() &=p: [ ]",
-        "&=p:[]",
-        "&=p:",
-        "&=P: [ ]",
-        "&=pq: [ ]",
-        "&=p: [ ?=1 ]",
-        "&=p: [ A=1 ]",
-        "&=p: [ @=1,2 ]",
-        "&=p: [ q:1 ]",
-        "&=p: [ &=q: [ ] ]",
-        "&=p: [ ] p:1",
-        "&=p: [ ] p:(1)",
-        "&=p: [ ] p:()x",
+        "?=7 &=p: [ ]",
+        "?=7 p:()",
         "&=p [ %=1 [ &=q [ ] ] ]",
         "&=p [ ^=1 #=2 ]",
         "#=2 &=p [ ] ^=2",
         "?=7 &=p [ A= ]",
-        "?=7 &=p: [ ] p:1",
         "p=() &=p [ ]",
         "&=p [ ] &=p [ ]",
         "&=p [ p=() ]",
@@ -349,11 +323,6 @@ fn malformed_source_never_starts_runtime() {
                 || source == "&=p [ q=() ] &=q [ ]"
                 || source == "#=2 &=p [ ] ^=2"
                 || source == "p=1"
-                || source == "p:() &=p: [ ]"
-                || source == "p:1"
-                || source == "&=p: [ ] p:1"
-                || source == "?=7 &=p: [ ] p:1"
-                || source == "&=q: [ p ]"
             {
                 4
             } else {
@@ -362,8 +331,6 @@ fn malformed_source_never_starts_runtime() {
             b"",
         );
     }
-    let shared_depth_17 = format!("&=p: [ ] {}p:(){}", "%=1 [ ".repeat(16), " ]".repeat(16));
-    expect(&shared_depth_17, 2, b"");
     let nested_17 = format!("{}?=9{}", "%=1 [ ".repeat(17), " ]".repeat(17));
     expect(&nested_17, 2, b"");
     let nested_while_17 = format!("~=0 {}?=9{}", "*=() [ ~=0 ] [ ".repeat(17), " ]".repeat(17));
