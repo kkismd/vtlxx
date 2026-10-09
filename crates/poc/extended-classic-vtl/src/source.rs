@@ -4,6 +4,7 @@ use crate::{
     executable::{Instruction, RuntimeError},
     expression::compile_rhs,
     machine::Machine,
+    template::validate_template_body,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -32,28 +33,44 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
         }
         let (target, rhs) = split_statement(token.text).map_err(SourceError::Compile)?;
         if target == '&' {
-            if rhs.len() != 1 || !rhs.as_bytes()[0].is_ascii_lowercase() {
-                return Err(SourceError::Compile(CompileError::Syntax));
-            }
-            let identity = rhs.as_bytes()[0] as char;
+            let template_identity = parse_template_header(rhs);
+            let write_identity = if rhs.len() == 1 && rhs.as_bytes()[0].is_ascii_lowercase() {
+                Some(rhs.as_bytes()[0] as char)
+            } else {
+                None
+            };
+            let identity = template_identity
+                .or(write_identity)
+                .ok_or(SourceError::Compile(CompileError::Syntax))?;
             flush_top_level(
                 machine,
                 std::mem::replace(&mut builder, CodeBuilder::new()),
                 has_statements,
             )?;
             has_statements = false;
-            if machine.resolve(identity, SourceRole::Write).is_some() {
-                return Err(SourceError::Compile(CompileError::Syntax));
+            if let Some(identity) = template_identity {
+                if !machine.ensure_template_name_available(identity) {
+                    return Err(SourceError::Compile(CompileError::Syntax));
+                }
+                let statements = read_template_body(&mut reader).map_err(SourceError::Compile)?;
+                let completed = validate_template_body(statements).map_err(SourceError::Compile)?;
+                machine
+                    .publish_template(identity, completed)
+                    .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
+            } else {
+                if machine.resolve(identity, SourceRole::Write).is_some() {
+                    return Err(SourceError::Compile(CompileError::Syntax));
+                }
+                let mut definition_builder = CodeBuilder::new();
+                compile_required_block(&mut reader, machine, &constants, &mut definition_builder)
+                    .map_err(SourceError::Compile)?;
+                let completed = definition_builder
+                    .finish()
+                    .map_err(|_| SourceError::Compile(CompileError::Builder))?;
+                machine
+                    .publish_initial(identity, SourceRole::Write, completed)
+                    .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
             }
-            let mut definition_builder = CodeBuilder::new();
-            compile_required_block(&mut reader, machine, &constants, &mut definition_builder)
-                .map_err(SourceError::Compile)?;
-            let completed = definition_builder
-                .finish()
-                .map_err(|_| SourceError::Compile(CompileError::Builder))?;
-            machine
-                .publish_initial(identity, SourceRole::Write, completed)
-                .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
         } else {
             compile_source_statement(token, &mut reader, machine, &constants, &mut builder)
                 .map_err(SourceError::Compile)?;
@@ -61,6 +78,29 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
         }
     }
     flush_top_level(machine, builder, has_statements)
+}
+
+fn parse_template_header(rhs: &str) -> Option<char> {
+    let bytes = rhs.as_bytes();
+    (bytes.len() == 3 && bytes[0].is_ascii_lowercase() && &bytes[1..] == b"{}")
+        .then(|| bytes[0] as char)
+}
+
+fn read_template_body(reader: &mut SourceReader<'_>) -> Result<Vec<String>, CompileError> {
+    if reader.next()?.ok_or(CompileError::Syntax)?.text != "[" {
+        return Err(CompileError::Syntax);
+    }
+    let mut statements = Vec::new();
+    loop {
+        let token = reader.next()?.ok_or(CompileError::Syntax)?;
+        if token.text == "]" {
+            return Ok(statements);
+        }
+        if token.text == "[" {
+            return Err(CompileError::Syntax);
+        }
+        statements.push(token.text.to_owned());
+    }
 }
 
 #[derive(Default)]
@@ -433,6 +473,108 @@ mod tests {
 
         machine.execute_source("==MAX,2 B=3 A=MAXaB").unwrap();
         assert_eq!(machine.register(0), Some(5));
+    }
+
+    #[test]
+    fn template_is_validated_published_and_kept_across_sources() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ {}={}+1 ]").unwrap();
+        assert_eq!(
+            machine.template('a').unwrap().statements(),
+            &["{}={}+1".to_owned()]
+        );
+        machine.execute_source("&=b{} [ A=MAX{} {}=A+ ]").unwrap();
+        assert_eq!(
+            machine.template('b').unwrap().statements(),
+            &["A=MAX{}".to_owned(), "{}=A+".to_owned()]
+        );
+        assert_eq!(machine.register(0), Some(0));
+        assert!(Machine::new().template('a').is_none());
+    }
+
+    #[test]
+    fn template_reader_discards_comments_and_rejects_invalid_definitions() {
+        let mut machine = Machine::new();
+        machine
+            .execute_source("&=a{} [ {}={}+1 ; ] ignored\n B=2\n ]")
+            .unwrap();
+        assert_eq!(
+            machine.template('a').unwrap().statements(),
+            &["{}={}+1".to_owned(), "B=2".to_owned()]
+        );
+
+        for (identity, body) in [
+            ('b', "A=1"),
+            ('c', "A={X"),
+            ('d', "{X}=A"),
+            ('e', "A={X}"),
+            ('f', "@=1,{}"),
+            ('g', "[ A={} ]"),
+        ] {
+            let source = format!("&={identity}{{}} [ {body} ]");
+            assert_eq!(
+                machine.execute_source(&source),
+                Err(SourceError::Compile(CompileError::Syntax)),
+                "{source}"
+            );
+            assert!(machine.template(identity).is_none(), "{source}");
+        }
+        for source in [
+            "&=h{} [ ]",
+            "&=h{} [ A={} ",
+            "&=H{} [ A={} ]",
+            "&=h{} A={} ]",
+        ] {
+            assert_eq!(
+                machine.execute_source(source),
+                Err(SourceError::Compile(CompileError::Syntax)),
+                "{source}"
+            );
+        }
+        machine.execute_source("&=h{} [ A={} ]").unwrap();
+        assert_eq!(
+            machine.execute_source("&=h{} [ B={} ]"),
+            Err(SourceError::Compile(CompileError::Syntax))
+        );
+    }
+
+    #[test]
+    fn templates_conflict_with_every_role_in_both_registration_orders() {
+        let mut machine = Machine::new();
+        for role in [
+            SourceRole::Write,
+            SourceRole::PrimaryRead,
+            SourceRole::AppliedRead,
+            SourceRole::BinaryOperator,
+        ] {
+            let mut machine = Machine::new();
+            let body = CodeBuilder::new().finish().unwrap();
+            machine.publish_initial('a', role, body).unwrap();
+            assert_eq!(
+                machine.execute_source("&=a{} [ A={} ]"),
+                Err(SourceError::Compile(CompileError::Syntax))
+            );
+        }
+
+        machine.execute_source("&=b{} [ A={} ]").unwrap();
+        assert_eq!(
+            machine.publish_initial('b', SourceRole::Write, CodeBuilder::new().finish().unwrap()),
+            Err(crate::binding::BindingError::AlreadyBound)
+        );
+        assert!(machine.template('b').is_some());
+    }
+
+    #[test]
+    fn template_error_keeps_flushed_effect_and_prior_template() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ A={} ]").unwrap();
+        assert_eq!(
+            machine.execute_source("B=7 &=c{} [ A={X ]"),
+            Err(SourceError::Compile(CompileError::Syntax))
+        );
+        assert_eq!(machine.register(1), Some(7));
+        assert!(machine.template('a').is_some());
+        assert!(machine.template('c').is_none());
     }
 
     #[test]
