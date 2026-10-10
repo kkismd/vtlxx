@@ -374,6 +374,11 @@ fn template_definitions_are_saved_and_published_without_runtime_code() {
     expect("&=p [ ?=7 ] &=a{} [ A={} ] p=()", 0, b"7Z");
     expect("&=a{} [ A={} ] &=p [ ?=7 ] p=()", 0, b"7Z");
 
+    let many_holes = format!("&=a{{}} [ A={} ]", "{}".repeat(256));
+    expect(&many_holes, 0, b"Z");
+    let many_statements = format!("&=a{{}} [ {}]", "A={} ".repeat(256));
+    expect(&many_statements, 0, b"Z");
+
     for source in [
         "&=a{} [ ]",
         "&=a{} [ A=1 ]",

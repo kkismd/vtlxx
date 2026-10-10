@@ -53,8 +53,8 @@ constant_char:     .res 1
 constant_ptr:      .res 2
 template_char:     .res 1
 template_first:    .res 1
-template_seen_hole: .res 1
-template_statement_count: .res 1
+template_has_hole: .res 1
+template_has_statement: .res 1
 template_saved_start: .res 2
 
 .segment "RODATA"
@@ -769,8 +769,8 @@ statement:
     lda #1
     sta template_first
     lda #0
-    sta template_seen_hole
-    sta template_statement_count
+    sta template_has_hole
+    sta template_has_statement
 @template_body_next:
     jsr template_skip_separators
     lda fe_compile_status
@@ -790,9 +790,9 @@ statement:
     jne @write_definition_backend
     jmp @template_body_next
 @template_body_close:
-    lda template_statement_count
+    lda template_has_statement
     jeq @write_definition_syntax
-    lda template_seen_hole
+    lda template_has_hole
     jeq @write_definition_syntax
     jsr take
     jsr require_form_boundary
@@ -884,7 +884,8 @@ template_body_statement:
     jsr template_append
     lda #'}'
     jsr template_append
-    inc template_seen_hole
+    lda #1
+    sta template_has_hole
     jsr template_save_equals
     rts
 @register_prefix:
@@ -919,7 +920,8 @@ template_begin_statement:
 @first:
     lda #0
     sta template_first
-    inc template_statement_count
+    lda #1
+    sta template_has_statement
     clc
     rts
 @backend:
@@ -968,7 +970,8 @@ template_save_equals:
     jsr template_take_save
     lda fe_compile_status
     bne @done
-    inc template_seen_hole
+    lda #1
+    sta template_has_hole
     jmp @rhs
 @save_rhs:
     jsr template_take_save
