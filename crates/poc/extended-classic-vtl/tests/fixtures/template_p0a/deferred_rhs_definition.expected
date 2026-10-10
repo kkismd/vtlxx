@@ -1,0 +1,5 @@
+profile: portable
+result: success
+phase: definition
+stdout: empty
+template: a is published

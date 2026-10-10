@@ -1,0 +1,5 @@
+profile: portable
+result: success
+stdout: 1\n11\n
+registers: A=1, B=11
+stack: empty

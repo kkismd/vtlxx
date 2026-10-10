@@ -1,0 +1,6 @@
+profile: portable
+result: compile_error for every line when run independently
+phase: invocation
+stdout: empty
+registers: unchanged
+stack: unchanged

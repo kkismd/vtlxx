@@ -1,0 +1,2 @@
+Rust profile: compile_error at later definition; earlier flushed B=7 and template a remain; template c is unpublished.
+6502 profile: WholeProgramCompileRun fails compilation; runtime never starts, so B remains at its initial value.
