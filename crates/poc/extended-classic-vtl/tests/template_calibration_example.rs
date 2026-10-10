@@ -35,8 +35,7 @@ fn template_calibration_example_matches_ordinary_assignments() {
 
 #[test]
 fn template_calibration_example_runs_from_cli() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/p0a_template_calibration.vtl");
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/p0a_template_calibration.vtl");
     let output = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
         .arg(path)
         .output()
