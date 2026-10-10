@@ -4,8 +4,10 @@
 .export cc_arena_reset, cc_mark, cc_emit_byte, cc_emit_u16, cc_patch
 .export cc_patch_reset, cc_track_patch, cc_freeze
 .export cc_reserve, cc_write_byte_raw
+.export cc_data_begin, cc_data_append, cc_data_finish, cc_data_abort
+.export cc_data_is_active, cc_cursor_is_frozen
 .export cc_arena
-.exportzp cc_status, cc_arg, cc_cursor, cc_pending_count
+.exportzp cc_status, cc_arg, cc_cursor, cc_pending_count, cc_data_length
 
 .segment "ZEROPAGE"
 cc_status: .res 1
@@ -16,6 +18,15 @@ cc_ptr:    .res 2
 cc_limit:  .res 2
 cc_value:  .res 2
 cc_pending_count: .res 2
+cc_source_begin: .res 2
+cc_data_begin_ptr: .res 2
+cc_data_active: .res 1
+cc_data_length: .res 2
+cc_reserve_count: .res 1
+cc_data_value: .res 1
+cc_copy_src: .res 2
+cc_copy_dst: .res 2
+cc_copy_count: .res 2
 cc_bit_index: .res 2
 cc_bit_mask: .res 1
 
@@ -35,6 +46,14 @@ cc_arena_reset:
     lda #>cc_arena
     sta cc_cursor+1
     sta cc_frozen_end+1
+    lda #<cc_arena_end
+    sta cc_source_begin
+    lda #>cc_arena_end
+    sta cc_source_begin+1
+    lda #0
+    sta cc_data_active
+    sta cc_data_length
+    sta cc_data_length+1
     rts
 
 ; Bytes before this cursor belong to completed owners and cannot be patched.
@@ -62,43 +81,251 @@ cc_mark:
     ldx cc_cursor+1
     rts
 
-; A = required byte count (1..255). No cursor mutation on failure.
-cc_reserve:
-    pha
-    lda cc_status
-    beq @active
-    pla
+; Backend queries used by the owner gate; raw arena state stays private.
+cc_data_is_active:
+    lda cc_data_active
     rts
-@active:
-    pla
+
+cc_cursor_is_frozen:
+    lda cc_cursor
+    cmp cc_frozen_end
+    bne @different
+    lda cc_cursor+1
+    cmp cc_frozen_end+1
+    bne @different
+    lda #1
+    rts
+@different:
+    lda #0
+    rts
+
+; A = required code byte count (1..255). No cursor mutation on failure.
+cc_reserve:
+    sta cc_reserve_count
+    lda cc_status
+    bne @done
+    lda cc_data_active
+    beq @ordinary
+    lda #3
+    sta cc_status
+@done:
+    rts
+@ordinary:
+    lda cc_reserve_count
+    jmp cc_reserve_shared
+
+; The data save path shares the same overflow-safe capacity check.
+cc_reserve_shared:
+    sta cc_reserve_count
+    lda cc_status
+    bne @done
     clc
-    adc cc_cursor
+    lda cc_cursor
+    adc cc_reserve_count
     sta cc_limit
     lda cc_cursor+1
     adc #0
     bcs @full
     sta cc_limit+1
-    cmp #>cc_arena_end
+    cmp cc_source_begin+1
     bcc @ok
     bne @full
     lda cc_limit
-    cmp #<cc_arena_end
+    cmp cc_source_begin
     bcc @ok
     beq @ok
 @full:
     lda #1
     sta cc_status
 @ok:
+@done:
     rts
 
 ; Caller must reserve the whole template first. A = byte to append.
 cc_write_byte_raw:
+    sta cc_data_value
+    lda cc_data_active
+    beq @write
+    lda #3
+    sta cc_status
+    rts
+@write:
+    ; Recover the input byte from A via a private scratch before pointer use.
+    ; Callers reserve before entering this internal writer.
+    ldy #0
+    lda cc_data_value
+    sta (cc_cursor),y
+    inc cc_cursor
+    bne @done
+    inc cc_cursor+1
+@done:
+    rts
+
+; Begin a temporary forward append at the current code cursor.
+cc_data_begin:
+    lda cc_status
+    bne @done
+    lda cc_data_active
+    bne @misuse
+    lda cc_cursor
+    sta cc_data_begin_ptr
+    lda cc_cursor+1
+    sta cc_data_begin_ptr+1
+    lda #1
+    sta cc_data_active
+@done:
+    rts
+@misuse:
+    lda #3
+    sta cc_status
+    rts
+
+; A = one source byte. It is written only after the shared capacity check.
+cc_data_append:
+    sta cc_data_value
+    lda cc_status
+    bne @done
+    lda cc_data_active
+    bne @active
+    lda #3
+    sta cc_status
+    rts
+@active:
+    lda #1
+    jsr cc_reserve_shared
+    lda cc_status
+    bne @done
+    lda cc_data_value
+    ; This is the same raw cursor write, with data-active intentionally allowed.
     ldy #0
     sta (cc_cursor),y
     inc cc_cursor
     bne @done
     inc cc_cursor+1
 @done:
+    rts
+
+; Finish and compact the new bytes against the previous source tail.
+; Returns B in A/X and length in cc_data_length. No state publishes on failure.
+cc_data_finish:
+    lda cc_status
+    beq :+
+    rts
+:
+    lda cc_data_active
+    bne @active
+    jmp @misuse
+@active:
+    sec
+    lda cc_cursor
+    sbc cc_data_begin_ptr
+    sta cc_data_length
+    lda cc_cursor+1
+    sbc cc_data_begin_ptr+1
+    sta cc_data_length+1
+    lda cc_data_length
+    ora cc_data_length+1
+    bne @nonempty
+    jmp @misuse
+@nonempty:
+    sec
+    lda cc_source_begin
+    sbc cc_data_length
+    sta cc_copy_dst
+    lda cc_source_begin+1
+    sbc cc_data_length+1
+    sta cc_copy_dst+1
+    ; A <= B is required so completed code and the new source do not overlap.
+    lda cc_data_begin_ptr+1
+    cmp cc_copy_dst+1
+    bcc @range_ok
+    bne @range_bad
+    lda cc_data_begin_ptr
+    cmp cc_copy_dst
+    bcc @range_ok
+    beq @range_ok
+@range_bad:
+    lda #1
+    sta cc_status
+    rts
+@range_ok:
+    clc
+    lda cc_data_begin_ptr
+    adc cc_data_length
+    sta cc_copy_src
+    lda cc_data_begin_ptr+1
+    adc cc_data_length+1
+    sta cc_copy_src+1
+    clc
+    lda cc_copy_dst
+    adc cc_data_length
+    sta cc_copy_dst
+    lda cc_copy_dst+1
+    adc cc_data_length+1
+    sta cc_copy_dst+1
+    lda cc_data_length
+    sta cc_copy_count
+    lda cc_data_length+1
+    sta cc_copy_count+1
+@copy:
+    sec
+    lda cc_copy_src
+    sbc #1
+    sta cc_copy_src
+    lda cc_copy_src+1
+    sbc #0
+    sta cc_copy_src+1
+    sec
+    lda cc_copy_dst
+    sbc #1
+    sta cc_copy_dst
+    lda cc_copy_dst+1
+    sbc #0
+    sta cc_copy_dst+1
+    ldy #0
+    lda (cc_copy_src),y
+    sta (cc_copy_dst),y
+    lda cc_copy_count
+    bne @count_low
+    dec cc_copy_count+1
+@count_low:
+    dec cc_copy_count
+    lda cc_copy_count
+    ora cc_copy_count+1
+    bne @copy
+    lda cc_copy_dst
+    sta cc_source_begin
+    lda cc_copy_dst+1
+    sta cc_source_begin+1
+    lda cc_data_begin_ptr
+    sta cc_cursor
+    lda cc_data_begin_ptr+1
+    sta cc_cursor+1
+    lda #0
+    sta cc_data_active
+    lda cc_source_begin
+    ldx cc_source_begin+1
+@done:
+    rts
+@misuse:
+    lda #3
+    sta cc_status
+    rts
+
+; Discard the current temporary append while preserving prior source bytes/status.
+cc_data_abort:
+    lda cc_data_active
+    bne @active
+    lda #3
+    sta cc_status
+    rts
+@active:
+    lda cc_data_begin_ptr
+    sta cc_cursor
+    lda cc_data_begin_ptr+1
+    sta cc_cursor+1
+    lda #0
+    sta cc_data_active
     rts
 
 cc_emit_byte:

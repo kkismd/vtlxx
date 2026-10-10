@@ -3,10 +3,13 @@
 
 .export cc_init, cc_begin_owner, cc_complete_owner
 .export cc_define_label, cc_label_jump, cc_is_completed
+.export cc_source_begin, cc_source_append, cc_source_finish, cc_source_abort, cc_source_is_active
 .import cc_arena_reset, cc_patch_reset, cc_freeze, cc_mark, cc_return, cc_jump, cc_jump_placeholder, cc_patch
+.import cc_data_begin, cc_data_append, cc_data_finish, cc_data_abort
+.import cc_data_is_active, cc_cursor_is_frozen
 .import cc_binding_reset, cc_work_reset
 .import cc_arena
-.importzp cc_status, cc_arg, cc_pending_count
+.importzp cc_status, cc_arg, cc_pending_count, cc_data_length
 
 .segment "ZEROPAGE"
 owner_state: .res 1             ; 0 idle, 1 emitting
@@ -55,6 +58,8 @@ cc_begin_owner:
     bne @done
     lda owner_state
     bne @misuse
+    jsr cc_data_is_active
+    bne @misuse
     lda #1
     sta owner_state
     lda #0
@@ -76,6 +81,47 @@ cc_begin_owner:
     lda #3
     sta cc_status
     jmp @done
+
+; Source-storage ABI: cc_status is the result (0 success, 1 capacity, 3 misuse).
+; begin takes no arguments and clobbers A; it requires an idle owner at frozen
+; code end with no pending patches. The arena owns all storage state.
+cc_source_begin:
+    lda cc_status
+    bne @done
+    lda owner_state
+    bne @misuse
+    jsr cc_data_is_active
+    bne @misuse
+    jsr cc_cursor_is_frozen
+    cmp #1
+    bne @misuse
+    lda cc_pending_count
+    ora cc_pending_count+1
+    bne @misuse
+    jmp cc_data_begin
+@misuse:
+    lda #3
+    sta cc_status
+@done:
+    rts
+
+; A = source byte; cc_status reports success or failure. A/Y are clobbered.
+cc_source_append:
+    jmp cc_data_append
+
+; On success returns source start B in A/X and length L in cc_data_length.
+; A/X/Y are clobbered; cc_status reports success or failure.
+cc_source_finish:
+    jmp cc_data_finish
+
+; No arguments; active abort restores the temporary cursor and preserves status.
+; Inactive abort is misuse and sets status 3.
+cc_source_abort:
+    jmp cc_data_abort
+
+; Read-only query: A=0 inactive or A=1 active; cc_status is unchanged.
+cc_source_is_active:
+    jmp cc_data_is_active
 
 ; Checks all unresolved references, appends the final RTS, then marks entry completed.
 cc_complete_owner:
