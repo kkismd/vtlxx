@@ -651,6 +651,25 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
   crates/poc/extended-classic-vtl/examples/rpn_evaluator.vtl
 ```
 
+## Example: P0a 手続きテンプレートによる整数測定値補正
+
+[`examples/p0a_template_calibration.vtl`](examples/p0a_template_calibration.vtl) は、3チャンネルの整数測定値をそれぞれの倍率・補正値で補正します。1つのテンプレート本文を A/B/C に展開し、Aには同じテンプレートをもう一度適用します。`GAIN{}` / `BIAS{}` の穴とチャンネル名を連結して名前付き整数を解決します。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
+  crates/poc/extended-classic-vtl/examples/p0a_template_calibration.vtl
+```
+
+期待出力は次のとおりです。
+
+```text
+58
+20
+40
+```
+
+テンプレートの計算は `f(x,k,b)=(x*k+b)*2` です。Aは `3 → 14 → 58`、Bは `4 → 20`、Cは `5 → 40` となります。テンプレート呼出は実行時 stack に値を残しません。
+
 ## ECVTL source を書くときの確認事項
 
 新しい ECVTL source を追加・変更するときは、少なくとも次を確認してください。
