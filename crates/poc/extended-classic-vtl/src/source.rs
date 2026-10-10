@@ -4,7 +4,7 @@ use crate::{
     executable::{Instruction, RuntimeError},
     expression::compile_rhs,
     machine::Machine,
-    template::validate_template_body,
+    template::{validate_template_body, validate_template_statement},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -99,6 +99,7 @@ fn read_template_body(reader: &mut SourceReader<'_>) -> Result<Vec<String>, Comp
         if token.text == "[" {
             return Err(CompileError::Syntax);
         }
+        validate_template_statement(token.text)?;
         statements.push(token.text.to_owned());
     }
 }
@@ -536,6 +537,18 @@ mod tests {
             machine.execute_source("&=h{} [ B={} ]"),
             Err(SourceError::Compile(CompileError::Syntax))
         );
+    }
+
+    #[test]
+    fn template_reader_stops_at_the_first_invalid_statement_or_hole() {
+        let mut reader = SourceReader::new("[ {}=1 ; ] ignored\n&=b{} [\n B=2\n]\n?=\"unfinished");
+        assert_eq!(read_template_body(&mut reader), Err(CompileError::Syntax));
+        assert_eq!(reader.next().unwrap().unwrap().text, "[");
+
+        let mut reader = SourceReader::new("[ A={X\n?=\"unfinished");
+        assert_eq!(read_template_body(&mut reader), Err(CompileError::Syntax));
+        assert_eq!(reader.line, 0);
+        assert!(matches!(reader.next(), Err(CompileError::Syntax)));
     }
 
     #[test]
