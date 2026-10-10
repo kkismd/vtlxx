@@ -4,7 +4,7 @@ use crate::{
     executable::{Instruction, RuntimeError},
     expression::compile_rhs,
     machine::Machine,
-    template::{validate_template_body, validate_template_statement},
+    template::{bind_statement, validate_template_body, validate_template_statement},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -29,6 +29,14 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
     while let Some(token) = reader.next().map_err(SourceError::Compile)? {
         if let Some(definition) = token.text.strip_prefix("==") {
             constants.define(definition).map_err(SourceError::Compile)?;
+            continue;
+        }
+        if let Some(invocation) =
+            parse_template_invocation(token.text).map_err(SourceError::Compile)?
+        {
+            compile_template_invocation(invocation, machine, &constants, &mut builder)
+                .map_err(SourceError::Compile)?;
+            has_statements = true;
             continue;
         }
         let (target, rhs) = split_statement(token.text).map_err(SourceError::Compile)?;
@@ -84,6 +92,35 @@ fn parse_template_header(rhs: &str) -> Option<char> {
     let bytes = rhs.as_bytes();
     (bytes.len() == 3 && bytes[0].is_ascii_lowercase() && &bytes[1..] == b"{}")
         .then(|| bytes[0] as char)
+}
+
+fn parse_template_invocation(token: &str) -> Result<Option<(char, char)>, CompileError> {
+    let bytes = token.as_bytes();
+    if bytes.len() < 2 || !bytes[0].is_ascii_lowercase() || bytes[1] != b'{' {
+        return Ok(None);
+    }
+    if bytes.len() != 7 || !bytes[2].is_ascii_uppercase() || &bytes[3..] != b"}=()" {
+        return Err(CompileError::Syntax);
+    }
+    Ok(Some((bytes[0] as char, bytes[2] as char)))
+}
+
+fn compile_template_invocation(
+    (template_identity, argument): (char, char),
+    machine: &Machine,
+    constants: &Constants,
+    builder: &mut CodeBuilder,
+) -> Result<(), CompileError> {
+    let template = machine
+        .template(template_identity)
+        .ok_or(CompileError::UndefinedBinding)?;
+    let mut staged = builder.clone();
+    for statement in template.statements() {
+        let bound = bind_statement(statement, argument);
+        compile_statement(&bound, machine, constants, &mut staged)?;
+    }
+    *builder = staged;
+    Ok(())
 }
 
 fn read_template_body(reader: &mut SourceReader<'_>) -> Result<Vec<String>, CompileError> {
@@ -239,6 +276,9 @@ fn compile_source_statement(
     constants: &Constants,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
+    if let Some(invocation) = parse_template_invocation(token.text)? {
+        return compile_template_invocation(invocation, machine, constants, builder);
+    }
     let (target, rhs) = split_statement(token.text)?;
     if target == '*' {
         if rhs != "()" {
@@ -491,6 +531,122 @@ mod tests {
         );
         assert_eq!(machine.register(0), Some(0));
         assert!(Machine::new().template('a').is_none());
+    }
+
+    #[test]
+    fn template_invocation_expands_into_the_caller_and_keeps_source_immutable() {
+        let mut machine = Machine::new();
+        machine
+            .execute_source("&=a{} [ {}={}+1 ] A=0 B=10 a{A}=() a{B}=()")
+            .unwrap();
+        assert_eq!(machine.register(0), Some(1));
+        assert_eq!(machine.register(1), Some(11));
+        assert_eq!(
+            machine.template('a').unwrap().statements(),
+            &["{}={}+1".to_owned()]
+        );
+    }
+
+    #[test]
+    fn template_invocation_survives_source_calls_and_uses_current_constants() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ A=MAX{} ]").unwrap();
+        machine.execute_source("==MAXX,7 A=2 a{X}=()").unwrap();
+        assert_eq!(machine.register(0), Some(7));
+        assert_eq!(
+            machine.execute_source("a{X}=()"),
+            Err(SourceError::Compile(CompileError::Syntax))
+        );
+        assert_eq!(machine.register(0), Some(7));
+        assert_eq!(
+            Machine::new().execute_source("a{A}=()"),
+            Err(SourceError::Compile(CompileError::UndefinedBinding))
+        );
+    }
+
+    #[test]
+    fn template_invocation_preserves_reader_order_and_caller_owner() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ {}={}+1 ]").unwrap();
+        machine.execute_source("A=1 a{A}=() B=3").unwrap();
+        assert_eq!(machine.register(0), Some(2));
+        assert_eq!(machine.register(1), Some(3));
+
+        machine.execute_source("&=p [ a{A}=() ] A=4 p=()").unwrap();
+        assert_eq!(machine.register(0), Some(5));
+    }
+
+    #[test]
+    fn template_invocation_reuses_rhs_roles_comma_order_and_stack_seed() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ A=@({}) ]").unwrap();
+        machine.execute_source("&=b{} [ A={},1 ]").unwrap();
+        machine.execute_source("&=c{} [ {}=~+1 ]").unwrap();
+
+        machine.execute_source("B=0 @=B,42 a{B}=()").unwrap();
+        assert_eq!(machine.register(0), Some(42));
+        assert!(machine.stack().is_empty());
+
+        machine.execute_source("A=6 B=6 b{B}=()").unwrap();
+        assert_eq!(machine.register(0), Some(1));
+        assert_eq!(machine.stack(), &[6]);
+
+        machine.push(8);
+        machine.execute_source("c{B}=()").unwrap();
+        assert_eq!(machine.register(1), Some(9));
+        assert_eq!(machine.stack(), &[6]);
+
+        machine.execute_source("&=d{} [ {}=q ]").unwrap();
+        assert_eq!(
+            machine.execute_source("d{X}=()"),
+            Err(SourceError::Compile(CompileError::UndefinedBinding))
+        );
+    }
+
+    #[test]
+    fn template_invocation_rejects_bad_candidates_without_consuming_following_tokens() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ A={} ]").unwrap();
+        for source in [
+            "a{}=()",
+            "a{AB}=()",
+            "a{a}=()",
+            "a{A}=1",
+            "a{A}=",
+            "a{A=()",
+            "a{A}=() B=1+",
+        ] {
+            assert!(
+                matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn failed_template_expansion_does_not_mutate_its_owner_or_runtime() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ A={} {}=A+ ]").unwrap();
+        let mut builder = CodeBuilder::new();
+        builder.emit(Instruction::PushConst(7)).unwrap();
+        let original = builder.clone();
+        assert_eq!(
+            compile_template_invocation(('a', 'B'), &machine, &Constants::default(), &mut builder),
+            Err(CompileError::Syntax)
+        );
+        assert_eq!(builder, original);
+        assert_eq!(machine.register(0), Some(0));
+        assert_eq!(machine.register(1), Some(0));
+
+        assert_eq!(
+            machine.execute_source("B=9 a{B}=()"),
+            Err(SourceError::Compile(CompileError::Syntax))
+        );
+        assert_eq!(machine.register(1), Some(0));
+        assert_eq!(
+            machine.template('a').unwrap().statements(),
+            &["A={}".to_owned(), "{}=A+".to_owned()]
+        );
     }
 
     #[test]

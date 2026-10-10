@@ -1,15 +1,17 @@
 use crate::source::CompileError;
 
-#[allow(dead_code)] // Consumed by the follow-up template invocation issue.
 pub(crate) struct CompletedTemplate {
     statements: Vec<String>,
 }
 
 impl CompletedTemplate {
-    #[allow(dead_code)] // Consumed by the follow-up template invocation issue.
     pub(crate) fn statements(&self) -> &[String] {
         &self.statements
     }
+}
+
+pub(crate) fn bind_statement(statement: &str, identity: char) -> String {
+    statement.replace("{}", &identity.to_string())
 }
 
 pub(crate) fn validate_template_body(
