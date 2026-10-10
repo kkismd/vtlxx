@@ -171,3 +171,12 @@ fn register_templates_cover_index_bounds_and_atomic_reserve_failure() {
 fn binding_availability_query_is_non_destructive() {
     expect(20, b"K");
 }
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn shared_arena_source_storage_and_owner_guards() {
+    expect(21, b"QK");
+    for case in 22..=27 {
+        expect(case, b"K");
+    }
+}

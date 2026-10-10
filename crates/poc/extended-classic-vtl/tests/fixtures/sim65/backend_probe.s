@@ -5,12 +5,14 @@
 .import cc_push_const, cc_call, cc_return, cc_jump, cc_jz
 .import cc_load_reg, cc_store_reg
 .import cc_jump_placeholder, cc_jz_placeholder, cc_patch_here, cc_jump_to
-.import cc_begin_owner, cc_complete_owner, cc_is_bound, cc_publish, cc_resolve
+.import cc_begin_owner, cc_complete_owner, cc_is_bound, cc_is_completed, cc_publish, cc_resolve
 .import cc_define_label, cc_label_jump
+.import cc_source_begin, cc_source_append, cc_source_finish, cc_source_abort, cc_source_is_active
+.import cc_arena
 .import cc_work_push, cc_work_pop, cc_work_swap, cc_work_reset
 .import rt_init, rt_print_number, rt_print_char, rt_push
 .import serial_out, halt
-.importzp cc_status, cc_arg, rt_depth
+.importzp cc_status, cc_arg, cc_cursor, cc_data_length, rt_depth
 
 .macro WORD value
     lda #<(value)
@@ -33,9 +35,9 @@
 
 .segment "ZEROPAGE"
 probe_ptr:   .res 2
+entry:       .res 2
 
 .segment "BSS"
-entry:       .res 2
 patch:       .res 2
 patch_two:   .res 2
 address:     .res 2
@@ -566,6 +568,16 @@ _main:
     jsr cc_call
     jsr cc_complete_owner
     OK
+    lda entry
+    sta cc_arg
+    lda entry+1
+    sta cc_arg+1
+    ldy #0
+    lda (cc_arg),y
+    cmp #$a9
+    beq :+
+    jmp bad
+:
     jsr invoke
     lda rt_depth
     beq :+
@@ -741,6 +753,515 @@ _main:
     ldx #'a'
     jsr cc_resolve
     ERROR
+.elseif TEST_CASE = 21
+    ; Two saved sources move to the tail in insertion order; later code stays executable.
+    jsr cc_begin_owner
+    sta patch_two
+    stx patch_two+1
+    jsr cc_complete_owner
+    OK
+    jsr cc_source_begin
+    OK
+    lda #$a1
+    jsr cc_source_append
+    lda #$60
+    jsr cc_source_append
+    lda #$4c
+    jsr cc_source_append
+    lda #$5a
+    jsr cc_source_append
+    jsr cc_source_finish
+    sta address
+    stx address+1
+    OK
+    lda cc_data_length
+    cmp #4
+    beq :+
+    jmp bad
+:
+    lda cc_data_length+1
+    beq :+
+    jmp bad
+:
+    jsr cc_source_begin
+    OK
+    lda #$11
+    jsr cc_source_append
+    lda #$22
+    jsr cc_source_append
+    lda #$33
+    jsr cc_source_append
+    sec
+    lda cc_cursor
+    sbc #3
+    sta probe_ptr
+    lda cc_cursor+1
+    sbc #0
+    sta probe_ptr+1
+    ldy #0
+    lda probe_ptr
+    clc
+    adc #2
+    sta probe_ptr
+    lda probe_ptr+1
+    adc #0
+    sta probe_ptr+1
+    lda (probe_ptr),y
+    cmp #$33
+    beq :+
+    jmp bad
+:
+    sec
+    lda probe_ptr
+    sbc #2
+    sta probe_ptr
+    lda probe_ptr+1
+    sbc #0
+    sta probe_ptr+1
+    lda (probe_ptr),y
+    cmp #$11
+    beq :+
+    jmp bad
+:
+    jsr cc_source_finish
+    sta patch
+    stx patch+1
+    OK
+    ; New source begins immediately below the existing source tail.
+    lda patch
+    sta probe_ptr
+    lda patch+1
+    sta probe_ptr+1
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$11
+    beq :+
+    jmp bad
+:
+    iny
+    lda (probe_ptr),y
+    cmp #$22
+    beq :+
+    jmp bad
+:
+    iny
+    lda (probe_ptr),y
+    cmp #$33
+    beq :+
+    jmp bad
+:
+    ; The first source remains at the high end and is unchanged.
+    lda address
+    sta probe_ptr
+    lda address+1
+    sta probe_ptr+1
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$a1
+    beq :+
+    jmp bad
+:
+    iny
+    lda (probe_ptr),y
+    cmp #$60
+    beq :+
+    jmp bad
+:
+    iny
+    lda (probe_ptr),y
+    cmp #$4c
+    beq :+
+    jmp bad
+:
+    iny
+    lda (probe_ptr),y
+    cmp #$5a
+    beq :+
+    jmp bad
+:
+    lda patch_two
+    ldx patch_two+1
+    jsr cc_is_completed
+    OK
+    lda patch_two
+    sta probe_ptr
+    lda patch_two+1
+    sta probe_ptr+1
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$60
+    beq :+
+    jmp bad
+:
+    jsr cc_begin_owner
+    sta entry
+    stx entry+1
+    WORD 'Q'
+    jsr cc_push_const
+    WORD rt_print_char
+    jsr cc_call
+    jsr cc_complete_owner
+    OK
+    lda entry
+    sta cc_arg
+    lda entry+1
+    sta cc_arg+1
+    ldy #0
+    lda (cc_arg),y
+    cmp #$a9
+    beq :+
+    jmp bad
+:
+    jsr invoke
+.elseif TEST_CASE = 22
+    ; Owner gating and code append are rejected during temporary source storage.
+    jsr cc_begin_owner
+    jsr cc_source_begin
+    ERROR
+    jsr cc_init
+    jsr cc_source_begin
+    OK
+    jsr cc_begin_owner
+    ERROR
+    jsr cc_init
+    jsr cc_source_begin
+    OK
+    jsr cc_mark
+    sta address
+    stx address+1
+    lda #$ea
+    jsr cc_emit_byte
+    ERROR
+    jsr cc_mark
+    cmp address
+    beq :+
+    jmp bad
+:
+    cpx address+1
+    beq :+
+    jmp bad
+:
+    jsr cc_source_abort
+    ; Abort is cleanup only and preserves the misuse status.
+    ERROR
+    jsr cc_source_is_active
+    beq :+
+    jmp bad
+:
+    jsr cc_init
+    jsr cc_source_abort
+    ERROR
+    jsr cc_init
+    jsr cc_source_begin
+    OK
+    jsr cc_source_begin
+    ERROR
+    jsr cc_init
+    lda #$44
+    jsr cc_source_append
+    ERROR
+    jsr cc_init
+    jsr cc_source_finish
+    ERROR
+    jsr cc_init
+    jsr cc_source_begin
+    lda #$44
+    jsr cc_source_append
+    jsr cc_source_abort
+    OK
+    jsr cc_source_is_active
+    beq :+
+    jmp bad
+:
+    jsr cc_source_begin
+    OK
+    jsr cc_source_abort
+    OK
+.elseif TEST_CASE = 23
+    ; A u16 source length above 255 survives append and backward relocation.
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    jsr cc_source_begin
+    lda #0
+    sta counter
+    sta counter+1
+@long_data:
+    lda #$a5
+    jsr cc_source_append
+    OK
+    inc counter
+    bne :+
+    inc counter+1
+:
+    lda counter+1
+    cmp #1
+    bne @long_data
+    lda counter
+    cmp #$2c
+    bne @long_data
+    jsr cc_source_finish
+    sta probe_ptr
+    stx probe_ptr+1
+    OK
+    lda cc_data_length
+    cmp #$2c
+    beq :+
+    jmp bad
+:
+    lda cc_data_length+1
+    cmp #1
+    beq :+
+    jmp bad
+:
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$a5
+    beq :+
+    jmp bad
+:
+    ; Last byte at B + 299 is also intact.
+    clc
+    lda probe_ptr
+    adc #$2b
+    sta cc_arg
+    lda probe_ptr+1
+    adc #1
+    sta cc_arg+1
+    ldy #0
+    lda (cc_arg),y
+    cmp #$a5
+    beq :+
+    jmp bad
+:
+.elseif TEST_CASE = 24
+    ; Filling the whole empty arena makes destination B equal temporary start A.
+    jsr cc_source_begin
+    lda #0
+    sta counter
+    sta counter+1
+@full_source:
+    lda #$5c
+    jsr cc_source_append
+    OK
+    inc counter
+    bne :+
+    inc counter+1
+:
+    lda counter
+    ora counter+1
+    bne :+
+    jmp @full_source
+:
+    lda counter
+    ora counter+1
+    ; The loop uses wraparound to stop after exactly 2048 appends.
+    lda counter+1
+    cmp #8
+    bne @full_source
+    lda counter
+    bne @full_source
+    jsr cc_source_finish
+    sta probe_ptr
+    stx probe_ptr+1
+    OK
+    lda probe_ptr
+    cmp #<cc_arena
+    beq :+
+    jmp bad
+:
+    ldx probe_ptr+1
+    cpx #>cc_arena
+    beq :+
+    jmp bad
+:
+    lda cc_data_length
+    beq :+
+    jmp bad
+:
+    lda cc_data_length+1
+    cmp #8
+    beq :+
+    jmp bad
+:
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$5c
+    beq :+
+    jmp bad
+:
+.elseif TEST_CASE = 25
+    ; A=1 and L=1024 cause an overlapping relocation; backward copy preserves bytes.
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    jsr cc_source_begin
+    lda #0
+    sta counter
+    sta counter+1
+@overlap_source:
+    lda counter
+    jsr cc_source_append
+    OK
+    inc counter
+    bne :+
+    inc counter+1
+:
+    lda counter+1
+    cmp #4
+    bne @overlap_source
+    lda counter
+    bne @overlap_source
+    jsr cc_source_finish
+    sta probe_ptr
+    stx probe_ptr+1
+    OK
+    lda cc_data_length
+    beq :+
+    jmp bad
+:
+    lda cc_data_length+1
+    cmp #4
+    beq :+
+    jmp bad
+:
+    ldy #0
+    lda (probe_ptr),y
+    cmp #0
+    beq :+
+    jmp bad
+:
+    clc
+    lda probe_ptr
+    adc #$ff
+    sta cc_arg
+    lda probe_ptr+1
+    adc #3
+    sta cc_arg+1
+    ldy #0
+    lda (cc_arg),y
+    cmp #$ff
+    beq :+
+    jmp bad
+:
+.elseif TEST_CASE = 26
+    ; Data append capacity failure leaves cursor unchanged; abort preserves old source.
+    jsr cc_source_begin
+    lda #$91
+    jsr cc_source_append
+    jsr cc_source_finish
+    sta patch
+    stx patch+1
+    OK
+    jsr cc_source_begin
+    lda #0
+    sta counter
+    sta counter+1
+@fill_source:
+    lda #$a7
+    jsr cc_source_append
+    lda cc_status
+    bne @failed_append
+    inc counter
+    bne :+
+    inc counter+1
+:
+    jmp @fill_source
+@failed_append:
+    lda cc_status
+    cmp #1
+    beq :+
+    jmp bad
+:
+    jsr cc_mark
+    sta address
+    stx address+1
+    lda #$ee
+    jsr cc_source_append
+    lda cc_status
+    cmp #1
+    beq :+
+    jmp bad
+:
+    jsr cc_mark
+    cmp address
+    beq :+
+    jmp bad
+:
+    cpx address+1
+    beq :+
+    jmp bad
+:
+    jsr cc_source_abort
+    lda cc_status
+    cmp #1
+    beq :+
+    jmp bad
+:
+    lda patch
+    sta probe_ptr
+    lda patch+1
+    sta probe_ptr+1
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$91
+    beq :+
+    jmp bad
+:
+.elseif TEST_CASE = 27
+    ; Code reserve uses the same source limit after template storage.
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    jsr cc_source_begin
+    lda #$cb
+    jsr cc_source_append
+    jsr cc_source_finish
+    sta patch
+    stx patch+1
+    OK
+    jsr cc_begin_owner
+    lda #0
+    sta counter
+    sta counter+1
+@fill_code:
+    lda #$ea
+    jsr cc_emit_byte
+    OK
+    inc counter
+    bne :+
+    inc counter+1
+:
+    lda counter+1
+    cmp #7
+    bcc @fill_code
+    bne @code_limit
+    lda counter
+    cmp #$fe
+    bne @fill_code
+@code_limit:
+    jsr cc_mark
+    sta address
+    stx address+1
+    lda #$ea
+    jsr cc_emit_byte
+    ERROR
+    jsr cc_mark
+    cmp address
+    beq :+
+    jmp bad
+:
+    cpx address+1
+    beq :+
+    jmp bad
+:
+    lda patch
+    sta probe_ptr
+    lda patch+1
+    sta probe_ptr+1
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$cb
+    beq :+
+    jmp bad
+:
 .else
     .error "unknown backend probe case"
 .endif
