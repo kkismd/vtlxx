@@ -670,6 +670,18 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 
 テンプレートの計算は `f(x,k,b)=(x*k+b)*2` です。Aは `3 → 14 → 58`、Bは `4 → 20`、Cは `5 → 40` となります。テンプレート呼出は実行時 stack に値を残しません。
 
+### Rust/6502 共通適合fixture
+
+`tests/fixtures/template_p0a/` はP0aテンプレートの共通sourceと期待状態です。各 `.vtl` に隣接する `.expected` が、成功・compile error、失敗phase、stdout、最終register/stack、およびRustと6502のprofile差を記録します。出力中の `\\n` はLF byteです。既存の `examples/p0a_template_calibration.vtl` も共通成功fixtureとして使います。
+
+Rust側は次のコマンドでfixtureを実行します。
+
+```sh
+cargo test --manifest-path crates/poc/extended-classic-vtl/Cargo.toml --test template_p0a_fixtures
+```
+
+Block内呼出、定義時のRHS遅延検証、呼出形式エラー、未完成定義の非公開、展開失敗時のcaller owner不変性を確認します。`chunk_failure_profiles.vtl` は同一sourceに対するprofile差を表します。Rustは先行flush済みchunkのeffectを保持しますが、6502のWholeProgramCompileRunはcompile failureでruntimeを開始しません。Rust Machineを複数の `execute_source` 呼出で使うtemplate寿命はAPI固有fixtureであり、serial single-sourceの6502へ複数呼出APIを要求しません。
+
 ## ECVTL source を書くときの確認事項
 
 新しい ECVTL source を追加・変更するときは、少なくとも次を確認してください。
