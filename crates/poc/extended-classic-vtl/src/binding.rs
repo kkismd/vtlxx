@@ -21,6 +21,12 @@ pub(crate) struct Bindings {
 }
 
 impl Bindings {
+    pub(crate) fn has_identity(&self, identity: char) -> bool {
+        self.entries
+            .keys()
+            .any(|(candidate, _)| *candidate == identity)
+    }
+
     pub(crate) fn resolve(&self, identity: char, role: SourceRole) -> Option<ExecutableId> {
         self.entries.get(&(identity, role)).copied()
     }

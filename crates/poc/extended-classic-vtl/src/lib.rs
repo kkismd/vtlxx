@@ -12,6 +12,7 @@ mod machine;
 #[allow(dead_code)]
 mod primitive;
 mod source;
+mod template;
 
 pub use cell::Cell;
 pub use executable::RuntimeError;
