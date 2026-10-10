@@ -45,10 +45,15 @@ fn run(tool: &str, args: &[&OsStr], input: &[u8]) -> Output {
 }
 
 fn build_and_run_input(input: &[u8]) -> Output {
+    build_and_run_input_with_frontend(input, "tests/fixtures/sim65/frontend_basic.s")
+}
+
+fn build_and_run_input_with_frontend(input: &[u8], frontend_fixture: &str) -> Output {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
-        "tests/fixtures/sim65/frontend_basic.s",
+        frontend_fixture,
         "6502/frontend/basic.s",
+        "6502/frontend/template.s",
         "6502/frontend/source.s",
         "6502/compiler/arena.s",
         "6502/compiler/emitter.s",
@@ -356,4 +361,101 @@ fn malformed_source_never_starts_runtime() {
     let truncated = build_and_run_input(&[4, 0, b'?', b'=', b'1']);
     assert_eq!(truncated.status.code(), Some(1), "{truncated:?}");
     assert!(truncated.stdout.is_empty(), "{truncated:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn template_definitions_are_saved_and_published_without_runtime_code() {
+    expect("&=a{} [ {}={}+1 ]", 0, b"Z");
+    expect("&=a{} [ A=MAX{} ; ignored ]\n]", 0, b"Z");
+    expect("&=a{} [ A=MAX{}\n{}=A+ ]", 0, b"Z");
+    expect("&=a{} [ A={} B= ]", 0, b"Z");
+    expect("&=a{} [ A={} ] &=b{} [ {}=A{} ]", 0, b"Z");
+    expect("&=p [ ?=7 ] &=a{} [ A={} ] p=()", 0, b"7Z");
+    expect("&=a{} [ A={} ] &=p [ ?=7 ] p=()", 0, b"7Z");
+
+    for source in [
+        "&=a{} [ ]",
+        "&=a{} [ A=1 ]",
+        "&=a{}[ A={} ]",
+        "&=a{ } [ A={} ]",
+        "&=a{} [ A={X ]",
+        "&=a{} [ [ A={} ] ]",
+        "&=a{} [ ?=1 ]",
+        "&=a{} [ @=1,{} ]",
+        "&=a{} [ a={} ]",
+        "&=a{} [ A={} &= ]",
+        "&=a{} [ A={} ] &=a{} [ B={} ]",
+        "&=a{} [ A={} ] &=p [ ] &=p{} [ B={} ]",
+        "&=p [ ] &=a{} [ A={} ] &=p [ ]",
+        "&=a{} [ A={} ] &=b{} [ B=1 ]",
+        "&=A{} [ A={} ]",
+        "&=ab{} [ A={} ]",
+        "&=é{} [ A={} ]",
+        "&=a{} [ A={} ]?=1",
+    ] {
+        expect(source, 2, b"");
+    }
+    for source in include_str!("fixtures/template_p0a/invalid_definitions.vtl")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+    {
+        // Tracker #354 requires each shared invalid fixture line to be a
+        // separate length-prefixed WholeProgramCompileRun input.
+        expect(source, 2, b"");
+    }
+
+    let mut too_large = String::from("&=a{} [ A={}");
+    too_large.push_str(&"X".repeat(2100));
+    too_large.push_str(" ]");
+    expect(&too_large, 4, b"");
+
+    let mut source = b"&=a{} [ A={} ]".to_vec();
+    let framed_len = (source.len() + 2) as u16;
+    let mut framed = vec![framed_len as u8, (framed_len >> 8) as u8];
+    framed.append(&mut source);
+    let truncated = build_and_run_input(&framed);
+    assert_eq!(truncated.status.code(), Some(1), "{truncated:?}");
+    assert!(truncated.stdout.is_empty(), "{truncated:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn template_registry_points_to_canonical_saved_source() {
+    let source = b"&=a{} [ A={} ; discarded ]\n{}=MAX{} ]";
+    let mut framed = vec![source.len() as u8, (source.len() >> 8) as u8];
+    framed.extend_from_slice(source);
+    framed.push(b'Z');
+    let result =
+        build_and_run_input_with_frontend(&framed, "tests/fixtures/sim65/template_probe.s");
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+    assert_eq!(result.stdout, b"OKZ", "{result:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn failed_duplicate_template_does_not_replace_published_source() {
+    let source = b"&=a{} [ A={} ] &=a{} [ B={} ]";
+    let mut framed = vec![source.len() as u8, (source.len() >> 8) as u8];
+    framed.extend_from_slice(source);
+    framed.push(b'Z');
+    let result =
+        build_and_run_input_with_frontend(&framed, "tests/fixtures/sim65/template_failure_probe.s");
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+    assert_eq!(result.stdout, b"P", "{result:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn template_registry_keeps_u16_source_length() {
+    let mut source = String::from("&=a{} [ A={}");
+    source.push_str(&"X".repeat(300));
+    source.push_str(" ]");
+    let source = source.into_bytes();
+    let mut framed = vec![source.len() as u8, (source.len() >> 8) as u8];
+    framed.extend_from_slice(&source);
+    let result =
+        build_and_run_input_with_frontend(&framed, "tests/fixtures/sim65/template_length_probe.s");
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+    assert_eq!(result.stdout, b"L", "{result:?}");
 }

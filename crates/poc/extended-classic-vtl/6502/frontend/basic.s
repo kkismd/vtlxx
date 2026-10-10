@@ -5,6 +5,10 @@
 
 .export fe_compile_run
 .exportzp fe_compile_status
+; Private frontend ABI: identity in A; publish/lookup use cc_arg for start and
+; cc_data_length for length. template_is_bound and lookup leave cc_status alone.
+.import template_reset, template_is_bound, template_publish
+.import cc_source_begin, cc_source_append, cc_source_finish, cc_source_abort, cc_source_is_active
 .import fe_init, fe_next, cc_init, cc_begin_owner, cc_complete_owner
 .import cc_define_label, cc_label_jump
 .import cc_mark, cc_jz_placeholder, cc_jump_placeholder, cc_patch_here
@@ -17,6 +21,7 @@
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
 .import rt_print_number, rt_print_char
 .importzp fe_status, cc_status, cc_arg
+.importzp cc_data_length
 
 .segment "ZEROPAGE"
 fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
@@ -46,6 +51,11 @@ constant_slot:     .res 1
 constant_index:    .res 1
 constant_char:     .res 1
 constant_ptr:      .res 2
+template_char:     .res 1
+template_first:    .res 1
+template_seen_hole: .res 1
+template_statement_count: .res 1
+template_saved_start: .res 2
 
 .segment "RODATA"
 operator_chars: .byte '+','-','*','/','%','<','>'
@@ -74,6 +84,7 @@ fe_compile_run:
     jsr fe_init
     jcs source_error
     jsr cc_init
+    jsr template_reset
     jsr fe_start_chunk
     lda fe_compile_status
     bne @failed
@@ -114,6 +125,12 @@ fe_compile_run:
     clc
     rts
 @failed:
+    ; Abort only an active temporary source save. Keep the original frontend
+    ; error and backend status as the primary failure report.
+    jsr cc_source_is_active
+    beq :+
+    jsr cc_source_abort
+:
     sec
     rts
 
@@ -283,7 +300,7 @@ skip_separators:
 statement:
     lda look_byte
     cmp #'='
-    jeq @definition
+    jeq fe_definition
     lda look_byte
     sta target_index
     jsr take
@@ -297,9 +314,9 @@ statement:
     jsr take
     lda target_index
     cmp #'^'
-    jeq @label
+    jeq fe_label
     cmp #'#'
-    jeq @label
+    jeq fe_label
     cmp #'%'
     jeq @conditional
     cmp #'*'
@@ -632,7 +649,7 @@ statement:
 ; Write target only after required-block compilation and owner completion.
 @write_definition:
     lda structured_depth
-    bne @write_definition_syntax
+    jne @write_definition_syntax
     jsr peek
     lda look_state
     cmp #1
@@ -644,15 +661,25 @@ statement:
     jcs @write_definition_syntax
     sta definition_identity
     jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @write_definition_syntax
+    lda look_byte
+    cmp #'{'
+    jeq @template_definition
     jsr require_form_boundary
     lda fe_compile_status
     bne @write_definition_done
+    lda definition_identity
+    jsr template_is_bound
+    bne @write_definition_syntax
     lda #0
     ldx definition_identity
     jsr cc_is_bound
+    bcs @write_definition_syntax
     lda cc_status
     jne @write_definition_backend
-    bcs @write_definition_syntax
 
     ; Preserve source order by finishing the prior chunk before the named
     ; owner, then resume with a fresh chunk after publication.
@@ -684,9 +711,301 @@ statement:
 @write_definition_done:
     rts
 
+; Parse and save a source template without compiling any body RHS.
+@template_definition:
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @write_definition_syntax
+    lda look_byte
+    cmp #'}'
+    jne @write_definition_syntax
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @write_definition_done
+
+    lda definition_identity
+    jsr template_is_bound
+    bne @write_definition_syntax
+    lda #0
+    ldx definition_identity
+    jsr cc_is_bound
+    bcs @write_definition_syntax
+    lda cc_status
+    jne @write_definition_backend
+    lda #1
+    ldx definition_identity
+    jsr cc_is_bound
+    bcs @write_definition_syntax
+    lda cc_status
+    jne @write_definition_backend
+
+    jsr skip_separators
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne @write_definition_syntax
+    lda look_byte
+    cmp #'['
+    jne @write_definition_syntax
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    bne @write_definition_done
+    lda look_state
+    cmp #2
+    jeq @write_definition_syntax
+
+    ; Only after every header check and both namespaces are known to be free.
+    jsr fe_finish_chunk
+    lda fe_compile_status
+    bne @write_definition_done
+    jsr cc_source_begin
+    lda cc_status
+    jne @write_definition_backend
+    lda #1
+    sta template_first
+    lda #0
+    sta template_seen_hole
+    sta template_statement_count
+@template_body_next:
+    jsr template_skip_separators
+    lda fe_compile_status
+    jne @write_definition_done
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #2
+    jeq @write_definition_syntax
+    lda look_byte
+    cmp #']'
+    jeq @template_body_close
+    jsr template_body_statement
+    lda fe_compile_status
+    jne @write_definition_done
+    lda cc_status
+    jne @write_definition_backend
+    jmp @template_body_next
+@template_body_close:
+    lda template_statement_count
+    jeq @write_definition_syntax
+    lda template_seen_hole
+    jeq @write_definition_syntax
+    jsr take
+    jsr require_form_boundary
+    lda fe_compile_status
+    jne @write_definition_done
+    jsr cc_source_finish
+    sta template_saved_start
+    stx template_saved_start+1
+    lda cc_status
+    jne @write_definition_backend
+    lda template_saved_start
+    sta cc_arg
+    lda template_saved_start+1
+    sta cc_arg+1
+    lda definition_identity
+    jsr template_publish
+    lda cc_status
+    jne @write_definition_backend
+    jsr fe_start_chunk
+    rts
+
+; Skip source separators and comments inside the template body. Comments
+; never enter the saved source and all physical newlines become canonical LF.
+template_skip_separators:
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @done
+    lda look_byte
+    cmp #';'
+    beq @comment
+    cmp #' '
+    beq @skip
+    cmp #9
+    beq @skip
+    cmp #10
+    beq @skip
+    cmp #13
+    bne @done
+@skip:
+    jsr take
+    jmp template_skip_separators
+@comment:
+    jsr take
+@comment_next:
+    jsr peek
+    lda look_state
+    cmp #1
+    bne @done
+    lda look_byte
+    cmp #10
+    beq @skip
+    jsr take
+    jmp @comment_next
+@done:
+    rts
+
+; Validate the assignment prefix before saving anything from this statement.
+template_body_statement:
+    lda look_byte
+    cmp #'A'
+    bcc @hole_prefix
+    cmp #'Z'+1
+    bcc @register_prefix
+@hole_prefix:
+    cmp #'{'
+    jne @bad
+    ; Verify the complete {}= prefix before writing any of it.
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @bad
+    lda look_byte
+    cmp #'}'
+    jne @bad
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @bad
+    lda look_byte
+    cmp #'='
+    jne @bad
+    jsr template_begin_statement
+    lda fe_compile_status
+    bne @done
+    lda #'{'
+    jsr template_append
+    lda #'}'
+    jsr template_append
+    inc template_seen_hole
+    jsr template_save_equals
+    rts
+@register_prefix:
+    sta template_char
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @bad
+    lda look_byte
+    cmp #'='
+    jne @bad
+    jsr template_begin_statement
+    lda fe_compile_status
+    bne @done
+    lda template_char
+    jsr template_append
+    jsr template_save_equals
+    rts
+@bad:
+    jmp syntax_error
+@done:
+    rts
+
+template_begin_statement:
+    lda template_first
+    bne @first
+    lda #10
+    jsr cc_source_append
+    lda cc_status
+    bne @backend
+@first:
+    lda #0
+    sta template_first
+    inc template_statement_count
+    clc
+    rts
+@backend:
+    jmp backend_error
+
+template_save_equals:
+    jsr template_take_save
+    lda fe_compile_status
+    bne @done
+@rhs:
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #2
+    beq @end
+    lda look_byte
+    cmp #' '
+    beq @end
+    cmp #9
+    beq @end
+    cmp #10
+    beq @end
+    cmp #13
+    beq @end
+    cmp #';'
+    beq @end
+    cmp #']'
+    beq @bad
+    cmp #'['
+    beq @bad
+    cmp #'}'
+    beq @bad
+    cmp #'{'
+    bne @save_rhs
+    jsr template_take_save
+    lda fe_compile_status
+    bne @done
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @bad
+    lda look_byte
+    cmp #'}'
+    jne @bad
+    jsr template_take_save
+    lda fe_compile_status
+    bne @done
+    inc template_seen_hole
+    jmp @rhs
+@save_rhs:
+    jsr template_take_save
+    lda fe_compile_status
+    bne @done
+    jmp @rhs
+@end:
+    rts
+@bad:
+    jmp syntax_error
+@backend:
+    jmp backend_error
+@done:
+    rts
+
+; Consume current lookahead and append it verbatim to the arena. A backend
+; capacity failure is promoted to frontend resource status 4 by the caller.
+template_take_save:
+    lda look_byte
+    sta template_char
+    jsr take
+    lda template_char
+    jmp template_append
+@done:
+    rts
+
+template_append:
+    jsr cc_source_append
+    lda cc_status
+    beq @done
+    jmp backend_error
+@done:
+    rts
+
 ; Numeric label operands reuse the compile-run constant table, then delegate
 ; all owner-local definition/fixup behavior to the backend.
-@label:
+fe_label:
     jsr resolve_label_operand
     lda fe_compile_status
     jne @done
@@ -703,9 +1022,11 @@ statement:
     lda literal
     ldx literal+1
     jmp cc_label_jump
+@done:
+    rts
 
 ; Top-level `==NAME,value`. The table is compile-run local and never emitted.
-@definition:
+fe_definition:
     jsr take
     jsr peek
     lda look_state
