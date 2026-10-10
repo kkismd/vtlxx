@@ -1,0 +1,35 @@
+; Integer calibration of three independent sensor channels.
+; f(x,k,b) = (x*k+b)*2; channel-specific k and b.
+; Expected output: 58, 20, 40 (each followed by LF).
+; A is calibrated twice to prove repeated invocation.
+; Template definition and invocation have no runtime stack effect.
+
+==GAINA,2
+==GAINB,3
+==GAINC,4
+==BIASA,1
+==BIASB,-2
+==BIASC,0
+
+  &=t{} [
+    ; First stage: x*k+b. Holes form GAINA/BIASA, etc.
+    {}={}*GAIN{}+BIAS{}
+    ; Second stage: multiply the intermediate result by two.
+    {}={}*2
+  ]
+
+  A=3
+  B=4
+  C=5
+
+  t{A}=()
+  t{B}=()
+  t{C}=()
+  t{A}=()
+
+  ?=A
+  ?=()
+  ?=B
+  ?=()
+  ?=C
+  ?=()
