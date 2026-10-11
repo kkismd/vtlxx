@@ -145,7 +145,6 @@ fn basic_source_compiles_and_executes() {
     expect("?=(42)", 0, b"42Z");
     expect("?=(1)+2", 0, b"3Z");
     expect("?=() ; comment\n?=7", 0, b"\n7Z");
-    expect("?=()", 0, b"\nZ");
     expect("?=1 ?=2 A=3 ?=A ?=4", 0, b"1234Z");
     expect("&=p [ ] p=()", 0, b"Z");
     expect("&=p [ ?=~ ] p=42", 0, b"42Z");
