@@ -52,6 +52,32 @@ cargo test --manifest-path crates/poc/extended-classic-vtl/Cargo.toml
 cargo test --workspace
 ```
 
+## NMOS 6502 PoC の手動実行
+
+`ecvtl6502` は ECVTL source を既存の NMOS 6502 compiler で native code にし、`sim65` で実行します。Rust reference VMへのフォールバックはありません。実行には cc65 の `ca65`、`ld65`、`sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
+  crates/poc/extended-classic-vtl/examples/sim65_cli.vtl
+```
+
+source file は raw bytes で読み、最大 65535 bytes までです。target は stdin の先頭に source 長の u16 little-endian 2 byte を受け取り、その後に source bytes と runtime input bytes を読みます。任意の runtime input file は `--runtime-input` で指定できます。
+
+6502 frontend の runtime input 構文は現在実装待ちです（#317、採用 ADR #328）。そのため本 CLI は bytes を source frame の後ろへ忠実に渡しますが、source から読み出す end-to-end 確認は #317 の実装後に行います。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
+  path/to/program.vtl --runtime-input path/to/input.bin
+```
+
+成功時の stdout は sim65 が出した bytes そのものです。CLI の診断は stderr に出し、usage・file・toolchain・assemble/link・compile/runtime・cycle-limit failure は nonzero status で終了します。sim65 の実行上限は 4,000,000 cycles です。実行は `ca65 -t sim6502` で target source を組み立て、`ld65 -t sim6502` で `sim6502.lib` と link し、生成物を一時 directory に置いて sim65 へ渡す流れです。成功・失敗のどちらも一時生成物は削除します。
+
+手動統合確認:
+
+```sh
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_cli -- --ignored
+```
+
 ## 基本モデル
 
 ### Cell

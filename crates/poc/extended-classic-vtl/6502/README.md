@@ -94,3 +94,9 @@ frontend専用template moduleの選択ABIは次のとおり（portable ECVTL API
 呼出 `a{X}=()` はtemplate sourceを逐次読む仮想readerへ切り替え、保存sourceの各 `{}` をXの1 byteへ置き換えながら既存の通常assignment compilerへ渡す。readerはsourceを変更せず、展開source全体のbufferも持たない。展開されたassignmentは呼出を含む現在のownerへ通常どおり生成される。呼出文を原sourceで消費し、lookup結果と原sourceのlookaheadを退避してから仮想readerを開始するため、展開後に元のseparator/comment/frame位置からcompileを続ける。template本文の再帰呼出は対象外。
 
 source本体は `compiler/arena.s` が所有し、template registryには開始位置・長さ・valid flagだけを保持する。`sim65_frontend` のtemplate probeは保存byte列、canonical LF、lookup結果、失敗時の既公開entry保持を直接確認する。
+
+## 手動実行 CLI（#365）
+
+`target/sim65_cli.s` は CLI 専用entryで、`_main` から `fe_compile_run` を一度呼ぶ。compile成功時は既にfrontendが実行したruntimeの後で `halt(0)` し、compile error時は `fe_compile_status` を `$80` と OR したtarget statusで終了する。test probe用entryとは分離し、追加serial readやsentinel出力を行わない。
+
+crate root の `ecvtl6502` host binaryが source/runtime inputをraw bytesで読み、source lengthをu16 LEで検証・framingする。`ca65` / `ld65` は argvで起動し、対象source、既存runtime/frontend/compiler、CLI entry、`sim65_adapter.s` を組み立てて `sim6502.lib` と linkする。生成programは4,000,000 cycle limit付きでsim65へ渡す。一時directoryは各実行で新規作成し、終了時に削除する。
