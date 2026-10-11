@@ -118,6 +118,13 @@ fn build_and_run(source: &[u8], runtime_input: &[u8]) -> Output {
     build_and_run_input(&input)
 }
 
+fn build_and_run_read_char(source: &[u8], runtime_input: &[u8]) -> Output {
+    let mut input = vec![source.len() as u8, (source.len() >> 8) as u8];
+    input.extend_from_slice(source);
+    input.extend_from_slice(runtime_input);
+    build_and_run_input_with_frontend(&input, "tests/fixtures/sim65/frontend_read_char.s")
+}
+
 fn expect(source: &str, status: i32, output: &[u8]) {
     let result = build_and_run(source.as_bytes(), b"Z");
     assert_eq!(result.status.code(), Some(status), "{source}: {result:?}");
@@ -362,6 +369,49 @@ fn malformed_source_never_starts_runtime() {
     let truncated = build_and_run_input(&[4, 0, b'?', b'=', b'1']);
     assert_eq!(truncated.status.code(), Some(1), "{truncated:?}");
     assert!(truncated.stdout.is_empty(), "{truncated:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn primary_read_waits_discards_nul_and_maps_ff_and_eof() {
+    let output = build_and_run_read_char(
+        b"A=$ B=$ C=$ D=$ E=$ ?=A ?=B ?=C ?=D ?=E",
+        &[0, 0x7f, 0x80, 0xff],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"127128255-1-1", "{output:?}");
+
+    let output = build_and_run_read_char(b"A=$ ?=A", &[0, 0, b'A']);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"65", "{output:?}");
+
+    let output = build_and_run_read_char(b"A=$ ?=A", &[]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"-1", "{output:?}");
+
+    let output = build_and_run_read_char(b"A=$ ?=A", &[0, 0]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"-1", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn primary_read_works_in_expressions_and_preserves_character_write() {
+    let output = build_and_run_read_char(b"?=$ ?=$", &[65, 66]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"6566", "{output:?}");
+
+    let output = build_and_run_read_char(b"A=1+$ B=($) ?=A ?=B $=A $=0", &[41, 42]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"4242*\0", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn primary_read_compile_failure_does_not_start_runtime() {
+    let output = build_and_run_read_char(b"A=$+", b"Z");
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(output.stdout, b"", "{output:?}");
 }
 
 #[test]
