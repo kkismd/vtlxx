@@ -21,7 +21,7 @@
 .import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
-.import rt_print_number, rt_print_char
+.import rt_print_number, rt_print_char, rt_read_char
 .importzp fe_status, cc_status, cc_arg
 .importzp cc_data_length
 
@@ -1576,6 +1576,8 @@ value:
     lda look_byte
     cmp #'('
     jeq @group
+    cmp #'$'
+    jeq @read_char
     cmp #'0'
     bcc @minus
     cmp #'9'+1
@@ -1680,6 +1682,11 @@ value:
     lda literal
     ldx literal+1
     jmp cc_push_const
+@read_char:
+    jsr take
+    lda #<rt_read_char
+    ldx #>rt_read_char
+    jmp cc_call
 @group:
     jsr take
     jsr enter_nesting

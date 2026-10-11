@@ -22,12 +22,15 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 -- --ignored
 | `rt_add`, `rt_sub`, `rt_mul`, `rt_div`, `rt_rem` | stack 上の operands | `( lhs rhs -- result )` |
 | `rt_eq`, `rt_ne`, `rt_lt`, `rt_le`, `rt_gt`, `rt_ge` | stack 上の operands | `( lhs rhs -- 0\|1 )` |
 | `rt_print_number`, `rt_print_char` | stack 上の value | `( value -- )` |
+| `rt_read_char` | — | `( -- char_or_eof )` |
 
 helper は A/X/Y と processor flags を保存しない。`rt_push` の引数と register helper の X 以外に CPU register の入力契約はない。Cell は little-endian の signed 16-bit、stack は 16 Cell、A-Z は 26 Cell、storage は下位7 bitで選ぶ128 Cellの ring。A-Z と stack は zero page、storage は通常 RAM に置く。`rt_init` は register、storage、stack depth を初期化する。
 
 fatal status は underflow = 1、overflow = 2、division by zero = 3、remainder by zero = 4 とし、いずれも #273 の `halt` へ移る。これは sim65 fixture が success と runtime error を区別するための target 内の値である。error 検出前に stack operand を消費しない。
 
 sim65 の失敗時状態確認だけに `RT_TEST_PROBE` を指定すると、HALT 直前に fixture の `rt_test_probe` を呼ぶ。通常の target build にはこの hook は入らない。
+
+`rt_read_char` は `$` PrimaryRead の固定runtime targetである。stack空き容量をtransport readより先に検査し、NULを読み捨てて1..255またはEOF=-1を1 Cellとしてpushする。EOFはruntime session内で記憶し、後続readも-1を返す。sim65 adapterの `_getchar` はbyteとEOFだけを区別し、recoverable I/O failureを個別に表せないため、このtargetではそのerror分類を検証できない。
 
 ```sh
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_runtime -- --ignored

@@ -33,14 +33,23 @@ impl Drop for TempDir {
     }
 }
 
-fn run_tool(tool: &str, stage: &str, args: &[&OsStr]) -> Result<Output, String> {
-    let child = Command::new(tool)
+fn run_tool(tool: &str, stage: &str, args: &[&OsStr], input: &[u8]) -> Result<Output, String> {
+    let mut child = Command::new(tool)
         .args(args)
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| format!("{stage}: could not start {tool}: {error}"))?;
+    if !input.is_empty() {
+        use std::io::Write;
+        child
+            .stdin
+            .take()
+            .expect("piped stdin")
+            .write_all(input)
+            .map_err(|error| format!("{stage}: could not write stdin to {tool}: {error}"))?;
+    }
     child
         .wait_with_output()
         .map_err(|error| format!("{stage}: could not collect {tool} output: {error}"))
@@ -59,6 +68,14 @@ fn require_success(stage: &str, tool: &str, output: &Output) -> Result<(), Strin
 }
 
 fn build_and_run(fixture: &str, probe_case: Option<u8>) -> Result<Output, String> {
+    build_and_run_with_input(fixture, probe_case, &[])
+}
+
+fn build_and_run_with_input(
+    fixture: &str,
+    probe_case: Option<u8>,
+    input: &[u8],
+) -> Result<Output, String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         root.join("tests/fixtures/sim65")
@@ -89,7 +106,7 @@ fn build_and_run(fixture: &str, probe_case: Option<u8>) -> Result<Output, String
             args.extend([OsStr::new("-D"), case_define.as_os_str()]);
         }
         args.extend([source.as_os_str(), OsStr::new("-o"), object.as_os_str()]);
-        let output = run_tool("ca65", "assemble", &args)?;
+        let output = run_tool("ca65", "assemble", &args, &[])?;
         require_success("assemble", "ca65", &output)?;
         objects.push(object);
     }
@@ -103,7 +120,7 @@ fn build_and_run(fixture: &str, probe_case: Option<u8>) -> Result<Output, String
     ];
     args.extend(objects.iter().map(|object| object.as_os_str()));
     args.push(OsStr::new("sim6502.lib"));
-    let output = run_tool("ld65", "link", &args)?;
+    let output = run_tool("ld65", "link", &args, &[])?;
     require_success("link", "ld65", &output)?;
 
     run_tool(
@@ -114,6 +131,7 @@ fn build_and_run(fixture: &str, probe_case: Option<u8>) -> Result<Output, String
             OsStr::new(CYCLE_LIMIT),
             executable.as_os_str(),
         ],
+        input,
     )
 }
 
@@ -194,4 +212,12 @@ fn fatal_helpers_preserve_committed_operands_and_depth() {
     for (case, status) in [(1, 1), (2, 2), (3, 3), (4, 4), (5, 1), (6, 1)] {
         expect_probe(case, status);
     }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn read_char_overflow_does_not_consume_transport_input() {
+    let output = build_and_run_with_input("runtime_probe", Some(7), b"Z").unwrap();
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    assert_eq!(output.stdout, b"K", "{output:?}");
 }

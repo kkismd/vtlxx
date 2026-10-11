@@ -6,6 +6,7 @@
 .export rt_need_one, rt_need_two, rt_commit_binary
 .export rt_underflow, rt_overflow, rt_div_zero, rt_rem_zero
 .exportzp rt_depth, rt_stack, rt_lhs, rt_rhs, rt_result
+.exportzp rt_input_eof
 .import halt
 .ifdef RT_TEST_PROBE
 .import rt_test_probe
@@ -19,6 +20,7 @@ rt_lhs:     .res 2
 rt_rhs:     .res 2
 rt_result:  .res 2
 rt_index:   .res 1
+rt_input_eof: .res 1
 
 .segment "BSS"
 rt_storage: .res 256
@@ -27,6 +29,7 @@ rt_storage: .res 256
 rt_init:
     lda #0
     sta rt_depth
+    sta rt_input_eof
     ldx #51
 @clear_regs:
     sta rt_regs,x

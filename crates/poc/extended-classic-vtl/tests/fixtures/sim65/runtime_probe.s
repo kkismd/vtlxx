@@ -2,9 +2,9 @@
 ; immediately before the fatal entry passes its status to the #273 HALT.
 .setcpu "6502"
 .export _main, rt_test_probe
-.import rt_init, rt_push, rt_add, rt_div, rt_rem, rt_store_storage, rt_store_reg
+.import rt_init, rt_push, rt_add, rt_div, rt_rem, rt_store_storage, rt_store_reg, rt_read_char
 .importzp rt_depth, rt_stack
-.import serial_out, halt
+.import serial_in, serial_out, halt
 .include "runtime_macros.inc"
 
 .segment "CODE"
@@ -36,6 +36,11 @@ _main:
     ; StoreReg cannot modify a register with an empty value stack.
     ldx #25
     jsr rt_store_reg
+.elseif TEST_CASE = 7
+    .repeat 16, i
+        PUSH i
+    .endrepeat
+    jsr rt_read_char
 .else
     .error "unknown probe case"
 .endif
@@ -94,6 +99,26 @@ rt_test_probe:
     bne @bad
 .elseif TEST_CASE = 6
     lda rt_depth
+    bne @bad
+.elseif TEST_CASE = 7
+    lda rt_depth
+    cmp #16
+    bne @bad
+    ldx #0
+@input_stack:
+    txa
+    lsr a
+    cmp rt_stack,x
+    bne @bad
+    lda rt_stack+1,x
+    bne @bad
+    inx
+    inx
+    cpx #32
+    bne @input_stack
+    jsr serial_in
+    bcs @bad
+    cmp #'Z'
     bne @bad
 .endif
     lda #'K'
