@@ -370,6 +370,9 @@ statement:
     jne syntax_error
 @target_ok:
     lda target_index
+    cmp #'?'
+    jeq @question_output
+    lda target_index
     cmp #'a'
     jcc @compile_operand
     cmp #'z'+1
@@ -386,10 +389,10 @@ statement:
     jsr peek
     lda look_state
     cmp #1
-    bne @compile_operand
+    jne @compile_operand
     lda look_byte
     cmp #'('
-    bne @compile_operand
+    jne @compile_operand
     jsr take
     jsr peek
     lda look_state
@@ -412,6 +415,59 @@ statement:
     ; The opening parenthesis was consumed to distinguish `()` from a normal
     ; grouped operand. Compile the group contents, then continue the ordinary
     ; operator/comma path with its result already on the value stack.
+    jsr enter_nesting
+    lda fe_compile_status
+    jne @done
+    lda #0
+    jsr operand
+    lda fe_compile_status
+    jne @done
+    jsr close_group
+    dec nesting
+    lda fe_compile_status
+    jne @done
+    lda #1
+    jsr operand
+    lda fe_compile_status
+    jne @done
+    jmp @operands_ready
+@question_output:
+    ; Only exact `?=()` is a zero-operand newline output. Preserve ordinary
+    ; grouped-expression handling whenever the parentheses are nonempty.
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @compile_operand
+    lda look_byte
+    cmp #'('
+    jne @compile_operand
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    bne @question_group
+    lda look_byte
+    cmp #')'
+    bne @question_group
+    jsr take
+    jsr peek
+    jsr statement_end
+    lda fe_compile_status
+    jne @done
+    lda #10
+    ldx #0
+    jsr cc_push_const
+    lda cc_status
+    jne backend_error
+    lda #<rt_print_char
+    ldx #>rt_print_char
+    jsr cc_call
+    lda cc_status
+    jne backend_error
+    rts
+@question_group:
+    ; The opener is consumed, so compile the group through the same operand
+    ; path used by a Write call, then continue normal RHS parsing.
     jsr enter_nesting
     lda fe_compile_status
     jne @done
