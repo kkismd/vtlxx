@@ -477,6 +477,7 @@ fn template_calls_expand_into_the_current_caller() {
     expect("&=a{} [ A=MAX{} ] a{A}=()", 2, b"");
     expect("==MAXA,3 &=a{} [ A=MAX{} ] a{A}=() ?=A", 0, b"3Z");
     expect("&=a{} [ A={} ] a{C}=() ?=C", 0, b"0Z");
+    expect("&=a{} [ {}={} ] a{A}=()", 0, b"Z");
     expect("&=a{} [ {}={}+1 ] A=0 &=p [ a{A}=() ?=A ] p=()", 0, b"1Z");
     expect("&=a{} [ {}={}+1 ] A=0 %=1 [ a{A}=() ] ?=A", 0, b"1Z");
     expect(
