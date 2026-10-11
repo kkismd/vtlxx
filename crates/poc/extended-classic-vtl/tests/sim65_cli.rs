@@ -165,6 +165,20 @@ fn template_runs_without_test_sentinel_and_compile_failure_is_nonzero() {
 }
 
 #[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn p0a_template_calibration_example_matches_reference_output_bytes() {
+    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("examples/p0a_template_calibration.vtl");
+    let output = run_cli(&[example.to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"58\n20\n40\n");
+}
+
+#[test]
 fn oversized_source_is_rejected_before_toolchain_start() {
     let temp = TestDir::new();
     let source = temp.0.join("oversized.vtl");

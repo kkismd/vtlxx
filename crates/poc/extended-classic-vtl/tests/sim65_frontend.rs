@@ -138,6 +138,14 @@ fn basic_source_compiles_and_executes() {
     expect("A=40", 0, b"Z");
     expect("A=40 ?=A", 0, b"40Z");
     expect("A=40\nA=A+2\n?=A", 0, b"42Z");
+    expect("?=()", 0, b"\nZ");
+    expect("?=() ?=()", 0, b"\n\nZ");
+    expect("~=42 ?=() ?=~", 0, b"\n42Z");
+    expect("?=1 ?=() ?=2", 0, b"1\n2Z");
+    expect("?=(42)", 0, b"42Z");
+    expect("?=(1)+2", 0, b"3Z");
+    expect("?=() ; comment\n?=7", 0, b"\n7Z");
+    expect("?=()", 0, b"\nZ");
     expect("?=1 ?=2 A=3 ?=A ?=4", 0, b"1234Z");
     expect("&=p [ ] p=()", 0, b"Z");
     expect("&=p [ ?=~ ] p=42", 0, b"42Z");
@@ -155,6 +163,9 @@ fn basic_source_compiles_and_executes() {
     expect("&=p [ ^=3 ?=9 ] ^=3 ?=8 p=()", 0, b"89Z");
     expect("?=1 &=p [ ?=8 ] ?=2 p=() ?=3", 0, b"1283Z");
     expect("&=p [ ?=1 ] ?=2 &=q [ ?=3 ] ?=4 q=() p=()", 0, b"2431Z");
+    expect("&=p [ ?=() ] p=()", 0, b"\nZ");
+    expect("%=1 [ ?=() ]", 0, b"\nZ");
+    expect("A=0 *=() [ ~=A<1 ] [ ?=() A=A+1 ]", 0, b"\nZ");
     expect("%=1 [ ] ?=7", 0, b"7Z");
     expect("%=1 [ ?=1 ]", 0, b"1Z");
     expect("%=0 [ ?=1 ]", 0, b"Z");
@@ -238,6 +249,11 @@ fn basic_source_compiles_and_executes() {
 fn malformed_source_never_starts_runtime() {
     for source in [
         "A=",
+        "A=()",
+        "?=( )",
+        "?=()?=1",
+        "?=(",
+        "?=()+1",
         "A=32768",
         "A=-32769",
         "A=1+",
