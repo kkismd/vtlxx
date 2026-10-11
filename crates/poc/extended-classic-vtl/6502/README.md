@@ -80,7 +80,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_frontend -- --ignored
 
 `&=a{} [ ... ]` は lowercase identity 1 byte のcompile-only template definitionである。本文は通常のRHS compilerへ渡さず、register assignment (`A..Z=`) と hole assignment (`{}=`) の形、および `{}` holeだけを検証する。コメントを除いたstatement sourceを元の文字順で共有arenaへ保存し、statement間はLF 1 byteで区切る。全条件と `cc_source_finish` が成功した後にだけ26-entry registryへ公開する。空本文・holeなし・不正header/body・名前衝突・arena容量不足ではcompile-runを失敗させ、runtimeを開始しない。template registryはcompile-runごとにresetされる。
 
-template identityは既存Write roleとSourceProcedure roleのbindingを両方照会し、templateとWriteの同名定義も拒否する。今後SourceProcedure roleを追加するfrontendも、公開前に同じrole照会を行う。既存 `cc_binding` tableやrole意味論は変更しない。呼出構文、穴置換、caller compileは未実装で、registry lookupを使う後続issueの対象である。
+template identityは既存Write roleとSourceProcedure roleのbindingを両方照会し、templateとWriteの同名定義も拒否する。今後SourceProcedure roleを追加するfrontendも、公開前に同じrole照会を行う。既存 `cc_binding` tableやrole意味論は変更しない。
 
 frontend専用template moduleの選択ABIは次のとおり（portable ECVTL APIではない）。
 
@@ -90,5 +90,7 @@ frontend専用template moduleの選択ABIは次のとおり（portable ECVTL API
 | `template_publish` | A = identity、`cc_arg` = source start、`cc_data_length` = length | valid flagを最後に立てる。失敗時 `cc_status = 3` |
 | `template_lookup` | A = identity | carry clearなら `cc_arg` = start、`cc_data_length` = length。missはcarry set。状態を変更しない |
 | `template_reset` | なし | 全26 slotを未登録にする |
+
+呼出 `a{X}=()` はtemplate sourceを逐次読む仮想readerへ切り替え、保存sourceの各 `{}` をXの1 byteへ置き換えながら既存の通常assignment compilerへ渡す。readerはsourceを変更せず、展開source全体のbufferも持たない。展開されたassignmentは呼出を含む現在のownerへ通常どおり生成される。呼出文を原sourceで消費し、lookup結果と原sourceのlookaheadを退避してから仮想readerを開始するため、展開後に元のseparator/comment/frame位置からcompileを続ける。template本文の再帰呼出は対象外。
 
 source本体は `compiler/arena.s` が所有し、template registryには開始位置・長さ・valid flagだけを保持する。`sim65_frontend` のtemplate probeは保存byte列、canonical LF、lookup結果、失敗時の既公開entry保持を直接確認する。

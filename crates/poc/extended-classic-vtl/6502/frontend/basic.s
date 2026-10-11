@@ -7,7 +7,9 @@
 .exportzp fe_compile_status
 ; Private frontend ABI: identity in A; publish/lookup use cc_arg for start and
 ; cc_data_length for length. template_is_bound and lookup leave cc_status alone.
-.import template_reset, template_is_bound, template_publish
+.import template_reset, template_is_bound, template_publish, template_lookup
+.import template_reader_init, template_reader_next, template_reader_stop
+.importzp template_reader_error
 .import cc_source_begin, cc_source_append, cc_source_finish, cc_source_abort, cc_source_is_active
 .import fe_init, fe_next, cc_init, cc_begin_owner, cc_complete_owner
 .import cc_define_label, cc_label_jump
@@ -27,6 +29,13 @@
 fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
 look_state:        .res 1       ; 0 empty, 1 byte, 2 frame end, 3 transport error
 look_byte:         .res 1
+virtual_active:    .res 1
+original_look_state: .res 1
+original_look_byte: .res 1
+template_identity: .res 1
+template_replacement: .res 1
+template_start:    .res 2
+template_length:   .res 2
 target_index:      .res 1
 nesting:           .res 1
 structured_depth:  .res 1
@@ -76,6 +85,7 @@ fe_compile_run:
     lda #0
     sta fe_compile_status
     sta look_state
+    sta virtual_active
     sta nesting
     sta structured_depth
     sta while_depth
@@ -239,6 +249,14 @@ set_error:
 peek:
     lda look_state
     bne @ready
+    lda virtual_active
+    beq @source
+    jsr template_reader_next
+    bcc @byte
+    lda template_reader_error
+    beq @end
+    jmp syntax_error
+@source:
     jsr fe_next
     bcc @byte
     lda fe_status
@@ -308,6 +326,15 @@ statement:
     lda look_state
     cmp #1
     jne syntax_error
+    lda target_index
+    cmp #'a'
+    jcc @require_equals
+    cmp #'z'+1
+    jcs @require_equals
+    lda look_byte
+    cmp #'{'
+    jeq template_call
+@require_equals:
     lda look_byte
     cmp #'='
     jne syntax_error
@@ -433,6 +460,7 @@ statement:
     lda fe_compile_status
     beq @comma
     rts
+
 @end:
     jsr statement_end
     lda fe_compile_status
@@ -1008,6 +1036,136 @@ template_append:
 
 ; Numeric label operands reuse the compile-run constant table, then delegate
 ; all owner-local definition/fixup behavior to the backend.
+; Parse a{X}=(), preserve the original one-byte lookahead, then feed the
+; saved template through the same statement compiler under a virtual reader.
+template_call:
+    lda target_index
+    sta template_identity
+    jsr take                         ; {
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'A'
+    jcc syntax_error
+    cmp #'Z'+1
+    jcs syntax_error
+    sta template_replacement
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'}'
+    jne syntax_error
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'='
+    jne syntax_error
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'('
+    jne syntax_error
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #')'
+    jne syntax_error
+    jsr take
+    jsr peek
+    jsr statement_end
+    lda fe_compile_status
+    jne @done
+    ; statement_end validates without consuming the delimiter lookahead.
+    lda look_state
+    sta original_look_state
+    lda look_byte
+    sta original_look_byte
+    lda template_identity
+    jsr template_lookup
+    jcs @undefined
+    lda cc_arg
+    sta template_start
+    lda cc_arg+1
+    sta template_start+1
+    lda cc_data_length
+    sta template_length
+    lda cc_data_length+1
+    sta template_length+1
+    lda template_start
+    sta cc_arg
+    ldx template_start+1
+    stx cc_arg+1
+    lda template_length
+    sta cc_data_length
+    lda template_length+1
+    sta cc_data_length+1
+    lda template_start
+    ldx template_start+1
+    ldy template_replacement
+    jsr template_reader_init
+    lda #1
+    sta virtual_active
+    lda #0
+    sta look_state
+@expand_next:
+    jsr skip_separators
+    lda fe_compile_status
+    bne @expand_fail
+    lda look_state
+    cmp #2
+    beq @expand_done
+    cmp #1
+    jne @expand_fail
+    lda look_byte
+    cmp #'A'
+    jcc @expand_fail
+    cmp #'Z'+1
+    jcs @expand_fail
+    jsr statement
+    lda fe_compile_status
+    bne @expand_fail
+    lda cc_status
+    bne @expand_backend
+    jmp @expand_next
+@expand_done:
+    jsr template_reader_stop
+    lda #0
+    sta virtual_active
+    lda original_look_state
+    sta look_state
+    lda original_look_byte
+    sta look_byte
+    rts
+@expand_backend:
+    jsr template_reader_stop
+    lda #0
+    sta virtual_active
+    jmp backend_error
+@expand_fail:
+    jsr template_reader_stop
+    lda #0
+    sta virtual_active
+    rts
+@undefined:
+    jmp syntax_error
+@done:
+    rts
+
+
 fe_label:
     jsr resolve_label_operand
     lda fe_compile_status

@@ -54,6 +54,7 @@ fn build_and_run_input_with_frontend(input: &[u8], frontend_fixture: &str) -> Ou
         frontend_fixture,
         "6502/frontend/basic.s",
         "6502/frontend/template.s",
+        "6502/frontend/template_reader.s",
         "6502/frontend/source.s",
         "6502/compiler/arena.s",
         "6502/compiler/emitter.s",
@@ -463,4 +464,61 @@ fn template_registry_keeps_u16_source_length() {
         build_and_run_input_with_frontend(&framed, "tests/fixtures/sim65/template_length_probe.s");
     assert_eq!(result.status.code(), Some(0), "{result:?}");
     assert_eq!(result.stdout, b"L", "{result:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn template_calls_expand_into_the_current_caller() {
+    expect(
+        "&=a{} [ {}={}+1 ] A=0 B=10 a{A}=() a{B}=() ?=A ?=B",
+        0,
+        b"111Z",
+    );
+    expect("&=a{} [ A=MAX{} ] a{A}=()", 2, b"");
+    expect("==MAXA,3 &=a{} [ A=MAX{} ] a{A}=() ?=A", 0, b"3Z");
+    expect("&=a{} [ A={} ] a{C}=() ?=C", 0, b"0Z");
+    expect("&=a{} [ {}={}+1 ] A=0 &=p [ a{A}=() ?=A ] p=()", 0, b"1Z");
+    expect("&=a{} [ {}={}+1 ] A=0 %=1 [ a{A}=() ] ?=A", 0, b"1Z");
+    expect(
+        "&=a{} [ {}={}+1 ] A=0 *=() [ ~=A<1 ] [ a{A}=() ] ?=A",
+        0,
+        b"1Z",
+    );
+    expect("&=a{} [ {}={} ] a{A}=() ; tail\n?=A", 0, b"0Z");
+    expect("&=a{} [ {}=A+ ] a{B}=()", 2, b"");
+    for source in [
+        "a{a}=()",
+        "a{}=()",
+        "a{AA}=()",
+        "a{A}=1",
+        "a{A}=(1)",
+        "a{A}=()?=1",
+    ] {
+        expect(source, 2, b"");
+    }
+    for call in include_str!("fixtures/template_p0a/invalid_call_forms.vtl")
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+    {
+        let source = format!("&=a{{}} [ A={{}} ] {call}");
+        expect(&source, 2, b"");
+    }
+    let mut long_body = String::from("A=0 &=a{} [ ");
+    long_body.push_str(&"A={} ".repeat(60));
+    long_body.push_str("] a{A}=() ?=A");
+    expect(&long_body, 0, b"0Z");
+
+    let mut all_identities = String::new();
+    for identity in b'a'..=b'z' {
+        let identity = char::from(identity);
+        all_identities.push_str(&format!(
+            "&={identity}{{}} [ {{}}={{}} ] {identity}{{A}}=() "
+        ));
+    }
+    expect(&all_identities, 0, b"Z");
+
+    let mut capacity_failure = String::from("&=a{} [ ");
+    capacity_failure.push_str(&"A={} ".repeat(300));
+    capacity_failure.push_str("] a{A}=()");
+    expect(&capacity_failure, 4, b"");
 }
