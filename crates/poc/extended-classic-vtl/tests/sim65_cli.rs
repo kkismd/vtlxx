@@ -5,6 +5,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+type RuntimeInputCase = (&'static str, &'static [u8], &'static [u8], &'static [u8]);
 
 struct TestDir(PathBuf);
 
@@ -35,6 +36,36 @@ fn run_cli(args: &[&str]) -> Output {
         .args(args)
         .output()
         .unwrap()
+}
+
+fn run_program_with_input(temp: &TestDir, name: &str, source: &[u8], input: &[u8]) -> Output {
+    let source_path = temp.0.join(format!("{name}.vtl"));
+    let input_path = temp.0.join(format!("{name}.bin"));
+    fs::write(&source_path, source).unwrap();
+    fs::write(&input_path, input).unwrap();
+
+    Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+        .arg(&source_path)
+        .arg("--runtime-input")
+        .arg(&input_path)
+        .output()
+        .unwrap()
+}
+
+fn assert_runtime_input_output(
+    temp: &TestDir,
+    name: &str,
+    source: &[u8],
+    input: &[u8],
+    expected: &[u8],
+) {
+    let output = run_program_with_input(temp, name, source, input);
+    assert!(
+        output.status.success(),
+        "{name}: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, expected, "{name}");
 }
 
 #[test]
@@ -70,6 +101,40 @@ fn compiles_native_source_and_reads_binary_runtime_input() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"65");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn runtime_input_primary_read_matches_waiting_input_semantics() {
+    let temp = TestDir::new();
+    let cases: &[RuntimeInputCase] = &[
+        ("basic", b"A=$ ?=A", &[0x41], b"65"),
+        ("nul_then_basic", b"A=$ ?=A", &[0x00, 0x41], b"65"),
+        (
+            "repeated_nul_then_basic",
+            b"A=$ ?=A",
+            &[0x00, 0x00, 0x41],
+            b"65",
+        ),
+        ("high_bytes", b"A=$ B=$ ?=A ?=B", &[0x80, 0xff], b"128255"),
+        ("eof", b"A=$ ?=A", &[], b"-1"),
+        ("repeated_eof", b"A=$ B=$ ?=A ?=B", &[], b"-1-1"),
+        ("nul_then_eof", b"A=$ ?=A", &[0x00], b"-1"),
+    ];
+
+    for (name, source, input, expected) in cases {
+        assert_runtime_input_output(&temp, name, source, input, expected);
+    }
+
+    // NUL is physically transported but discarded; 0xff remains a valid byte,
+    // and only transport EOF becomes -1.
+    assert_runtime_input_output(
+        &temp,
+        "nul_high_bytes_and_eof",
+        b"A=$ B=$ C=$ D=$ ?=A ?=B ?=C ?=D",
+        &[0x00, 0x7f, 0x80, 0xff],
+        b"127128255-1",
+    );
 }
 
 #[test]
