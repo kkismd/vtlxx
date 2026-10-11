@@ -63,11 +63,17 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
 
 source file は raw bytes で読み、最大 65535 bytes までです。target は stdin の先頭に source 長の u16 little-endian 2 byte を受け取り、その後に source bytes と runtime input bytes を読みます。任意の runtime input file は `--runtime-input` で指定できます。
 
-6502 frontend の runtime input 構文は現在実装待ちです（#317、採用 ADR #328）。そのため本 CLI は bytes を source frame の後ろへ忠実に渡しますが、source から読み出す end-to-end 確認は #317 の実装後に行います。
+6502 frontend では `$` を待機文字入力として利用できます（#317、採用 ADR #328）。`--runtime-input` で指定した raw bytes は source frame の後ろに渡され、ECVTL の `$` から読み取られます。物理 NUL (`0x00`) は読み捨てられ、`1..255` は値として返り、入力 EOF は `-1` になります。したがって `0xff` は EOF ではなく `255` です。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
   path/to/program.vtl --runtime-input path/to/input.bin
+```
+
+たとえば `program.vtl` に `A=$ ?=A`、`input.bin` に byte `0x41` を置くと、stdout に `65` が出ます。source-level の入力経路は次の ignored integration test でも実機相当の `sim65` 実行を通して確認できます。
+
+```sh
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_cli -- --ignored
 ```
 
 成功時の stdout は sim65 が出した bytes そのものです。CLI の診断は stderr に出し、usage・file・toolchain・assemble/link・compile/runtime・cycle-limit failure は nonzero status で終了します。sim65 の実行上限は 4,000,000 cycles です。実行は `ca65 -t sim6502` で target source を組み立て、`ld65 -t sim6502` で `sim6502.lib` と link し、生成物を一時 directory に置いて sim65 へ渡す流れです。成功・失敗のどちらも一時生成物は削除します。
