@@ -568,8 +568,18 @@ statement:
     lda look_byte
     cmp #'['
     jeq @condition_empty
+    cmp #'~'
+    beq @condition_stack
     lda #0
     jsr operand
+    jmp @condition_ready
+@condition_stack:
+    ; A root `~` continues the condition from the existing value stack.
+    ; It emits no value itself; JumpIfZero later consumes the result.
+    jsr take
+    lda #1
+    jsr operand
+@condition_ready:
     lda fe_compile_status
     jne @conditional_done
     lda cc_status

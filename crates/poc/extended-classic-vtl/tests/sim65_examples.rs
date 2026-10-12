@@ -45,19 +45,16 @@ const EXAMPLES: &[ExampleCase] = &[
     ExampleCase {
         name: "eight_queens_storage.vtl",
         disposition: Disposition::KnownNonconformant {
-            kind: FailureKind::FrontendSyntax,
-            exit_code: 130,
+            kind: FailureKind::CycleLimit,
+            exit_code: 126,
             expected_rust_stdout: None,
-            reason: "6502 frontend rejects syntax used by the example; exact construct not isolated",
+            reason: "6502 frontend accepts the source, but sim65 reaches its cycle limit before completion",
         },
     },
     ExampleCase {
         name: "maze_dfs.vtl",
-        disposition: Disposition::KnownNonconformant {
-            kind: FailureKind::FrontendSyntax,
-            exit_code: 130,
-            expected_rust_stdout: Some(b"7\n"),
-            reason: "%=~ is a candidate cause, not confirmed",
+        disposition: Disposition::Portable {
+            expected_stdout: Some(b"7\n"),
         },
     },
     ExampleCase {
