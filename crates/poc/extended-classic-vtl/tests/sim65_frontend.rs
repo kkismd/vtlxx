@@ -174,6 +174,15 @@ fn basic_source_compiles_and_executes() {
     expect("%=1 [ ] ?=3", 0, b"3Z");
     expect("%=1 [ %=0 [ ?=1 ] [ ?=2 ] ] [ ?=3 ]", 0, b"2Z");
     expect("%=0 [ %=1 [ ?=1 ] ] [ ?=2 ]", 0, b"2Z");
+    expect("~=1 %=~ [ ?=7 ]", 0, b"7Z");
+    expect("~=0 %=~ [ ?=1 ] [ ?=2 ]", 0, b"2Z");
+    expect("~=1 %=~+1 [ ?=3 ]", 0, b"3Z");
+    expect("~=1 ~=0 %=~ [ ?=1 ] [ ?=2 ] ?=~", 0, b"21Z");
+    expect(
+        "~=1 %=~ ; condition continues after comment\n [ ?=8 ]",
+        0,
+        b"8Z",
+    );
     expect("A=0 *=() [ ~=0 ] [ A=99 ] ?=A", 0, b"0Z");
     expect("A=0 *=() [ ~=A<1 ] [ A=A+1 ] ?=A", 0, b"1Z");
     expect("A=0 *=() [ ~=A<4 ] [ A=A+1 ] ?=A", 0, b"4Z");
@@ -309,10 +318,13 @@ fn malformed_source_never_starts_runtime() {
         "%=1 [ ] [ A=",
         "%=1 [ ] [",
         "%= [ ]",
+        "%=~",
         "%=1[ ?=1 ]",
         "%=1 []",
         "%=1 [?=1 ]",
         "%=1 [ ?=1 ][ ?=2 ]",
+        "%=1+~ [ ?=1 ]",
+        "%=(~) [ ?=1 ]",
         "%=1 [ ]?=3",
         "%=1 [ ?=1]",
         "*=",
@@ -359,6 +371,7 @@ fn malformed_source_never_starts_runtime() {
             b"",
         );
     }
+    expect("%=~ [ ?=1 ]", 1, b"");
     let nested_17 = format!("{}?=9{}", "%=1 [ ".repeat(17), " ]".repeat(17));
     expect(&nested_17, 2, b"");
     let nested_while_17 = format!("~=0 {}?=9{}", "*=() [ ~=0 ] [ ".repeat(17), " ]".repeat(17));
