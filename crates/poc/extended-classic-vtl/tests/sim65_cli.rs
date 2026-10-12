@@ -73,11 +73,31 @@ fn help_and_argument_errors_do_not_need_cc65() {
     let help = run_cli(&["--help"]);
     assert!(help.status.success());
     assert!(String::from_utf8_lossy(&help.stdout).contains("--runtime-input"));
+    assert!(String::from_utf8_lossy(&help.stdout).contains("--cycle-limit"));
 
     let invalid = run_cli(&["--unknown"]);
     assert!(!invalid.status.success());
     assert!(invalid.stdout.is_empty());
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("unknown option"));
+}
+
+#[test]
+fn invalid_cycle_limits_are_rejected_before_toolchain_start() {
+    for args in [
+        vec!["source.vtl", "--cycle-limit", "0"],
+        vec!["source.vtl", "--cycle-limit", "-1"],
+        vec!["source.vtl", "--cycle-limit", ""],
+        vec!["source.vtl", "--cycle-limit", "12x"],
+        vec!["source.vtl", "--cycle-limit", "4294967296"],
+        vec!["source.vtl", "--cycle-limit"],
+        vec!["source.vtl", "--cycle-limit", "10", "--cycle-limit", "20"],
+    ] {
+        let output = run_cli(&args);
+        assert_eq!(output.status.code(), Some(2), "args={args:?}");
+        assert!(output.stdout.is_empty(), "args={args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("--cycle-limit"), "args={args:?}: {stderr}");
+    }
 }
 
 #[test]
@@ -101,6 +121,23 @@ fn compiles_native_source_and_reads_binary_runtime_input() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"65");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn cycle_limit_option_is_passed_to_sim65() {
+    let temp = TestDir::new();
+    let source = temp.0.join("cycle-limit.vtl");
+    fs::write(&source, b"A=1").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+        .arg(&source)
+        .args(["--cycle-limit", "1"])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("cycle limit"));
 }
 
 #[test]

@@ -6,14 +6,15 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const CYCLE_LIMIT: &str = "4000000";
+const DEFAULT_CYCLE_LIMIT: u32 = 4_000_000;
 const MAX_SOURCE_LEN: usize = u16::MAX as usize;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
-const USAGE: &str = "Usage: ecvtl6502 <source.vtl> [--runtime-input <path>]\n\
+const USAGE: &str = "Usage: ecvtl6502 <source.vtl> [--runtime-input <path>] [--cycle-limit <cycles>]\n\
 Compile ECVTL source with the NMOS 6502 target and run it with sim65.\n\
 Options:\n\
   --runtime-input <path>  Supply raw runtime input bytes\n\
+  --cycle-limit <cycles>  Set sim65 cycle limit (default: 4000000)\n\
   -h, --help              Show this help\n";
 
 struct TempDir(PathBuf);
@@ -49,6 +50,7 @@ impl Drop for TempDir {
 struct Arguments {
     source: PathBuf,
     runtime_input: Option<PathBuf>,
+    cycle_limit: u32,
 }
 
 #[derive(Debug)]
@@ -61,6 +63,8 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
     let mut args = args.into_iter();
     let mut source = None;
     let mut runtime_input = None;
+    let mut cycle_limit = DEFAULT_CYCLE_LIMIT;
+    let mut cycle_limit_seen = false;
     while let Some(arg) = args.next() {
         if arg == "-h" || arg == "--help" {
             return Ok(ParsedArguments::Help);
@@ -73,6 +77,26 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
                 Some(PathBuf::from(args.next().ok_or_else(|| {
                     "--runtime-input requires a path".to_string()
                 })?));
+        } else if arg == "--cycle-limit" {
+            if cycle_limit_seen {
+                return Err("--cycle-limit may be specified only once".into());
+            }
+            cycle_limit_seen = true;
+            let value = args
+                .next()
+                .ok_or_else(|| "--cycle-limit requires a positive decimal integer".to_string())?;
+            let value = value
+                .to_str()
+                .ok_or_else(|| "--cycle-limit requires a positive decimal integer".to_string())?;
+            if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err("--cycle-limit requires a positive decimal integer".into());
+            }
+            cycle_limit = value
+                .parse::<u32>()
+                .map_err(|_| "--cycle-limit is outside the supported range".to_string())?;
+            if cycle_limit == 0 {
+                return Err("--cycle-limit must be greater than zero".into());
+            }
         } else if arg.to_string_lossy().starts_with('-') {
             return Err(format!("unknown option: {}", arg.to_string_lossy()));
         } else if source.replace(PathBuf::from(arg)).is_some() {
@@ -83,6 +107,7 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
     Ok(ParsedArguments::Run(Arguments {
         source,
         runtime_input,
+        cycle_limit,
     }))
 }
 
@@ -132,7 +157,7 @@ fn require_success(stage: &str, tool: &str, output: &Output) -> Result<(), Strin
     ))
 }
 
-fn build_and_run(input: &[u8]) -> Result<Output, String> {
+fn build_and_run(input: &[u8], cycle_limit: u32) -> Result<Output, String> {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         "6502/target/sim65_cli.s",
@@ -188,7 +213,7 @@ fn build_and_run(input: &[u8]) -> Result<Output, String> {
         "execute",
         &[
             OsStr::new("-x"),
-            OsStr::new(CYCLE_LIMIT),
+            OsStr::new(&cycle_limit.to_string()),
             executable.as_os_str(),
         ],
         input,
@@ -204,7 +229,7 @@ fn execute(arguments: Arguments) -> Result<Output, String> {
         None => Vec::new(),
     };
     let input = frame_input(&source, &runtime_input)?;
-    build_and_run(&input)
+    build_and_run(&input, arguments.cycle_limit)
 }
 
 fn report_simulation_failure(output: &Output) -> (i32, String) {
@@ -316,6 +341,50 @@ mod tests {
                 .unwrap_err()
                 .contains("requires a path")
         );
+        for value in ["0", "-1", "", "12x", "4294967296"] {
+            assert!(
+                parse_arguments(["source.vtl".into(), "--cycle-limit".into(), value.into()])
+                    .is_err(),
+                "accepted invalid cycle limit {value:?}"
+            );
+        }
+        assert!(
+            parse_arguments(["source.vtl".into(), "--cycle-limit".into()])
+                .unwrap_err()
+                .contains("requires")
+        );
+        assert!(
+            parse_arguments([
+                "source.vtl".into(),
+                "--cycle-limit".into(),
+                "100".into(),
+                "--cycle-limit".into(),
+                "200".into(),
+            ])
+            .unwrap_err()
+            .contains("only once")
+        );
+        match parse_arguments([
+            "source.vtl".into(),
+            "--cycle-limit".into(),
+            "256000000".into(),
+            "--runtime-input".into(),
+            "input.bin".into(),
+        ])
+        .unwrap()
+        {
+            ParsedArguments::Run(arguments) => {
+                assert_eq!(arguments.cycle_limit, 256_000_000);
+                assert_eq!(arguments.runtime_input, Some(PathBuf::from("input.bin")));
+            }
+            ParsedArguments::Help => panic!("expected run arguments"),
+        }
+        match parse_arguments(["source.vtl".into()]).unwrap() {
+            ParsedArguments::Run(arguments) => {
+                assert_eq!(arguments.cycle_limit, DEFAULT_CYCLE_LIMIT);
+            }
+            ParsedArguments::Help => panic!("expected run arguments"),
+        }
     }
 
     #[test]
