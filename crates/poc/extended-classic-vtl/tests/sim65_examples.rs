@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Output};
 
 const EXAMPLES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
@@ -39,7 +39,7 @@ const EXAMPLES: &[ExampleCase] = &[
             kind: FailureKind::CycleLimit,
             exit_code: 126,
             expected_rust_stdout: None,
-            reason: "6502 execution reaches the configured sim65 cycle limit; cause not isolated",
+            reason: "observed sim65 cycle-limit termination; this does not establish syntax conformance",
         },
     },
     ExampleCase {
@@ -106,105 +106,131 @@ fn examples_match_the_rust_reference_or_the_measured_6502_disposition() {
         "examples/*.vtl and the conformance manifest must match in both directions"
     );
 
+    let mut failures = Vec::new();
     for case in EXAMPLES {
-        let source = examples_dir.join(case.name);
-        let rust = run(env!("CARGO_BIN_EXE_ecvtl"), &source);
-        assert_process_started(&rust, case.name, "Rust ecvtl");
-        assert!(
-            rust.status.success(),
+        if let Err(error) = check_example(case, examples_dir) {
+            eprintln!("{error}");
+            failures.push(error);
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "{} example(s) failed conformance checks:\n{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> {
+    let source = examples_dir.join(case.name);
+    let rust = run(env!("CARGO_BIN_EXE_ecvtl"), &source)
+        .map_err(|error| format!("{}: {error}", case.name))?;
+    if rust.status.code().is_none() {
+        return Err(format!("{}: Rust ecvtl terminated by signal", case.name));
+    }
+    if !rust.status.success() {
+        return Err(format!(
             "{}: Rust reference failed (exit {:?}): {}",
             case.name,
             rust.status.code(),
             String::from_utf8_lossy(&rust.stderr)
-        );
+        ));
+    }
 
-        let target = run(env!("CARGO_BIN_EXE_ecvtl6502"), &source);
-        assert_process_started(&target, case.name, "6502 ecvtl6502");
+    let target = run(env!("CARGO_BIN_EXE_ecvtl6502"), &source)
+        .map_err(|error| format!("{}: {error}", case.name))?;
+    if target.status.code().is_none() {
+        return Err(format!(
+            "{}: 6502 ecvtl6502 terminated by signal",
+            case.name
+        ));
+    }
 
-        match case.disposition {
-            Disposition::Portable { expected_stdout } => {
-                assert!(
-                    target.status.success(),
+    match case.disposition {
+        Disposition::Portable { expected_stdout } => {
+            if !target.status.success() {
+                return Err(format!(
                     "{}: expected portable success, got exit {:?}: {}",
                     case.name,
                     target.status.code(),
                     String::from_utf8_lossy(&target.stderr)
-                );
-                assert_eq!(
-                    target.stdout, rust.stdout,
-                    "{}: Rust/6502 stdout bytes",
-                    case.name
-                );
-                if let Some(expected) = expected_stdout {
-                    assert_eq!(
-                        rust.stdout, expected,
-                        "{}: fixed expected stdout bytes",
-                        case.name
-                    );
-                }
-                println!(
-                    "{}: Rust exit=0, 6502 exit=0, disposition=portable success, stdout={} bytes",
-                    case.name,
-                    target.stdout.len()
-                );
+                ));
             }
-            Disposition::KnownNonconformant {
-                kind,
-                exit_code,
-                expected_rust_stdout,
-                reason,
-            } => {
-                if let Some(expected) = expected_rust_stdout {
-                    assert_eq!(
-                        rust.stdout, expected,
-                        "{}: fixed Rust reference bytes",
-                        case.name
-                    );
-                }
-                let observed_code = target.status.code().unwrap_or(-1);
-                let observed_kind = classify_failure(&target);
-                assert_eq!(
-                    observed_code,
-                    exit_code,
-                    "{}: known failure status changed (expected {:?}, got {:?}); {}",
+            if target.stdout != rust.stdout {
+                return Err(format!(
+                    "{}: Rust/6502 stdout bytes differ (Rust {}, 6502 {})",
                     case.name,
-                    exit_code,
-                    observed_code,
-                    String::from_utf8_lossy(&target.stderr)
-                );
-                assert_eq!(
-                    observed_kind,
-                    Some(kind),
-                    "{}: known failure classification changed: {}",
+                    describe_bytes(&rust.stdout),
+                    describe_bytes(&target.stdout)
+                ));
+            }
+            if let Some(expected) = expected_stdout
+                && rust.stdout != expected
+            {
+                return Err(format!(
+                    "{}: Rust stdout differs from fixed bytes (actual {}, expected {})",
                     case.name,
-                    String::from_utf8_lossy(&target.stderr)
-                );
-                println!(
-                    "{}: Rust exit=0, 6502 exit={}, disposition=known {:?}, stdout={} bytes; {}",
+                    describe_bytes(&rust.stdout),
+                    describe_bytes(expected)
+                ));
+            }
+            println!(
+                "{}: Rust exit=0, 6502 exit=0, disposition=portable success, stdout={} bytes",
+                case.name,
+                target.stdout.len()
+            );
+        }
+        Disposition::KnownNonconformant {
+            kind,
+            exit_code,
+            expected_rust_stdout,
+            reason,
+        } => {
+            if let Some(expected) = expected_rust_stdout
+                && rust.stdout != expected
+            {
+                return Err(format!(
+                    "{}: fixed Rust reference bytes differ (actual {}, expected {})",
                     case.name,
-                    observed_code,
+                    describe_bytes(&rust.stdout),
+                    describe_bytes(expected)
+                ));
+            }
+            let observed_code = target.status.code().unwrap_or(-1);
+            let observed_kind = classify_failure(&target);
+            if observed_code != exit_code || observed_kind != Some(kind) {
+                return Err(format!(
+                    "{}: known failure changed (expected {:?}/{:?}, got {:?}/{:?}): {}",
+                    case.name,
                     kind,
-                    target.stdout.len(),
-                    reason
-                );
+                    exit_code,
+                    observed_kind,
+                    observed_code,
+                    String::from_utf8_lossy(&target.stderr)
+                ));
             }
+            println!(
+                "{}: Rust exit=0, 6502 exit={}, disposition=known {:?}, stdout={} bytes; {}",
+                case.name,
+                observed_code,
+                kind,
+                target.stdout.len(),
+                reason
+            );
         }
     }
+    Ok(())
 }
 
-fn run(binary: &str, source: &PathBuf) -> Output {
+fn run(binary: &str, source: &Path) -> Result<Output, String> {
     Command::new(binary)
         .arg(source)
         .output()
-        .unwrap_or_else(|error| panic!("start {} for {}: {error}", binary, source.display()))
+        .map_err(|error| format!("start {} for {}: {error}", binary, source.display()))
 }
 
-fn assert_process_started(output: &Output, name: &str, program: &str) {
-    assert!(
-        output.status.code().is_some(),
-        "{name}: {program} did not exit normally: {:?}",
-        output.status
-    );
+fn describe_bytes(bytes: &[u8]) -> String {
+    format!("{} bytes ({bytes:?})", bytes.len())
 }
 
 fn classify_failure(output: &Output) -> Option<FailureKind> {
