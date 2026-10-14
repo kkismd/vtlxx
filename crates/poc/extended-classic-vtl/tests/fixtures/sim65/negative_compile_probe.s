@@ -16,9 +16,13 @@ _main:
     cmp #4
     bne @frontend_failure
     lda cc_status
+    clc
+    adc #32
     jmp halt
 @frontend_failure:
     lda fe_compile_status
+    clc
+    adc #64
     jmp halt
 @success:
     lda #0

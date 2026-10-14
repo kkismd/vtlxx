@@ -166,9 +166,19 @@ fn fixups_source(count: usize) -> Vec<u8> {
     source
 }
 
-fn assert_cli_failure(temp: &TestDir, name: &str, source: &[u8], diagnostic: &str) {
+fn assert_cli_failure(
+    temp: &TestDir,
+    name: &str,
+    source: &[u8],
+    expected_exit: i32,
+    diagnostic: &str,
+) {
     let output = cli(temp, name, source);
-    assert!(!output.status.success(), "{name}: {output:?}");
+    assert_eq!(
+        output.status.code(),
+        Some(expected_exit),
+        "{name}: {output:?}"
+    );
     assert!(output.stdout.is_empty(), "{name}: {:?}", output.stdout);
     assert!(
         String::from_utf8_lossy(&output.stderr).contains(diagnostic),
@@ -193,23 +203,52 @@ fn compile_failures_do_not_start_runtime_and_report_expected_causes() {
     assert_eq!(success.stdout, b"42");
 
     // The IDs and byte lengths match docs/ecvtl-6502-negative-e2e-investigation.md.
-    let cases: Vec<(&str, Vec<u8>, &str, i32)> = vec![
-        ("syntax", b"?=42\nA=".to_vec(), "syntax error", 2),
+    let cases: Vec<(&str, Vec<u8>, &str, i32, i32)> = vec![
+        ("syntax", b"?=42\nA=".to_vec(), "syntax error", 130, 66),
         (
             "undefined-write",
             b"?=42\na=()\n".to_vec(),
             "compiler resource error",
-            8,
+            132,
+            40,
         ),
-        ("arena-170", arena_source(170), "compiler resource error", 1),
-        ("if-depth-17", if_nesting_source(17), "syntax error", 2),
-        ("labels-33", labels_source(33), "compiler resource error", 5),
-        ("fixups-33", fixups_source(33), "compiler resource error", 6),
+        (
+            "arena-170",
+            arena_source(170),
+            "compiler resource error",
+            132,
+            33,
+        ),
+        (
+            "if-depth-17",
+            if_nesting_source(17),
+            "syntax error",
+            130,
+            66,
+        ),
+        (
+            "labels-33",
+            labels_source(33),
+            "compiler resource error",
+            132,
+            37,
+        ),
+        (
+            "fixups-33",
+            fixups_source(33),
+            "compiler resource error",
+            132,
+            38,
+        ),
     ];
 
-    for (name, source, diagnostic, expected_probe_status) in cases {
+    for (name, source, diagnostic, expected_cli_exit, expected_probe_status) in cases {
         let failure = cli(&temp, name, &source);
-        assert!(!failure.status.success(), "{name}: {failure:?}");
+        assert_eq!(
+            failure.status.code(),
+            Some(expected_cli_exit),
+            "{name}: {failure:?}"
+        );
         assert!(failure.stdout.is_empty(), "{name}: {:?}", failure.stdout);
         assert!(
             String::from_utf8_lossy(&failure.stderr).contains(diagnostic),
@@ -221,10 +260,16 @@ fn compile_failures_do_not_start_runtime_and_report_expected_causes() {
             "{name}: {:?}",
             failure.stderr
         );
+        let probe_result = run_probe(&probe, &source);
+        assert!(
+            probe_result.stderr.is_empty(),
+            "{name}: probe emitted stderr, so its status may be an external sim65 failure: {:?}",
+            probe_result.stderr
+        );
         assert_eq!(
-            run_probe(&probe, &source).status.code(),
+            probe_result.status.code(),
             Some(expected_probe_status),
-            "{name} (source length {}): expected internal status {expected_probe_status}",
+            "{name} (source length {}): expected encoded probe status {expected_probe_status}",
             source.len()
         );
     }
@@ -247,12 +292,14 @@ fn compile_failures_do_not_start_runtime_and_report_expected_causes() {
         &temp,
         "while-depth-17",
         &while_nesting_source(17),
+        130,
         "syntax error",
     );
     assert_cli_failure(
         &temp,
         "parentheses-depth-17",
         &parentheses_source(17),
+        130,
         "syntax error",
     );
 }
