@@ -24,7 +24,7 @@
 
 `sim65_cli.s::_main` は失敗時に `fe_compile_status | $80` で halt し、Rust CLI は frontend status 4 を一律 `compiler resource error` と表示する。したがって公開 exit/stderr では未定義 binding と arena 超過を区別できない。既存 `sim65_frontend` の E2E helper も frontend status を返すだけで、backend 原因は出力しない。既存 `sim65_backend` は arena / binding API の各単体契約を確認するが、#380 の source fixture が残した `cc_status` を直接確認しない。
 
-**#380 の原因別判定方式:** CLI fixture は本番 `ecvtl6502` を使い、非ゼロ exit・診断・raw stdout をassertする。原因確認は別の test-only sim65 driver を追加して行う。この driver は同じ `fe_compile_run`、同じ frontend/backend/runtime object、同じ framed source bytes を使い、成功時は通常どおり generated entry を実行する。失敗時だけ `fe_compile_status == 4` なら halt status に `cc_status` を返し、それ以外は `fe_compile_status` を返す。例えば未定義 binding=8、arena=1、syntax=2 となる。観測位置は `fe_compile_run` の戻り直後（失敗時の source abort を含む本番処理の後）とする。test-only driver の違いは失敗 halt 値だけであり、runtime出力には触れない。CLI観測と probe 観測を同じ raw source で対にし、production API/diagnostic は変更しない。probe は内部状態の根拠であり、本番CLIの公開status契約を検査する代用にはしない。
+**#380 の原因別判定方式:** CLI fixture は本番 `ecvtl6502` を使い、非ゼロ exit・診断・raw stdout をassertする。原因確認は別の test-only sim65 driver を追加して行う。この driver は同じ `fe_compile_run`、同じ frontend/backend/runtime object、同じ framed source bytes を使い、成功時は通常どおり generated entry を実行する。失敗時だけ `fe_compile_status == 4` なら halt status に `cc_status` を返し、それ以外は `fe_compile_status` を返す。例えば未定義 binding=8、arena=1、syntax=2 となる。観測位置は `fe_compile_run` の戻り直後（失敗時の source abort を含む本番処理の後）とする。`basic.s::@failed` は `cc_source_is_active` が真の場合だけ abortし、`owner.s::cc_source_abort` / `arena.s::cc_data_abort` は active append を取り消した後も元の `cc_status` を保持する（inactive呼び出しは別途 misuse=3を報告するが、frontendはinactive時に呼ばない）。#380のprobeはこの分岐とstatus保持をコード確認してから、同じcompiler objectsとframe bytesで実行する。test-only driver の違いは失敗 halt 値だけであり、runtime出力には触れない。CLI観測と probe 観測を同じ raw source で対にし、production API/diagnostic は変更しない。probe は内部状態の根拠であり、本番CLIの公開status契約を検査する代用にはしない。
 
 ## 原因別 fixture と runtime 未開始の確認
 
@@ -37,6 +37,35 @@
 | ARENA | `?=42\n` に `A=1\n` を N 回連結 | N=169 成功 (681 bytes)、N=170 失敗 (685 bytes) | 有効なstatement列を compile する途中の shared 2,048-byte arena 予約 | cc=1 は `cc_reserve_shared` の容量経路から静的推定。frontend=4、CLI exit 132。cc=1 のE2E probeは未実施 | 実測: N=170 stdout `b""`。N=169 は exit 0、stdout `42` | 4M budget。N=169/170 の境界を実行し、cycle-limit diagnosticなし |
 
 SYN/BND/ARENA はいずれも同じ本番CLIで実行した。CLI の stderr は上記 status と整合した。BND/ARENA の狙い原因は source と実装分岐からの静的推定であり、#380 で test-only probe を追加するまで「内部原因を実測済み」と扱わない。
+
+### raw source bytes の決定的な生成規則
+
+以下の Python 風 byte 生成式で再現できる。`marker = b"?=42\n"`、statement区切りはASCII space、指定した `\n` はLF byte。明記のない末尾改行は付けない。Nは括弧/IF/Whileで16または17、ARENAで169または170、label/fixupで32または33とする。
+
+```python
+marker = b"?=42\n"
+syntax = marker + b"A="
+undefined_write = marker + b"a=()\n"
+arena = lambda n: marker + b"A=1\n" * n
+parentheses = lambda n: marker + b"A=" + b"(" * n + b"1" + b")" * n
+if_nesting = lambda n: marker + b"%=1 [ " * n + b"?=9" + b" ]" * n
+while_nesting = lambda n: (
+    marker + b"~=0 " + b"*=() [ ~=0 ] [ " * n + b"?=9" + b" ]" * n
+)
+labels = lambda n: marker + b" ".join(
+    b"^=" + str(i).encode("ascii") for i in range(n)
+)
+fixups = lambda n: marker + b" ".join(
+    [*(b"#=" + str(i).encode("ascii") for i in range(n)),
+     *(b"^=" + str(i).encode("ascii") for i in range(n))]
+)
+chunks = b"A=1\n" + b"".join(
+    b"&=" + bytes([identity]) + b" [ ]\nA=1\n"
+    for identity in range(ord("a"), ord("z") + 1)
+)
+```
+
+labels/fixupsは10以上の数値も通常の10進表記で、末尾にspace/LFを追加しない。ARENAのN=169/170はこのSHAとtoolchainにおける観測境界であり、将来の実装へ固定する意味論上の定数ではない。
 
 `basic.s::fe_compile_run` は全 statement compile、`fe_finish_chunk`、`fe_build_driver` の成功後にだけ `rt_init` と generated entry へ移る。失敗は `@failed` から返る。よって先行 `?=42` が出ないことは CLI で実測でき、コード構造は runtime が開始されない根拠になる。これは register/storage/stack 等の全内部状態を直接観測した証拠ではない。#380 の受け入れ表現も「先行出力がない + compile failure時に runtime entry へ進まない構造確認」とし、全 mutation の直接実測とはしない。
 
