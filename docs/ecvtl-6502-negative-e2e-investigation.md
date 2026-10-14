@@ -80,4 +80,3 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_backend -- --ignored -
 3. runtime未開始は先行印字の不在を実測し、`fe_compile_run` の `rt_init`/entry呼出位置をコード確認する。内部register/storage等の全state mutation未発生を直接測ったとは主張しない。
 4. 到達可能な追加代表例は IF nesting 17、label 33、resolved fixup 33。work stack 17、top-level chunk 54 はfrontend guard / identity上限により到達不能なので受け入れ対象にしない。
 5. SourceProcedure、production diagnostic/status、資源上限を変更しない。#381の高水位計測も含めない。
-
