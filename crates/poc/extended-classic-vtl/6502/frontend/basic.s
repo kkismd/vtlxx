@@ -24,6 +24,9 @@
 .import rt_print_number, rt_print_char, rt_read_char
 .importzp fe_status, cc_status, cc_arg
 .importzp cc_data_length
+.ifdef RESOURCE_USAGE_PROBE
+.import ru_structured_peak, ru_while_peak, ru_chunk_peak, ru_constant_peak
+.endif
 
 .segment "ZEROPAGE"
 fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
@@ -184,6 +187,13 @@ fe_finish_chunk:
     lda chunk_target+1
     sta top_level_chunk_targets,y
     inc chunk_count
+.ifdef RESOURCE_USAGE_PROBE
+    lda chunk_count
+    cmp ru_chunk_peak
+    bcc :+
+    sta ru_chunk_peak
+:
+.endif
     clc
     rts
 
@@ -645,6 +655,13 @@ statement:
     lda while_depth
     sta while_slot
     inc while_depth
+.ifdef RESOURCE_USAGE_PROBE
+    lda while_depth
+    cmp ru_while_peak
+    bcc :+
+    sta ru_while_peak
+:
+.endif
 
     jsr peek
     lda look_state
@@ -1312,6 +1329,13 @@ fe_definition:
     lda literal+1
     sta (constant_ptr),y
     inc constant_count
+.ifdef RESOURCE_USAGE_PROBE
+    lda constant_count
+    cmp ru_constant_peak
+    bcc :+
+    sta ru_constant_peak
+:
+.endif
 @definition_done:
     rts
 
@@ -1548,6 +1572,13 @@ required_block:
     cmp #16
     jcs syntax_error
     inc structured_depth
+.ifdef RESOURCE_USAGE_PROBE
+    lda structured_depth
+    cmp ru_structured_peak
+    bcc :+
+    sta ru_structured_peak
+:
+.endif
     jsr take
     jsr require_form_boundary
     lda fe_compile_status

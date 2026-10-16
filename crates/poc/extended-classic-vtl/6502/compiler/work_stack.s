@@ -4,6 +4,9 @@
 .export cc_work_reset, cc_work_push, cc_work_pop, cc_work_swap
 .exportzp cc_work_depth
 .importzp cc_status
+.ifdef RESOURCE_USAGE_PROBE
+.import ru_work_stack_peak
+.endif
 
 .segment "ZEROPAGE"
 cc_work_depth: .res 1
@@ -40,6 +43,13 @@ cc_work_push:
     lda work_high
     sta work_words+1,y
     inc cc_work_depth
+.ifdef RESOURCE_USAGE_PROBE
+    lda cc_work_depth
+    cmp ru_work_stack_peak
+    bcc :+
+    sta ru_work_stack_peak
+:
+.endif
 @done:
     rts
 

@@ -10,6 +10,9 @@
 .import cc_binding_reset, cc_work_reset
 .import cc_arena
 .importzp cc_status, cc_arg, cc_pending_count, cc_data_length
+.ifdef RESOURCE_USAGE_PROBE
+.import ru_label_peak, ru_fixup_peak, ru_owner_completions
+.endif
 
 .segment "ZEROPAGE"
 owner_state: .res 1             ; 0 idle, 1 emitting
@@ -153,6 +156,9 @@ cc_complete_owner:
     sta completed_bits,y
     lda #0
     sta owner_state
+.ifdef RESOURCE_USAGE_PROBE
+    inc ru_owner_completions
+.endif
 @done:
     lda owner_entry
     ldx owner_entry+1
@@ -219,7 +225,13 @@ cc_define_label:
     stx owner_word+1
     jsr owner_require_active
     lda cc_status
+.ifdef RESOURCE_USAGE_PROBE
+    beq :+
+    jmp @done
+:
+.else
     bne @done
+.endif
     jsr owner_find_label
     bcc @new
     lda #4
@@ -228,7 +240,13 @@ cc_define_label:
 @new:
     ldx label_count
     cpx #32
+.ifdef RESOURCE_USAGE_PROBE
+    bcs @labels_full
+    jmp @room
+@labels_full:
+.else
     bcc @room
+.endif
     lda #5
     sta cc_status
     rts
@@ -247,6 +265,13 @@ cc_define_label:
     sta label_targets+1,y
     sta owner_target+1
     inc label_count
+.ifdef RESOURCE_USAGE_PROBE
+    lda label_count
+    cmp ru_label_peak
+    bcc :+
+    sta ru_label_peak
+:
+.endif
     lda #0
     sta owner_index
 @fixups:
@@ -338,6 +363,13 @@ cc_label_jump:
     lda owner_target+1
     sta fixup_patches+1,y
     inc fixup_count
+.ifdef RESOURCE_USAGE_PROBE
+    lda fixup_count
+    cmp ru_fixup_peak
+    bcc :+
+    sta ru_fixup_peak
+:
+.endif
 @done:
     rts
 

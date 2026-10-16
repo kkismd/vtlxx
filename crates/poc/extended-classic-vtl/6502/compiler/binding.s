@@ -4,6 +4,9 @@
 .export cc_binding_reset, cc_is_bound, cc_publish, cc_resolve
 .import cc_is_completed
 .importzp cc_status, cc_arg
+.ifdef RESOURCE_USAGE_PROBE
+.import ru_write_publishes
+.endif
 
 .segment "ZEROPAGE"
 binding_slot: .res 1
@@ -66,6 +69,9 @@ cc_publish:
     ldx binding_slot
     lda #1
     sta binding_valid,x
+.ifdef RESOURCE_USAGE_PROBE
+    inc ru_write_publishes
+.endif
 @done:
     rts
 

@@ -8,6 +8,11 @@
 .export cc_data_is_active, cc_cursor_is_frozen
 .export cc_arena
 .exportzp cc_status, cc_arg, cc_cursor, cc_pending_count, cc_data_length
+.ifdef RESOURCE_USAGE_PROBE
+.exportzp cc_source_floor
+.export cc_arena_end
+.import ru_patch_entries_peak
+.endif
 
 .segment "ZEROPAGE"
 cc_status: .res 1
@@ -18,7 +23,7 @@ cc_ptr:    .res 2
 cc_limit:  .res 2
 cc_value:  .res 2
 cc_pending_count: .res 2
-cc_source_begin: .res 2
+cc_source_floor: .res 2
 cc_data_begin_ptr: .res 2
 cc_data_active: .res 1
 cc_data_length: .res 2
@@ -47,9 +52,9 @@ cc_arena_reset:
     sta cc_cursor+1
     sta cc_frozen_end+1
     lda #<cc_arena_end
-    sta cc_source_begin
+    sta cc_source_floor
     lda #>cc_arena_end
-    sta cc_source_begin+1
+    sta cc_source_floor+1
     lda #0
     sta cc_data_active
     sta cc_data_length
@@ -127,11 +132,11 @@ cc_reserve_shared:
     adc #0
     bcs @full
     sta cc_limit+1
-    cmp cc_source_begin+1
+    cmp cc_source_floor+1
     bcc @ok
     bne @full
     lda cc_limit
-    cmp cc_source_begin
+    cmp cc_source_floor
     bcc @ok
     beq @ok
 @full:
@@ -229,10 +234,10 @@ cc_data_finish:
     jmp @misuse
 @nonempty:
     sec
-    lda cc_source_begin
+    lda cc_source_floor
     sbc cc_data_length
     sta cc_copy_dst
-    lda cc_source_begin+1
+    lda cc_source_floor+1
     sbc cc_data_length+1
     sta cc_copy_dst+1
     ; A <= B is required so completed code and the new source do not overlap.
@@ -294,17 +299,17 @@ cc_data_finish:
     ora cc_copy_count+1
     bne @copy
     lda cc_copy_dst
-    sta cc_source_begin
+    sta cc_source_floor
     lda cc_copy_dst+1
-    sta cc_source_begin+1
+    sta cc_source_floor+1
     lda cc_data_begin_ptr
     sta cc_cursor
     lda cc_data_begin_ptr+1
     sta cc_cursor+1
     lda #0
     sta cc_data_active
-    lda cc_source_begin
-    ldx cc_source_begin+1
+    lda cc_source_floor
+    ldx cc_source_floor+1
 @done:
     rts
 @misuse:
@@ -420,8 +425,25 @@ cc_track_patch:
     ora cc_bit_mask
     sta patch_bits,y
     inc cc_pending_count
-    bne @done
+    bne @patch_count_updated
     inc cc_pending_count+1
+.ifdef RESOURCE_USAGE_PROBE
+@patch_count_updated:
+    lda cc_pending_count+1
+    cmp ru_patch_entries_peak+1
+    bcc @done
+    bne @patch_peak_update
+    lda cc_pending_count
+    cmp ru_patch_entries_peak
+    bcc @done
+@patch_peak_update:
+    lda cc_pending_count
+    sta ru_patch_entries_peak
+    lda cc_pending_count+1
+    sta ru_patch_entries_peak+1
+.else
+@patch_count_updated:
+.endif
 @done:
     rts
 

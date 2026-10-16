@@ -11,6 +11,20 @@
 .ifdef RT_TEST_PROBE
 .import rt_test_probe
 .endif
+.ifdef RESOURCE_USAGE_PROBE
+.import ru_value_stack_peak, ru_storage_addr
+.import ru_storage_seen
+.endif
+
+.macro ru_track_storage
+    .ifdef RESOURCE_USAGE_PROBE
+    sta ru_storage_addr
+    tax
+    lda #1
+    sta ru_storage_seen,x
+    lda ru_storage_addr
+    .endif
+.endmacro
 
 .segment "ZEROPAGE"
 rt_depth:   .res 1
@@ -60,6 +74,13 @@ rt_push:
     pla
     sta rt_stack,y
     inc rt_depth
+.ifdef RESOURCE_USAGE_PROBE
+    lda rt_depth
+    cmp ru_value_stack_peak
+    bcc :+
+    sta ru_value_stack_peak
+:
+.endif
     rts
 
 ; Backend-only stack operation: consume one Cell and return Z=1 iff it was 0.
@@ -159,6 +180,9 @@ rt_load_storage:
     tay
     lda rt_stack,y
     and #$7f
+.ifdef RESOURCE_USAGE_PROBE
+    ru_track_storage
+.endif
     asl a
     tax
     lda rt_storage,x
@@ -171,6 +195,9 @@ rt_store_storage:
     jsr rt_need_two
     lda rt_lhs
     and #$7f
+.ifdef RESOURCE_USAGE_PROBE
+    ru_track_storage
+.endif
     asl a
     tax
     lda rt_rhs
