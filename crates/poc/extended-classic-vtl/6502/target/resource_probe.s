@@ -6,6 +6,7 @@
 .export ru_storage_unique, ru_work_stack_peak, ru_label_peak, ru_fixup_peak
 .export ru_owner_completions, ru_write_publishes, ru_template_publishes
 .export ru_structured_peak, ru_while_peak, ru_chunk_peak, ru_constant_peak
+.export ru_expression_nesting_peak
 .export ru_hw_peak
 .export ru_storage_seen
 .export ru_patch_entries_peak
@@ -32,6 +33,7 @@ ru_structured_peak: .res 1
 ru_while_peak:      .res 1
 ru_chunk_peak:      .res 1
 ru_constant_peak:   .res 1
+ru_expression_nesting_peak: .res 1
 ru_hw_peak:         .res 1
 ru_hw_base:         .res 1
 ru_hw_depth:        .res 1
@@ -122,6 +124,7 @@ ru_reset:
     sta ru_while_peak
     sta ru_chunk_peak
     sta ru_constant_peak
+    sta ru_expression_nesting_peak
     sta ru_hw_peak
     sta ru_zero_index
     ldx #127
@@ -212,6 +215,8 @@ ru_report:
     lda ru_patch_entries_peak
     jsr ru_emit
     lda ru_patch_entries_peak+1
+    jsr ru_emit
+    lda ru_expression_nesting_peak
     jsr ru_emit
     lda ru_exit_status
     jmp halt

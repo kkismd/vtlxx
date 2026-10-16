@@ -26,6 +26,7 @@
 .importzp cc_data_length
 .ifdef RESOURCE_USAGE_PROBE
 .import ru_structured_peak, ru_while_peak, ru_chunk_peak, ru_constant_peak
+.import ru_expression_nesting_peak
 .endif
 
 .segment "ZEROPAGE"
@@ -1806,6 +1807,12 @@ enter_nesting:
     bcc @ok
     jmp syntax_error
 @ok:
+.ifdef RESOURCE_USAGE_PROBE
+    cmp ru_expression_nesting_peak
+    bcc :+
+    sta ru_expression_nesting_peak
+:
+.endif
     rts
 
 close_group:

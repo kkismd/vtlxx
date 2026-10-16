@@ -8,7 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const CYCLE_LIMIT: u32 = 4_000_000;
 const QUEENS_CYCLE_LIMIT: u32 = 256_000_000;
 const ARENA_CAPACITY: u16 = 2048;
-const RESOURCE_RECORD_LEN: usize = 23;
+const RESOURCE_RECORD_LEN: usize = 24;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 struct TempDir(PathBuf);
@@ -107,6 +107,7 @@ struct Metrics {
     published_writes: u8,
     published_templates: u8,
     pending_patch_entries: u16,
+    expression_nesting: u8,
 }
 
 #[test]
@@ -243,6 +244,7 @@ impl Metrics {
             published_writes: bytes[19],
             published_templates: bytes[20],
             pending_patch_entries: word(21),
+            expression_nesting: bytes[23],
         })
     }
 }
@@ -276,18 +278,19 @@ fn assert_within_profile(name: &str, metrics: &Metrics) {
     assert!(metrics.published_writes <= 26, "{name}: {metrics:?}");
     assert!(metrics.published_templates <= 26, "{name}: {metrics:?}");
     assert!(metrics.pending_patch_entries <= 2048, "{name}: {metrics:?}");
+    assert!(metrics.expression_nesting <= 16, "{name}: {metrics:?}");
 }
 
 fn print_markdown_table(rows: &[(&str, Metrics)]) {
     println!(
-        "\n| workload | code B | template source B | shared arena B | value stack Cells | hardware stack B | storage Cells / extent | source work stack | labels / owner | fixups / owner | pending patches | IF depth | While depth | chunks | constants | completed owners | Write publishes | templates |"
+        "\n| workload | code B | template source B | shared arena B | value stack Cells | hardware stack B | storage Cells / extent | source work stack | labels / owner | fixups / owner | pending patches | expression depth | IF depth | While depth | chunks | constants | completed owners | Write publishes | templates |"
     );
     println!(
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
     );
     for (name, metrics) in rows {
         println!(
-            "| {name} | {} | {} | {} | {} | {} | {} / {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
+            "| {name} | {} | {} | {} | {} | {} | {} / {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |",
             metrics.code_bytes,
             metrics.template_source_bytes,
             metrics.code_bytes + metrics.template_source_bytes,
@@ -299,6 +302,7 @@ fn print_markdown_table(rows: &[(&str, Metrics)]) {
             metrics.numeric_labels_per_owner,
             metrics.unresolved_fixups_per_owner,
             metrics.pending_patch_entries,
+            metrics.expression_nesting,
             metrics.structured_nesting,
             metrics.while_nesting,
             metrics.runtime_chunks,
