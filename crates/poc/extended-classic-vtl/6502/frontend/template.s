@@ -3,6 +3,9 @@
 
 .export template_reset, template_is_bound, template_publish, template_lookup
 .importzp cc_status, cc_arg, cc_data_length
+.ifdef RESOURCE_USAGE_PROBE
+.import ru_template_publishes
+.endif
 
 .segment "ZEROPAGE"
 template_slot: .res 1
@@ -60,6 +63,9 @@ template_publish:
     ldx template_slot
     lda #1
     sta template_valid,x
+.ifdef RESOURCE_USAGE_PROBE
+    inc ru_template_publishes
+.endif
     pla
     rts
 @bad_pop:
