@@ -95,6 +95,11 @@ _main:
     dex
     jmp @scan_stack
 @stack_measured:
+    ; Include the two-byte return address by which sim6502 startup entered _main.
+    lda ru_hw_peak
+    clc
+    adc #2
+    sta ru_hw_peak
     jsr ru_capture_storage
     jsr ru_capture_arena
     jmp ru_report
