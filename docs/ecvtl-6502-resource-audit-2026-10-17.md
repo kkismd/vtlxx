@@ -19,10 +19,10 @@
 | 名前付き手続きの最大連鎖 | 52 | 小文字identityは最大26個（`a..z`）なので、26 × 2 byte。呼出先は完成済みbindingのみ解決し、definitionは完成後に公開する。現在のsource orderでは直接・相互再帰を作れない（`6502/frontend/basic.s:742-799`、`6502/compiler/binding.s`） |
 | generated code → runtime helper | 2 | `cc_call` 等の固定templateが `JSR` を生成 |
 | helper → nested helper | 例として2以上 | `rt_pop_condition → rt_need_one`、`rt_div → unsigned_divide`、storage helper → `rt_need_two` 等。同時に通らない呼出し経路を単純加算しない（`runtime/state.s:65-77, 153-181`、`runtime/arithmetic.s:74-109`） |
-| helper内のpush byte | `rt_push` で2以上 | `runtime/state.s:46-63`。`rt_load_reg → rt_push` では `rt_load_reg` のPHA 1 byteも同時に残る（`runtime/state.s:122-132`）。helper呼出し自身のJSRは上段に含む |
+| helper内のpush byte | `rt_push` の局所ピークは2 | `runtime/state.s:46-63`。`rt_load_reg` はPHA 1 byteの後、`rt_push` へ末尾JMPする前にPLAする（`runtime/state.s:122-132`）。したがって両者のpushは重ならず、この経路での追加量は局所ピークの大きい2 byte。JSRで入った呼出しframeは保持されるが、追加のnested JSRはない |
 | serial出力ライブラリ経路 | 未確認 | 最大の手続き連鎖下で `rt_print_number → serial_out → _putchar` が動き得る。cc65 library内の到達可能な呼出し経路を逆アセンブルして上界化していない |
 
-名前付き手続きの最深連鎖と一つのnested helperまでの**静的部分小計は62B**（2 + 2 + 2 + 52 + 2 + 2）。serial出力経路などを含まず、全体の上界ではない。26手続きの項は現在のbinding数から得た構造上の最大値であり、全workloadがこの深さに達するという意味ではない。
+名前付き手続きの最深連鎖と一つのnested helperまでの**静的部分小計は62B**（2 + 2 + 2 + 52 + 2 + 2）。最後の2 byteは `rt_div → unsigned_divide` のようなnested JSRであり、上表の `rt_load_reg → rt_push` の一時pushとは別経路である。serial出力経路などを含まず、全体の上界ではない。26手続きの項は現在のbinding数から得た構造上の最大値であり、全workloadがこの深さに達するという意味ではない。
 
 ## compile/runtime各phaseの最大上界と予算比較
 
