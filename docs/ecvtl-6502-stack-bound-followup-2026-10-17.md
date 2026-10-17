@@ -83,8 +83,13 @@ tmp=$(mktemp -d)
 root=crates/poc/extended-classic-vtl
 sources="6502/target/sim65_cli.s 6502/frontend/basic.s 6502/frontend/template.s 6502/frontend/template_reader.s 6502/frontend/source.s 6502/compiler/arena.s 6502/compiler/emitter.s 6502/compiler/owner.s 6502/compiler/binding.s 6502/compiler/work_stack.s 6502/runtime/state.s 6502/runtime/primitives.s 6502/runtime/arithmetic.s 6502/target/sim65_adapter.s"
 i=0
-for source in $sources; do ca65 -t sim6502 "$root/$source" -o "$tmp/$i.o" || exit; i=$((i + 1)); done
-ld65 -t sim6502 -m "$tmp/audit.map" -Ln "$tmp/audit.lbl" -o "$tmp/audit.prg" "$tmp"/[0-9]*.o sim6502.lib
+objects=()
+for source in $sources; do
+  ca65 -t sim6502 "$root/$source" -o "$tmp/$i.o" || exit
+  objects+=("$tmp/$i.o")
+  i=$((i + 1))
+done
+ld65 -t sim6502 -m "$tmp/audit.map" -Ln "$tmp/audit.lbl" -o "$tmp/audit.prg" "${objects[@]}" sim6502.lib
 ```
 
 `audit.map` と `audit.lbl` がlink時の配置・symbol根拠です。この `sim6502` linkのload addressは `0x0200` なので、`da65 -S 0x0200 -o "$tmp/audit.dis" "$tmp/audit.prg"` で逆アセンブルできます。これは実行中のSP traceではなく、生成物の静的確認を再現する手順です。
