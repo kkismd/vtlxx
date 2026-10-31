@@ -492,14 +492,6 @@ fn template_definitions_are_saved_and_published_without_runtime_code() {
     ] {
         expect(source, 2, b"");
     }
-    for source in include_str!("fixtures/template_p0a/invalid_definitions.vtl")
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-    {
-        // Tracker #354 requires each shared invalid fixture line to be a
-        // separate length-prefixed WholeProgramCompileRun input.
-        expect(source, 2, b"");
-    }
 
     let mut too_large = String::from("&=a{} [ A={}");
     too_large.push_str(&"X".repeat(2100));
@@ -582,13 +574,6 @@ fn template_calls_expand_into_the_current_caller() {
         "a{A}=()?=1",
     ] {
         expect(source, 2, b"");
-    }
-    for call in include_str!("fixtures/template_p0a/invalid_call_forms.vtl")
-        .lines()
-        .filter(|line| !line.trim().is_empty())
-    {
-        let source = format!("&=a{{}} [ A={{}} ] {call}");
-        expect(&source, 2, b"");
     }
     let mut long_body = String::from("A=0 &=a{} [ ");
     long_body.push_str(&"A={} ".repeat(60));
@@ -752,4 +737,157 @@ fn compile_stack_guard_accepts_201_byte_fixture_and_observes_headroom() {
     assert!((25..132).contains(&minimum), "{result:?}");
     assert_eq!(result.stdout, b"0");
     eprintln!("201-byte fixture: minimum guard S={minimum}");
+}
+
+// #427 expectation/observation ledger: fixtures/template_p0a/README.md.
+fn p0a_source(name: &str) -> String {
+    fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/template_p0a")
+            .join(format!("{name}.vtl")),
+    )
+    .unwrap()
+}
+
+fn p0a_frame(source: &str) -> Vec<u8> {
+    let mut input = u16::try_from(source.len()).unwrap().to_le_bytes().to_vec();
+    input.extend_from_slice(source.as_bytes());
+    input
+}
+
+fn p0a_result(result: &Output, status: i32, stdout: &[u8]) {
+    assert_eq!(result.status.code(), Some(status), "{result:?}");
+    assert_eq!(result.stdout, stdout, "{result:?}");
+    assert!(result.stderr.is_empty(), "{result:?}");
+}
+
+// This private adapter checks the live registry before process exit, never by
+// compiling another source after failure. Only 'a' may be published in these
+// fixtures; compare its entire canonical body, and reject every other slot.
+fn p0a_probe(source: &str, body: Option<&str>, failure: Option<bool>) -> Output {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let mut basic = fs::read_to_string(root.join("6502/frontend/basic.s")).unwrap();
+    let mut checks = String::new();
+    if let Some(virtual_rhs) = failure {
+        // Record the input reader at the actual syntax error, before cleanup
+        // clears virtual_active. Runtime entry is a trap, not an output proxy.
+        let marker = "syntax_error:\n";
+        assert_eq!(basic.matches(marker).count(), 1);
+        basic = basic.replace(
+            marker,
+            "syntax_error:\n    lda virtual_active\n    sta p0a_error_reader\n",
+        );
+        let marker = "    jsr rt_init";
+        assert_eq!(basic.matches(marker).count(), 1);
+        basic = basic.replace(marker, "    lda #99\n    jmp halt");
+        basic.push_str("\n.export p0a_error_reader\n.segment \"BSS\"\np0a_error_reader: .res 1\n");
+        checks.push_str(&format!(
+            ".import p0a_error_reader\n    jcc failed\n    lda fe_compile_status\n    cmp #2\n    jne failed\n    lda p0a_error_reader\n    cmp #{}\n    jne failed\n",
+            u8::from(virtual_rhs)
+        ));
+    } else {
+        checks.push_str("    jcs failed\n    lda rt_depth\n    jne failed\n");
+    }
+    for identity in b'a'..=b'z' {
+        checks.push_str(&format!("    lda #{identity}\n    jsr template_lookup\n"));
+        if let Some(body) = body.filter(|_| identity == b'a') {
+            checks.push_str(&format!("    jcs failed\n    lda cc_data_length\n    cmp #{}\n    jne failed\n    lda cc_data_length+1\n    jne failed\n", body.len()));
+            for (index, byte) in body.bytes().enumerate() {
+                checks.push_str(&format!(
+                    "    ldy #{index}\n    lda (cc_arg),y\n    cmp #{byte}\n    jne failed\n"
+                ));
+            }
+        } else {
+            checks.push_str("    jcc failed\n");
+        }
+    }
+    let adapter = format!(
+        ".setcpu \"6502\"\n.macpack longbranch\n.export _main\n.import fe_compile_run, template_lookup, halt\n.importzp fe_compile_status, cc_arg, cc_data_length, rt_depth\n.segment \"CODE\"\n_main:\n    jsr fe_compile_run\n{checks}    lda #0\n    jmp halt\nfailed:\n    lda #98\n    jmp halt\n"
+    );
+    let temp = TempDir::new();
+    let path = temp.0.join("p0a_probe.s");
+    fs::write(&path, adapter).unwrap();
+    build_and_run_custom(&p0a_frame(source), path.to_str().unwrap(), Some(&basic))
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn p0a_shared_success_sources_match_reference_and_empty_stack() {
+    for (name, stdout) in [
+        ("minimal_two_arguments", b"1\n11\n".as_slice()),
+        ("block_then_else", b"1\n7\n0\n4\n".as_slice()),
+    ] {
+        let source = p0a_source(name);
+        let reference = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+            .arg(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join(format!("tests/fixtures/template_p0a/{name}.vtl")),
+            )
+            .output()
+            .unwrap();
+        p0a_result(&reference, 0, stdout);
+        // Unmodified production CLI adapter: no appended runtime sentinel.
+        let result =
+            build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s");
+        p0a_result(&result, 0, &reference.stdout);
+        p0a_result(&p0a_probe(&source, Some("{}={}+1"), None), 0, stdout);
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn p0a_shared_failures_preserve_phase_publication_and_never_start_runtime() {
+    let definition = p0a_source("deferred_rhs_definition");
+    p0a_result(
+        &build_and_run_input_with_frontend(&p0a_frame(&definition), "6502/target/sim65_cli.s"),
+        0,
+        b"",
+    );
+    p0a_result(&p0a_probe(&definition, Some("{}=A+"), None), 0, b"");
+
+    let failures = [
+        (
+            format!("{definition}{}", p0a_source("deferred_rhs_call")),
+            Some("{}=A+"),
+            true,
+        ),
+        (
+            p0a_source("partial_expansion_failure"),
+            Some("A=3\n{}=A+"),
+            true,
+        ),
+        (p0a_source("chunk_failure_profiles"), Some("A={}"), false),
+    ];
+    for (source, body, virtual_rhs) in failures {
+        // CLI status 128 + syntax(2), distinct from source(129) and resource(132).
+        p0a_result(
+            &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
+            130,
+            b"",
+        );
+        p0a_result(&p0a_probe(&source, body, Some(virtual_rhs)), 0, b"");
+    }
+    for (name, count) in [("invalid_definitions", 7), ("invalid_call_forms", 5)] {
+        let fixture = p0a_source(name);
+        assert_eq!(
+            fixture.lines().count(),
+            count,
+            "{name}: update the expectation ledger when rows change"
+        );
+        for (line, statement) in fixture.lines().enumerate() {
+            assert!(!statement.trim().is_empty());
+            let (source, body) = if name == "invalid_call_forms" {
+                (format!("&=a{{}} [ A={{}} ]\n{statement}"), Some("A={}"))
+            } else {
+                (statement.to_owned(), None)
+            };
+            eprintln!("{name}:{}: syntax failure before virtual RHS", line + 1);
+            p0a_result(
+                &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
+                130,
+                b"",
+            );
+            p0a_result(&p0a_probe(&source, body, Some(false)), 0, b"");
+        }
+    }
 }
