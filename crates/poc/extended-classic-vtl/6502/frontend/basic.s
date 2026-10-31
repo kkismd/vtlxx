@@ -637,8 +637,8 @@ statement:
 @conditional_done:
     rts
 @while:
-    ; `*=()` is an exact header. Keep the expression multiplication operator
-    ; untouched; only statement target `*=` enters this source form.
+    ; Compile one ordinary RHS condition at the loop target. The generated
+    ; condition code then runs again after each body jump.
     lda while_depth
     cmp #16
     jcs syntax_error
@@ -646,53 +646,60 @@ statement:
     sta while_slot
     inc while_depth
 
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @while_syntax
-    lda look_byte
-    cmp #'('
-    jne @while_syntax
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @while_syntax
-    lda look_byte
-    cmp #')'
-    jne @while_syntax
-    jsr take
-    jsr require_form_boundary
-    lda fe_compile_status
-    jne @while_done
-
-    ; Frame arrays are indexed independently of the IF work stack, preserving
-    ; sixteen nested While forms without using two work-stack words per level.
-    lda while_slot
-    asl a
-    sta while_offset
+    ; Mark before emitting the condition so every iteration starts there.
     jsr cc_mark
     sta while_word
     stx while_word+1
-    ldy while_offset
+    lda cc_status
+    jne @while_backend
+    lda while_depth
+    sec
+    sbc #1
+    asl a
+    tay
     lda while_word
     sta while_loop_targets,y
     iny
     lda while_word+1
     sta while_loop_targets,y
 
-    jsr required_block
+    ; Match IF's bounded RHS entry, including its root-stack form. An empty
+    ; RHS (including `*=()`) and a block in condition position are invalid.
+    jsr peek
+    lda look_state
+    cmp #1
+    jne @while_syntax
+    lda look_byte
+    cmp #'['
+    jeq @while_syntax
+    cmp #'~'
+    beq @while_condition_stack
+    lda #0
+    jsr operand
+    jmp @while_condition_ready
+@while_condition_stack:
+    jsr take
+    lda #1
+    jsr operand
+@while_condition_ready:
     lda fe_compile_status
-    bne @while_done
+    jne @while_done
+    lda cc_status
+    jne @while_backend
+    jsr statement_end
+    lda fe_compile_status
+    jne @while_done
+
+    ; The JZ consumes exactly the condition's top runtime Cell.
+    jsr cc_jz_placeholder
+    sta while_word
+    stx while_word+1
+    lda cc_status
+    jne @while_backend
     lda while_depth
     sec
     sbc #1
     asl a
-    sta while_offset
-    jsr cc_jz_placeholder
-    sta while_word
-    stx while_word+1
-    lda while_offset
     tay
     lda while_word
     sta while_exit_patches,y
@@ -700,15 +707,19 @@ statement:
     lda while_word+1
     sta while_exit_patches,y
 
+    ; The body is one required block. Recompute the frame after nested source
+    ; compilation, which may overwrite shared scratch and frame indexes.
     jsr required_block
     lda fe_compile_status
     bne @while_done
+    lda cc_status
+    jne @while_backend
     lda while_depth
     sec
     sbc #1
     asl a
     sta while_offset
-    ldy while_offset
+    tay
     lda while_loop_targets,y
     sta while_word
     iny

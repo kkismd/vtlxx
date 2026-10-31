@@ -157,14 +157,14 @@ fn basic_source_compiles_and_executes() {
     expect("~=42 &=p [ ] p=~ ?=~", 0, b"42Z");
     expect("A=0 &=p [ A=A+1 ] p=() ?=A", 0, b"1Z");
     expect("&=p [ %=1 [ ?=7 ] ] p=()", 0, b"7Z");
-    expect("&=p [ A=0 *=() [ ~=A<2 ] [ A=A+1 ] ?=A ] p=()", 0, b"2Z");
+    expect("&=p [ A=0 *=A<2 [ A=A+1 ] ?=A ] p=()", 0, b"2Z");
     expect("&=p [ #=3 ?=1 ^=3 ?=9 ] p=()", 0, b"9Z");
     expect("&=p [ ^=3 ?=9 ] ^=3 ?=8 p=()", 0, b"89Z");
     expect("?=1 &=p [ ?=8 ] ?=2 p=() ?=3", 0, b"1283Z");
     expect("&=p [ ?=1 ] ?=2 &=q [ ?=3 ] ?=4 q=() p=()", 0, b"2431Z");
     expect("&=p [ ?=() ] p=()", 0, b"\nZ");
     expect("%=1 [ ?=() ]", 0, b"\nZ");
-    expect("A=0 *=() [ ~=A<1 ] [ ?=() A=A+1 ]", 0, b"\nZ");
+    expect("A=0 *=A<1 [ ?=() A=A+1 ]", 0, b"\nZ");
     expect("%=1 [ ] ?=7", 0, b"7Z");
     expect("%=1 [ ?=1 ]", 0, b"1Z");
     expect("%=0 [ ?=1 ]", 0, b"Z");
@@ -183,35 +183,32 @@ fn basic_source_compiles_and_executes() {
         0,
         b"8Z",
     );
-    expect("A=0 *=() [ ~=0 ] [ A=99 ] ?=A", 0, b"0Z");
-    expect("A=0 *=() [ ~=A<1 ] [ A=A+1 ] ?=A", 0, b"1Z");
-    expect("A=0 *=() [ ~=A<4 ] [ A=A+1 ] ?=A", 0, b"4Z");
-    expect("A=0 *=() [ ~=A<3 ] [ A=A+1 ] A=A+5 ?=A", 0, b"8Z");
+    expect("A=0 *=0 [ A=99 ] ?=A", 0, b"0Z");
+    expect("A=0 *=A<1 [ A=A+1 ] ?=A", 0, b"1Z");
+    expect("A=0 *=A<4 [ A=A+1 ] ?=A", 0, b"4Z");
+    expect("A=1 *=A [ A=0 ] ?=A", 0, b"0Z");
+    expect("A=-2 *=A [ A=A+1 ] ?=A", 0, b"0Z");
+    expect("==LIMIT,3 A=0 *=(A<LIMIT) [ A=A+1 ] ?=A", 0, b"3Z");
+    expect("A=0 *=A<3*2 [ A=A+1 ] ?=A*4", 0, b"12Z");
+    expect("~=1 *=~ [ A=1 ~=0 ] ?=A", 0, b"1Z");
+    expect("~=2 *=~-1 [ ~=1 ] ?=A", 0, b"0Z");
+    expect("A=0 *=A<3 [ A=A+1 ] A=A+5 ?=A", 0, b"8Z");
     // A jump from an inline While body resolves in the surrounding owner's
     // label namespace and reaches the label after the loop.
-    expect("A=0 *=() [ ~=A<1 ] [ #=9 A=99 ] ^=9 ?=A", 0, b"0Z");
-    expect("==LIMIT,3 A=0 *=() [ ~=A<LIMIT ] [ A=A+1 ] ?=A", 0, b"3Z");
-    expect("A=0 *=() [ ~=A<2 ] [ %=1 [ A=A+1 ] ] ?=A", 0, b"2Z");
-    expect("A=0 %=1 [ *=() [ ~=A<2 ] [ A=A+1 ] ] ?=A", 0, b"2Z");
-    expect(
-        "A=0 *=() [ ~=A<2 ] [ A=A+1 *=() [ ~=0 ] [ A=99 ] ] ?=A",
-        0,
-        b"2Z",
-    );
+    expect("A=0 *=A<1 [ #=9 A=99 ] ^=9 ?=A", 0, b"0Z");
+    expect("A=0 *=A<2 [ %=1 [ A=A+1 ] ] ?=A", 0, b"2Z");
+    expect("A=0 %=1 [ *=A<2 [ A=A+1 ] ] ?=A", 0, b"2Z");
+    expect("A=0 *=A<2 [ A=A+1 *=0 [ A=99 ] ] ?=A", 0, b"2Z");
     expect("==VALUE,42 %=1 [ ?=VALUE ]", 0, b"42Z");
     expect("%=1 [ #=2 ?=1 ^=2 ?=8 ]", 0, b"8Z");
     let nested_16 = format!("{}?=9{}", "%=1 [ ".repeat(16), " ]".repeat(16));
     expect(&nested_16, 0, b"9Z");
-    let nested_while_16 = format!("~=0 {}?=9{}", "*=() [ ~=0 ] [ ".repeat(16), " ]".repeat(16));
+    let nested_while_16 = format!("{}?=9{}", "*=0 [ ".repeat(16), " ]".repeat(16));
     expect(&nested_while_16, 0, b"Z");
     // Keep expression grouping at its independent limit while all sixteen
     // While frames are active during source compilation.
-    let mut nested_while_grouping = "*=() [ ~=0 ] [ ".repeat(15);
-    nested_while_grouping.push_str(&format!(
-        "*=() [ ~={}0{} ] [ ]",
-        "(".repeat(16),
-        ")".repeat(16)
-    ));
+    let mut nested_while_grouping = "*=0 [ ".repeat(15);
+    nested_while_grouping.push_str(&format!("*={}0{} [ ]", "(".repeat(16), ")".repeat(16)));
     nested_while_grouping.push_str(&" ]".repeat(15));
     expect(&nested_while_grouping, 0, b"Z");
     let grouped_condition = format!("%={}1{} [ ?=9 ]", "(".repeat(16), ")".repeat(16));
@@ -329,13 +326,17 @@ fn malformed_source_never_starts_runtime() {
         "%=1 [ ?=1]",
         "*=",
         "*=1",
-        "*= ( ) [ ] [ ]",
-        "*=( ) [ ] [ ]",
-        "*=()[] [ ]",
-        "*=() [ ]",
-        "*=() [ ] [",
-        "*=() [",
-        "*=() [ ] [ A= ]",
+        "*=() [ ~=0 ] [ A=1 ]",
+        "*=() [ ] [ ]",
+        "*=1",
+        "*=1 A=1",
+        "*=1 [ A=1",
+        "*=1 [ A= ]",
+        "*=0[ ]",
+        "*=0 [A=1 ]",
+        "*=0 [ A=1]",
+        "*=0 [ ] [ ]",
+        "*=A+ [ ]",
         "[ ]",
         "]",
         "%=1 [ ] ]",
@@ -374,7 +375,7 @@ fn malformed_source_never_starts_runtime() {
     expect("%=~ [ ?=1 ]", 1, b"");
     let nested_17 = format!("{}?=9{}", "%=1 [ ".repeat(17), " ]".repeat(17));
     expect(&nested_17, 2, b"");
-    let nested_while_17 = format!("~=0 {}?=9{}", "*=() [ ~=0 ] [ ".repeat(17), " ]".repeat(17));
+    let nested_while_17 = format!("{}?=9{}", "*=0 [ ".repeat(17), " ]".repeat(17));
     expect(&nested_while_17, 2, b"");
     let mut too_many_labels = String::new();
     for label in 0..33 {
@@ -558,11 +559,7 @@ fn template_calls_expand_into_the_current_caller() {
     expect("&=a{} [ {}={} ] a{A}=()", 0, b"Z");
     expect("&=a{} [ {}={}+1 ] A=0 &=p [ a{A}=() ?=A ] p=()", 0, b"1Z");
     expect("&=a{} [ {}={}+1 ] A=0 %=1 [ a{A}=() ] ?=A", 0, b"1Z");
-    expect(
-        "&=a{} [ {}={}+1 ] A=0 *=() [ ~=A<1 ] [ a{A}=() ] ?=A",
-        0,
-        b"1Z",
-    );
+    expect("&=a{} [ {}={}+1 ] A=0 *=A<1 [ a{A}=() ] ?=A", 0, b"1Z");
     expect("&=a{} [ {}={} ] a{A}=() ; tail\n?=A", 0, b"0Z");
     expect("&=a{} [ {}=A+ ] a{B}=()", 2, b"");
     for source in [

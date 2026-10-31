@@ -313,9 +313,9 @@ fn parentheses_source(depth: usize) -> Vec<u8> {
 }
 
 fn while_nesting_source(depth: usize) -> Vec<u8> {
-    let mut source = b"?=42\n~=0 ".to_vec();
+    let mut source = b"?=42\n".to_vec();
     for _ in 0..depth {
-        source.extend_from_slice(b"*=() [ ~=0 ] [ ");
+        source.extend_from_slice(b"*=0 [ ");
     }
     source.extend_from_slice(b"?=9");
     for _ in 0..depth {

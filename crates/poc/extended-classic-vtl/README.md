@@ -468,7 +468,7 @@ While は stack を自動 cleanup しません。式が必要とする stack inp
 
 空条件と zero-operand marker は不正です。旧 predicate block + body の2ブロック形式も compile error になります。statement の `*=` は native While source command、expression 内の `*` は multiplication operator です。
 
-この構文は Rust reference のものです。6502 版の移行は [#421](https://github.com/kkismd/vtlxx/issues/421) で扱い、それまでは While を使う更新済み examples の sim65 共通適合検証は成立しません。
+Rust reference と actual 6502 frontend の両方でこの構文を使います。sim65 共通適合検証では、各 While 使用 example の出力と Rust reference の結果を照合します。
 
 ## Source-defined 手続き
 
