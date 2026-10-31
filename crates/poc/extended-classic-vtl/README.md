@@ -451,28 +451,24 @@ anonymous block は独立した procedure や runtime value ではありませ�
 
 statement target の `%=` は IF source command です。expression 中の `%` は従来どおり remainder operator であり、意味は変わりません。
 
-### While `*=()`
+### While `*=condition`
 
-`*=()` は直後に predicate と body の **2つの `[ ... ]` anonymous block** を取ります。どちらにも単独 statement の省略形はありません。
+`*=` は IF と同じ通常の RHS 式を条件とし、直後に **1つの `[ ... ]` anonymous block** を body として取ります。条件と block の間には空白または改行が必要です。単独 statement の省略形はありません。
 
 ```vtl
   A=0
-  *=()
-  [
-    ~=A<10
-  ]
-  [
+  *=A<10 [
     A=A+1
   ]
 ```
 
-第1 block の predicate は各反復の先頭で実行されます。その実行後、既存の `JumpIfZero` が現在の value stack top 1 Cell を condition として消費します。0なら終了し、0以外なら第2 block の body を実行して predicate に戻ります。
+条件式は一度コンパイルされ、その生成コードを各反復の先頭で実行します。既存の `JumpIfZero` が条件結果の 1 Cell を消費し、0なら終了、非0なら body を実行して条件を再評価します。括弧、名前付き整数、乗算も通常の RHS と同じ規則で使えます。
 
-predicate の `( -- condition )` は programmer contract です。arity metadata や compile-time check はなく、condition が stack に無ければ通常の stack-underflow error になります。`*=()` 自体の `()` は通常 operand を生成しません。
+While は stack を自動 cleanup しません。式が必要とする stack input と副作用は通常の式規約に従い、開始前からある値や body が残した値は共通の value stack 上に残ります。body は surrounding owner の code と numeric label namespace を共有します。
 
-While は stack を自動 cleanup しません。開始前からある値や predicate / body が余分に残した値は、共通の value stack 上にそのまま残ります。
+空条件と zero-operand marker は不正です。旧 predicate block + body の2ブロック形式も compile error になります。statement の `*=` は native While source command、expression 内の `*` は multiplication operator です。
 
-statement の `*=()` は native While source command です。expression 内の `*` は従来どおり multiplication operator です。
+この構文は Rust reference のものです。6502 版の移行は [#421](https://github.com/kkismd/vtlxx/issues/421) で扱い、それまでは While を使う更新済み examples の sim65 共通適合検証は成立しません。
 
 ## Source-defined 手続き
 
@@ -653,7 +649,7 @@ opener / closer の改行配置には今後評価する余地がありますが�
 - storage
 - source-defined procedures for board writes, collision checks, output, and search
 - shared value stack
-- IF `%=` and While `*=()` with anonymous blocks
+- IF `%=` and While `*=condition` with anonymous blocks
 - decimal / newline output
 - formatting / indentation rule
 

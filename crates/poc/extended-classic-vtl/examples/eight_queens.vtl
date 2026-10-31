@@ -29,11 +29,7 @@
   &=c [
     F=0
     J=0
-    *=()
-    [
-      ~=J<C
-    ]
-    [
+    *=J<C [
       P=@(J)
       %=P==R [
         F=1
@@ -55,11 +51,7 @@
   ; writes/clobbers: J, output
   &=o [
     J=0
-    *=()
-    [
-      ~=J<8
-    ]
-    [
+    *=J<8 [
       ?=@(J)
       J=J+1
     ]
@@ -86,11 +78,7 @@
   ; reads: C, S, indexed storage; calls b, c, d, o, p
   ; writes/clobbers: C, R, S, F, J, P, D, I, V, board, output
   &=s [
-    *=()
-    [
-      ~=C>=0
-    ]
-    [
+    *=C>=0 [
       ; Advance this column's row candidate. Exhaustion backtracks.
       R=@(C)+1
       %=R>8 [ b=() ] [

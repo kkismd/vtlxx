@@ -281,18 +281,18 @@ fn compile_source_statement(
     }
     let (target, rhs) = split_statement(token.text)?;
     if target == '*' {
-        if rhs != "()" {
+        if rhs.is_empty() || rhs == "()" {
             return Err(CompileError::Syntax);
         }
-        // The predicate and body share the surrounding owner's labels, but
-        // neither block may leave partial code or targets in that owner.
+        // Stage the condition and body together in the surrounding owner.
+        // Failed compilation must not leave partial code, labels, or targets.
         let mut staged = builder.clone();
         let loop_target = staged.new_target();
         let end_target = staged.new_target();
         staged
             .complete_target(loop_target)
             .map_err(|_| CompileError::Builder)?;
-        compile_required_block(reader, machine, constants, &mut staged)?;
+        compile_resolved_rhs(rhs, machine, constants, &mut staged)?;
         staged
             .emit_jump_if_zero(end_target)
             .map_err(|_| CompileError::Builder)?;
@@ -862,15 +862,19 @@ mod tests {
     fn failed_while_keeps_parent_code_labels_and_targets_unchanged() {
         let machine = Machine::new();
         for source in [
-            "*=() [ ^=8 A=1+ ] [ A=1 ]",
-            "*=() [ ~=1 ] [ ^=8 A=1+ ]",
-            "*=() [ ^=8 ~=1 ] [ ^=8 ]",
-            "*=() [ ~=1 ] [ A=1+ ]",
-            "*=() [ ~=1 ] [ ^=8 A=1",
+            "*=A+ [ A=1 ]",
+            "*=1 [ ^=8 A=1+ ]",
+            "*=1 [ ^=8 ^=8 ]",
+            "*=1 [ ^=9 ]",
+            "*=1 [ ^=8 A=1",
+            "*=MISSING [ ]",
         ] {
             let mut builder = CodeBuilder::new();
             builder.emit(Instruction::PushConst(7)).unwrap();
-            let before = builder.clone().finish().unwrap().into_instructions();
+            builder.define_numeric_label(9).unwrap();
+            let target = builder.new_target();
+            builder.emit_jump(target).unwrap();
+            let before = builder.clone();
             let mut reader = SourceReader::new(source);
             let token = reader.next().unwrap().unwrap();
             assert!(
@@ -884,18 +888,18 @@ mod tests {
                 .is_err(),
                 "{source}"
             );
-            assert_eq!(
-                builder.clone().finish().unwrap().into_instructions(),
-                before,
-                "{source}"
-            );
+            assert_eq!(builder, before, "{source}");
+            builder.complete_target(target).unwrap();
+            builder.emit_numeric_jump(9).unwrap();
             builder.define_numeric_label(8).unwrap();
             builder.emit_numeric_jump(8).unwrap();
             assert_eq!(
                 builder.finish().unwrap().into_instructions(),
                 vec![
                     Instruction::PushConst(7),
+                    Instruction::Jump(2),
                     Instruction::Jump(1),
+                    Instruction::Jump(3),
                     Instruction::Return
                 ],
                 "{source}"
@@ -904,10 +908,10 @@ mod tests {
     }
 
     #[test]
-    fn while_consumes_only_two_block_arguments() {
+    fn while_consumes_only_one_body_block() {
         let machine = Machine::new();
         let mut builder = CodeBuilder::new();
-        let mut reader = SourceReader::new("*=() [ ~=0 ] [ A=1 ] [ A=2 ]");
+        let mut reader = SourceReader::new("*=0 [ A=1 ] B=2");
         let token = reader.next().unwrap().unwrap();
         compile_source_statement(
             token,
@@ -917,6 +921,6 @@ mod tests {
             &mut builder,
         )
         .unwrap();
-        assert_eq!(reader.peek().unwrap().unwrap().text, "[");
+        assert_eq!(reader.peek().unwrap().unwrap().text, "B=2");
     }
 }

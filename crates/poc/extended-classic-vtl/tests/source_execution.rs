@@ -40,7 +40,7 @@ fn named_integer_errors_reject_invalid_definitions_and_references() {
         "==BAD,1,2",
         "==BAD,1 &=p [ ==INNER,2 ]",
         "%=1 [ ==INNER,2 ]",
-        "*=() [ ==INNER,2 ] [ ~=0 ]",
+        "*=0 [ ==INNER,2 ]",
         "==NEG,-1 ^=NEG",
         "==NEG,-1 #=NEG",
         "==UNKNOWN,1 A=MISSING",
@@ -233,9 +233,7 @@ fn bracket_blocks_work_for_if_and_while() {
     assert_eq!(machine.register(1), Some(2));
 
     let mut machine = Machine::new();
-    machine
-        .execute_source("A=0 *=() [ ~=A<3 ] [ A=A+1 ]")
-        .unwrap();
+    machine.execute_source("A=0 *=A<3 [ A=A+1 ]").unwrap();
     assert_eq!(machine.register(0), Some(3));
     assert!(machine.stack().is_empty());
 }
@@ -281,9 +279,9 @@ fn bracket_block_errors_are_atomic() {
         "%=1 [ A=1 =| ] [ B=2 ]",
         "%=1 [ A=1 ] |= B=2 =|",
         "%=1 |= A=1 =| [ B=2 ]",
-        "*=() |= ~=0 =| [ A=1 ]",
-        "*=() [ ~=0 ] |= A=1 =|",
-        "*=() [ ~=0 ] [ A=1",
+        "*=0 |= A=1 =|",
+        "*=0 [ A=1 =|",
+        "*=0 [ A=1",
         "%=1 [ A=1 ] [ B=2",
         "%=1 [ A=1 ] |= B=2 ]",
     ] {
@@ -332,10 +330,10 @@ fn if_requires_then_block_and_preserves_remainder() {
 }
 
 #[test]
-fn while_rechecks_predicate_and_handles_zero_iterations() {
+fn while_rechecks_condition_and_handles_zero_iterations() {
     let mut machine = Machine::new();
     machine
-        .execute_source("A=0 B=0 *=() [ ~=A<3 ] [ A=A+1 B=B+2 ] C=A")
+        .execute_source("A=0 B=0 *=A<3 [ A=A+1 B=B+2 ] C=A")
         .unwrap();
     assert_eq!(machine.register(0), Some(3));
     assert_eq!(machine.register(1), Some(6));
@@ -343,9 +341,7 @@ fn while_rechecks_predicate_and_handles_zero_iterations() {
     assert!(machine.stack().is_empty());
 
     let mut machine = Machine::new();
-    machine
-        .execute_source("A=3 *=() [ ~=A<3 ] [ A=99 ] B=7")
-        .unwrap();
+    machine.execute_source("A=3 *=A<3 [ A=99 ] B=7").unwrap();
     assert_eq!(machine.register(0), Some(3));
     assert_eq!(machine.register(1), Some(7));
 }
@@ -354,7 +350,7 @@ fn while_rechecks_predicate_and_handles_zero_iterations() {
 fn nested_while_and_following_source_keep_their_own_arguments() {
     let mut machine = Machine::new();
     machine
-        .execute_source("A=0 B=0 *=() [ ~=A<2 ] [ C=0 *=() [ ~=C<3 ] [ B=B+1 C=C+1 ] A=A+1 ] D=9")
+        .execute_source("A=0 B=0 *=A<2 [ C=0 *=C<3 [ B=B+1 C=C+1 ] A=A+1 ] D=9")
         .unwrap();
     for (index, expected) in [(0, 2), (1, 6), (2, 3), (3, 9)] {
         assert_eq!(machine.register(index), Some(expected));
@@ -366,35 +362,47 @@ fn nested_while_and_following_source_keep_their_own_arguments() {
 fn while_uses_shared_stack_without_cleanup() {
     let mut machine = Machine::new();
     machine.push(7);
-    machine
-        .execute_source("A=0 *=() [ ~=99,A<2 ] [ ~=88 A=A+1 ]")
-        .unwrap();
+    machine.execute_source("A=0 *=A<2 [ ~=88 A=A+1 ]").unwrap();
     assert_eq!(machine.register(0), Some(2));
-    assert_eq!(machine.stack(), &[7, 99, 88, 99, 88, 99]);
-
-    let mut machine = Machine::new();
-    machine.push(0);
-    machine.execute_source("*=() [ A=1 ] [ A=2 ]").unwrap();
-    assert_eq!(machine.register(0), Some(1));
-    assert!(machine.stack().is_empty());
-
-    let mut machine = Machine::new();
-    assert_eq!(
-        machine.execute_source("*=() [ A=1 ] [ A=2 ]"),
-        Err(SourceError::Runtime(RuntimeError::StackUnderflow))
-    );
-    assert_eq!(machine.register(0), Some(1));
+    assert_eq!(machine.stack(), &[7, 88, 88]);
 }
 
 #[test]
-fn while_requires_two_blocks_and_preserves_multiplication() {
+fn while_rhs_preserves_operand_order_and_stack_input() {
+    let mut machine = Machine::new();
+    machine.push(7);
+    machine.execute_source("A=0 *=A,A<2 [ A=A+1 ]").unwrap();
+    assert_eq!(machine.stack(), &[7, 0, 1, 2]);
+
+    let mut machine = Machine::new();
+    machine.push(7);
+    machine.push(1);
+    machine.execute_source("*=~ [ A=A+1 ~=0 ]").unwrap();
+    assert_eq!(machine.register(0), Some(1));
+    assert_eq!(machine.stack(), &[7]);
+    assert_eq!(
+        Machine::new().execute_source("*=~ [ ]"),
+        Err(SourceError::Runtime(RuntimeError::StackUnderflow))
+    );
+}
+
+#[test]
+fn while_requires_condition_and_one_block() {
     for source in [
+        "*=",
         "*=()",
-        "*=() [ ~=1 ]",
-        "*=() ~=1 |= A=1 =|",
-        "*=() [ ~=1 ] A=1",
-        "*=1 [ ~=1 ] [ A=1 ]",
-        "*=() [ ~=1 ] [ A=1",
+        "*=() [ ~=0 ] [ A=1 ]", // Removed predicate-block syntax.
+        "*=A+ [ A=1 ]",
+        "*=(A [ A=1 ]",
+        "*=MISSING [ ]",
+        "*=1",
+        "*=1 A=1",
+        "*=1 [ A=1",
+        "*=1 [ A=1+ ]",
+        "*=0[ A=1 ]",
+        "*=0 [A=1 ]",
+        "*=0 [ A=1]",
+        "*=0 [ A=1 ] [ A=2 ]",
     ] {
         let mut machine = Machine::new();
         assert!(
@@ -403,12 +411,66 @@ fn while_requires_two_blocks_and_preserves_multiplication() {
         );
         assert_eq!(machine.register(0), Some(0), "{source}");
     }
+}
+
+#[test]
+fn while_conditions_use_normal_rhs_expressions() {
+    for (source, expected) in [
+        ("A=3 *=0 [ A=99 ] ?=A", b"3".as_slice()),
+        ("A=1 *=A [ A=0 ] ?=A", b"0"),
+        ("A=-2 *=A [ A=A+1 ] ?=A", b"0"),
+        ("==LIMIT,3 A=0 *=(A<LIMIT) [ A=A+1 ] ?=A", b"3"),
+        ("A=0 *=(A<3)*2 [ A=A+1 ] ?=A*4", b"12"),
+    ] {
+        let mut machine = Machine::new();
+        machine.execute_source(source).unwrap();
+        assert_eq!(machine.output(), expected, "{source}");
+        assert!(machine.stack().is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn while_and_if_share_the_surrounding_label_owner() {
     let mut machine = Machine::new();
     machine
-        .execute_source("A=2*3 *=() [ ~=0 ] [ A=99 ] B=A*4")
+        .execute_source(
+            "&=p [ A=0 %=1 [ *=A<3 [ %=A==1 [ #=9 ] A=A+1 ] ] ^=9 ?=A ] \
+         ^=9 p=() B=0 *=B<2 [ ^=8 B=B+1 %=B<2 [ #=8 ] ] ?=B",
+        )
         .unwrap();
-    assert_eq!(machine.register(0), Some(6));
-    assert_eq!(machine.register(1), Some(24));
+    assert_eq!(machine.output(), b"12");
+    assert!(machine.stack().is_empty());
+    for source in [
+        "^=1 *=0 [ ^=1 ]",
+        "*=0 [ ^=1 ] ^=1",
+        "&=q [ *=0 [ ^=2 ] ] #=2",
+    ] {
+        assert!(matches!(
+            Machine::new().execute_source(source),
+            Err(SourceError::Compile(_))
+        ));
+    }
+}
+
+#[test]
+fn failed_while_preserves_flushed_effects_and_completed_bindings() {
+    let mut machine = Machine::new();
+    assert!(matches!(
+        machine.execute_source("A=7 ?=A &=p [ ?=8 ] A=99 *=1 [ A=1+ ]"),
+        Err(SourceError::Compile(_))
+    ));
+    assert_eq!(machine.register(0), Some(7));
+    assert_eq!(machine.output(), b"7");
+    assert!(matches!(
+        machine.execute_source("&=q [ *=1 [ A=1+ ] ]"),
+        Err(SourceError::Compile(_))
+    ));
+    assert!(matches!(
+        machine.execute_source("q=()"),
+        Err(SourceError::Compile(_))
+    ));
+    machine.execute_source("p=()").unwrap();
+    assert_eq!(machine.output(), b"78");
 }
 
 #[test]
