@@ -49,6 +49,10 @@ fn build_and_run_input(input: &[u8]) -> Output {
 }
 
 fn build_and_run_input_with_frontend(input: &[u8], frontend_fixture: &str) -> Output {
+    build_and_run_custom(input, frontend_fixture, None)
+}
+
+fn build_and_run_custom(input: &[u8], frontend_fixture: &str, basic: Option<&str>) -> Output {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         frontend_fixture,
@@ -67,10 +71,17 @@ fn build_and_run_input_with_frontend(input: &[u8], frontend_fixture: &str) -> Ou
         "6502/target/sim65_adapter.s",
     ];
     let temp = TempDir::new();
+    if let Some(basic) = basic {
+        fs::write(temp.0.join("basic.s"), basic).unwrap();
+    }
     let mut objects = Vec::new();
     for (index, source_file) in sources.iter().enumerate() {
         let object = temp.0.join(format!("{index}.o"));
-        let source_file = root.join(source_file);
+        let source_file = if basic.is_some() && *source_file == "6502/frontend/basic.s" {
+            temp.0.join("basic.s")
+        } else {
+            root.join(source_file)
+        };
         let output = run(
             "ca65",
             &[
@@ -597,4 +608,148 @@ fn template_calls_expand_into_the_current_caller() {
     capacity_failure.push_str(&"A={} ".repeat(300));
     capacity_failure.push_str("] a{A}=()");
     expect(&capacity_failure, 4, b"");
+}
+
+fn stack_fixture() -> String {
+    format!(
+        "%=0 [ {}A={}0+0{}{} ?=A",
+        "%=1 [ ".repeat(15),
+        "0+(".repeat(16),
+        ")".repeat(16),
+        " ]".repeat(16)
+    )
+}
+
+// Instrument only a temporary assembly copy. No test switches or symbols are
+// added to the production ABI, and no probe pushes change the observed S.
+fn stack_probe_basic() -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let basic = fs::read_to_string(root.join("6502/frontend/basic.s")).unwrap();
+    let basic = basic.replace(".segment \"BSS\"", ".segment \"BSS\"\naudit_min: .res 1");
+    let basic = basic.replace(
+        "fe_compile_run:\n",
+        "fe_compile_run:\n    lda #$a5\n    ldx #24\n:\n    sta $0100,x\n    dex\n    bpl :-\n    lda #255\n    sta audit_min\n",
+    );
+    let basic = basic.replace(
+        "    tsx\n    cpx #25",
+        "    tsx\n    cpx audit_min\n    bcs :+\n    stx audit_min\n:\n    cpx #25",
+    );
+    let fatal = "compile_stack_exhausted:\n    lda #4\n    sta fe_compile_status\n";
+    assert_eq!(basic.matches(fatal).count(), 1);
+    basic.replace(
+        fatal,
+        &format!("{fatal}    lda audit_min\n    jeq audit_failed\n    ldx #24\n:\n    lda $0100,x\n    cmp #$a5\n    jne audit_failed\n    dex\n    bpl :-\n"),
+    ) + "\n.segment \"CODE\"\naudit_failed:\n    lda #99\n    jmp halt\n"
+}
+
+fn run_stack_probe(source: &str, basic: &str) -> Output {
+    let mut input = (source.len() as u16).to_le_bytes().to_vec();
+    input.extend_from_slice(source.as_bytes());
+    build_and_run_custom(&input, "6502/target/sim65_cli.s", Some(basic))
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn compile_stack_guard_comparison_boundary_preserves_operand_modes() {
+    for observed in [24, 25] {
+        // Change the comparison input, never TXS or the live return frames.
+        // Both the value-first and stack-root operand entry branches execute.
+        let basic = stack_probe_basic()
+            .replace("    cpx #25", &format!("    ldx #{observed}\n    cpx #25"));
+        let result = run_stack_probe("~=40 ?=~+2", &basic);
+        assert_eq!(
+            result.status.code(),
+            Some(if observed == 24 { 132 } else { 0 }),
+            "{result:?}"
+        );
+        assert_eq!(
+            result.stdout,
+            if observed == 24 {
+                b"".as_slice()
+            } else {
+                b"42".as_slice()
+            }
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn compile_stack_guard_halts_deep_sources_before_runtime_or_wrap() {
+    let cases = [
+        (
+            "statement",
+            format!("?=9 {}A=1{}", "%=1 [ ".repeat(16), " ]".repeat(16)),
+            false,
+        ),
+        (
+            "required_block",
+            format!("?=9 {}A=1{}", "%=1 [ ".repeat(16), " ]".repeat(16)),
+            false,
+        ),
+        (
+            "operand",
+            format!("?=9 %=0 [ A={}0{} ]", "0+(".repeat(16), ")".repeat(16)),
+            false,
+        ),
+        (
+            "value",
+            format!("?=9 %=0 [ A={}0{} ]", "0+(".repeat(16), ")".repeat(16)),
+            false,
+        ),
+        (
+            "value",
+            format!(
+                "&=a{{}} [ {{}}={}0{} ] ?=9 %=0 [ a{{A}}=() ]",
+                "0+(".repeat(16),
+                ")".repeat(16)
+            ),
+            true,
+        ),
+    ];
+    for (entry, source, virtual_source) in cases {
+        let mut basic = stack_probe_basic();
+        let baseline = run_stack_probe(&source, &basic);
+        assert_eq!(baseline.status.code(), Some(0), "{baseline:?}");
+        assert_eq!(baseline.stdout, b"9");
+        // Only the selected entry gets a stricter threshold. For P0a, ensure
+        // that the failure actually occurs while reading the expansion.
+        let check = if virtual_source {
+            "    lda virtual_active\n    beq :+\n    tsx\n    cpx #200\n    bcs :+\n    jmp compile_stack_exhausted\n:\n"
+        } else {
+            "    tsx\n    cpx #200\n    bcs :+\n    jmp compile_stack_exhausted\n:\n"
+        };
+        // Operand's first BNE must consume the incoming Z before any probe.
+        let marker = if entry == "operand" {
+            "operand:\n    bne @operators\n    compile_stack_guard\n".to_owned()
+        } else {
+            format!("{entry}:\n    compile_stack_guard\n")
+        };
+        assert_eq!(basic.matches(&marker).count(), 1);
+        basic = basic.replace(&marker, &format!("{marker}{check}"));
+        basic = basic.replace("    jsr rt_init", "    jmp audit_failed");
+        let result = run_stack_probe(&source, &basic);
+        assert_eq!(
+            result.status.code(),
+            Some(132),
+            "{entry}, virtual={virtual_source}: {result:?}"
+        );
+        assert!(result.stdout.is_empty(), "{result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn compile_stack_guard_accepts_201_byte_fixture_and_observes_headroom() {
+    let source = stack_fixture();
+    assert_eq!(source.len(), 201);
+    let basic = stack_probe_basic().replace(
+        "@returned:\n",
+        "@returned:\n    lda audit_min\n    jmp halt\n",
+    );
+    let result = run_stack_probe(&source, &basic);
+    let minimum = result.status.code().unwrap();
+    assert!((25..132).contains(&minimum), "{result:?}");
+    assert_eq!(result.stdout, b"0");
+    eprintln!("201-byte fixture: minimum guard S={minimum}");
 }

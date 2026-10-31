@@ -24,6 +24,21 @@
 .import rt_print_number, rt_print_char, rt_read_char
 .importzp fe_status, cc_status, cc_arg
 .importzp cc_data_length
+.import halt
+
+; Compile-private CPU stack guard (#417/#424). The audited unguarded
+; increment is at most 24 bytes; reserve one further byte at the page bottom.
+; No pushes here or on the fatal path. A/Y are preserved; X/N/Z/C are dead at
+; each use (operand's incoming Z must be consumed BEFORE this macro).
+; Re-audit linked calls, temporary pushes and entry coverage when changing
+; these paths, the adapter or cc65 library. See docs/ecvtl-6502-stack-guard.md.
+.macro compile_stack_guard
+    tsx
+    cpx #25
+    bcs :+
+    jmp compile_stack_exhausted
+:
+.endmacro
 
 .segment "ZEROPAGE"
 fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
@@ -81,6 +96,7 @@ top_level_chunk_targets: .res 53*2
 .segment "CODE"
 ; Carry clear on success; A/X is the completed entry. Compile errors never
 ; enter generated code. The caller may inspect fe_compile_status/cc_status.
+; CPU stack exhaustion alone halts immediately instead of returning.
 fe_compile_run:
     lda #0
     sta fe_compile_status
@@ -229,6 +245,14 @@ fe_build_driver:
     clc
     rts
 
+; Only CPU stack exhaustion bypasses ordinary return/temporary-source abort.
+; The sim6502 process is discarded; no generated runtime has started.
+compile_stack_exhausted:
+    lda #4
+    sta fe_compile_status
+    lda #$84
+    jmp halt
+
 source_error:
     lda #1
     bne set_error
@@ -316,6 +340,7 @@ skip_separators:
     rts
 
 statement:
+    compile_stack_guard
     lda look_byte
     cmp #'='
     jeq fe_definition
@@ -1546,6 +1571,7 @@ require_form_boundary:
 
 ; Required source block, compiled inline into the current owner.
 required_block:
+    compile_stack_guard
     jsr skip_separators
     lda look_state
     cmp #3
@@ -1596,10 +1622,12 @@ required_block:
 ; as encountered, so every binary operation is left associative.
 operand:
     bne @operators
+    compile_stack_guard
     jsr value
     lda fe_compile_status
     bne @done
 @operators:
+    compile_stack_guard
     jsr peek
     lda look_state
     cmp #3
@@ -1644,6 +1672,7 @@ operand:
     rts
 
 value:
+    compile_stack_guard
     jsr peek
     lda look_state
     cmp #3
