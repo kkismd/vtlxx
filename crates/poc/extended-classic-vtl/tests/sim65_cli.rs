@@ -228,3 +228,17 @@ fn oversized_source_is_rejected_before_toolchain_start() {
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("maximum supported length"));
 }
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn while_rhs_runs_in_sim65_and_rejects_legacy_syntax() {
+    let temp = TestDir::new();
+    let success = run_program_with_input(&temp, "while-rhs", b"A=0 *=A<3 [ ?=A A=A+1 ] ?=A", &[]);
+    assert!(success.status.success(), "{:?}", success.stderr);
+    assert_eq!(success.stdout, b"0123");
+
+    let failure = run_program_with_input(&temp, "while-legacy", b"*=() [ ~=0 ] [ ?=9 ]", &[]);
+    assert!(!failure.status.success());
+    assert!(failure.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&failure.stderr).contains("compilation failed"));
+}
