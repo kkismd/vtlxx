@@ -1,0 +1,9 @@
+  ; ( index -- )
+  ; Representative caller: decode content and check b>0 before writing.
+  ; Legal stored cells only. Caller-saved scratch: F,I.
+  ; Writes only storage[index], preserving observation and other counts.
+  I=~
+  F=@(I)%1000
+  %=((F%100)/10)>0 [
+    @=I,@(I)-10
+  ]

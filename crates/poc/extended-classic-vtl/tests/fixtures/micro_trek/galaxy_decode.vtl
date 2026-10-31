@@ -1,0 +1,11 @@
+  ; ( index -- k b s observed )
+  ; Legal stored cells only. Caller-saved scratch: A,C,D,E,F,I.
+  ; No storage writes. F is the content without the observation flag.
+  I=~
+  F=@(I)
+  E=F>=1000
+  F=F-(1000*E)
+  A=F/100
+  C=(F%100)/10
+  D=F%10
+  ~=A,C,D,E

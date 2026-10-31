@@ -1,0 +1,9 @@
+  ; ( index k b s observed -- )
+  ; Legal inputs: index=0..63, k=0..5, b=0..1, s=0..7, observed=0/1.
+  ; Caller-saved scratch: A,C,D,E,I. Writes only storage[index].
+  E=~
+  D=~
+  C=~
+  A=~
+  I=~
+  @=I,(100*A)+(10*C)+D+(1000*E)

@@ -1,0 +1,7 @@
+  ; ( index -- )
+  ; Legal stored cells only. Caller-saved scratch: I.
+  ; Writes only storage[index]; observing twice has the same effect as once.
+  I=~
+  %=@(I)<1000 [
+    @=I,@(I)+1000
+  ]
