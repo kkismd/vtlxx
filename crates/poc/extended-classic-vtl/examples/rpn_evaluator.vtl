@@ -33,11 +33,7 @@
   ; calculator operands survive the loop and its procedure calls.
   &=e [
     P=0
-    *=()
-    [
-      ~=P<7
-    ]
-    [
+    *=P<7 [
       T=@(P)
       P=P+1
       %=T>=0 [ ~=T ] [

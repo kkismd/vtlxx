@@ -98,3 +98,18 @@ fn compile_and_runtime_failures_report_errors_without_stdout() {
         assert!(String::from_utf8_lossy(&output.stderr).contains(category));
     }
 }
+
+#[test]
+fn while_rhs_rechecks_condition_and_rejects_old_syntax() {
+    let source = SourceFile::new(b"A=0 *=A<3 [ ?=A A=A+1 ] ?=A");
+    let output = ecvtl(&[source.0.as_os_str()]);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"0123");
+    assert!(output.stderr.is_empty());
+
+    let source = SourceFile::new(b"*=() [ ~=0 ] [ A=1 ]");
+    let output = ecvtl(&[source.0.as_os_str()]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("Compile"));
+}

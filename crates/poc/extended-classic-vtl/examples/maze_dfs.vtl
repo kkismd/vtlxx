@@ -75,11 +75,7 @@
   ; reads maze; calls n, m, v, p, b and clobbers their scratch.
   ; Each attempted direction advances exactly once, even for a wall or revisit.
   &=s [
-    *=()
-    [
-      ~=(D>=0)*(C!=15)
-    ]
-    [
+    *=(D>=0)*(C!=15) [
       %=@(DIRECTION_BASE+D)<4 [
         n=()
         N=~
@@ -101,11 +97,7 @@
 
   ; Initialize all four storage regions, then mark the fixed open cells.
   I=0
-  *=()
-  [
-    ~=I<64
-  ]
-  [
+  *=I<64 [
     @=I,0
     I=I+1
   ]
