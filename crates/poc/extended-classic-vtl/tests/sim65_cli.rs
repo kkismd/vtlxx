@@ -242,3 +242,28 @@ fn while_rhs_runs_in_sim65_and_rejects_legacy_syntax() {
     assert!(failure.stdout.is_empty());
     assert!(String::from_utf8_lossy(&failure.stderr).contains("compilation failed"));
 }
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn compile_stack_201_byte_fixture_matches_reference() {
+    let temp = TestDir::new();
+    let source = format!(
+        "%=0 [ {}A={}0+0{}{} ?=A",
+        "%=1 [ ".repeat(15),
+        "0+(".repeat(16),
+        ")".repeat(16),
+        " ]".repeat(16)
+    );
+    assert_eq!(source.len(), 201);
+    let path = temp.0.join("stack-201.vtl");
+    fs::write(&path, &source).unwrap();
+    let reference = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+        .arg(&path)
+        .output()
+        .unwrap();
+    let target = run_program_with_input(&temp, "stack-201", source.as_bytes(), b"");
+    assert_eq!(reference.status.code(), Some(0), "{reference:?}");
+    assert_eq!(target.status.code(), reference.status.code(), "{target:?}");
+    assert_eq!(reference.stdout, b"0");
+    assert_eq!(target.stdout, reference.stdout);
+}
