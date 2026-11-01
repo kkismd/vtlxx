@@ -765,25 +765,32 @@ fn p0a_result(result: &Output, status: i32, stdout: &[u8]) {
 // compiling another source after failure. Only 'a' may be published in these
 // fixtures; compare its entire canonical body, and reject every other slot.
 fn p0a_probe(source: &str, body: Option<&str>, failure: Option<bool>) -> Output {
+    p0a_probe_status(source, body, failure.map(|reader| (reader, 2)))
+}
+
+fn p0a_probe_status(source: &str, body: Option<&str>, failure: Option<(bool, u8)>) -> Output {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut basic = fs::read_to_string(root.join("6502/frontend/basic.s")).unwrap();
     let mut checks = String::new();
-    if let Some(virtual_rhs) = failure {
+    if let Some((virtual_rhs, status)) = failure {
         // Record the input reader at the actual syntax error, before cleanup
         // clears virtual_active. Runtime entry is a trap, not an output proxy.
-        let marker = "syntax_error:\n";
+        let marker = if status == 4 {
+            "backend_error:\n"
+        } else {
+            "syntax_error:\n"
+        };
         assert_eq!(basic.matches(marker).count(), 1);
         basic = basic.replace(
             marker,
-            "syntax_error:\n    lda virtual_active\n    sta p0a_error_reader\n",
+            &format!("{marker}    lda virtual_active\n    sta p0a_error_reader\n"),
         );
         let marker = "    jsr rt_init";
         assert_eq!(basic.matches(marker).count(), 1);
         basic = basic.replace(marker, "    lda #99\n    jmp halt");
         basic.push_str("\n.export p0a_error_reader\n.segment \"BSS\"\np0a_error_reader: .res 1\n");
         checks.push_str(&format!(
-            ".import p0a_error_reader\n    jcc failed\n    lda fe_compile_status\n    cmp #2\n    jne failed\n    lda p0a_error_reader\n    cmp #{}\n    jne failed\n",
-            u8::from(virtual_rhs)
+            ".import p0a_error_reader\n    jcc failed\n    lda fe_compile_status\n    cmp #{status}\n    jne failed\n    lda p0a_error_reader\n    cmp #{}\n    jne failed\n", u8::from(virtual_rhs)
         ));
     } else {
         checks.push_str("    jcs failed\n    lda rt_depth\n    jne failed\n");
@@ -876,6 +883,19 @@ fn p0a_shared_failures_preserve_phase_publication_and_never_start_runtime() {
         );
         for (line, statement) in fixture.lines().enumerate() {
             assert!(!statement.trim().is_empty());
+            if name == "invalid_call_forms" && statement == "a{A}=1" {
+                // The P0a source is retained for history; P0b accepts this row.
+                let source = format!("&=a{{}} [ A={{}} ]\n{statement} ?=~");
+                p0a_result(
+                    &build_and_run_input_with_frontend(
+                        &p0a_frame(&source),
+                        "6502/target/sim65_cli.s",
+                    ),
+                    0,
+                    b"1",
+                );
+                continue;
+            }
             let (source, body) = if name == "invalid_call_forms" {
                 (format!("&=a{{}} [ A={{}} ]\n{statement}"), Some("A={}"))
             } else {
@@ -890,4 +910,76 @@ fn p0a_shared_failures_preserve_phase_publication_and_never_start_runtime() {
             p0a_result(&p0a_probe(&source, body, Some(false)), 0, b"");
         }
     }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn p0b_shared_fixture_and_rhs_forms_match_reference() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/template_p0b/minimal.vtl");
+    let source = fs::read_to_string(&path).unwrap();
+    let reference = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+        .arg(path)
+        .output()
+        .unwrap();
+    p0a_result(&reference, 0, b"15\n");
+    p0a_result(
+        &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
+        0,
+        &reference.stdout,
+    );
+    p0a_result(&p0a_probe(&source, Some("{}=~+{}"), None), 0, b"15\n");
+
+    for (source, stdout) in [
+        (
+            "==NUM,3 &=a{} [ {}=~+{} ] B=2 a{B}=(B+NUM) a{B}=1,4 ?=B ?=~",
+            b"111".as_slice(),
+        ),
+        ("&=a{} [ {}=~+{} ] ~=4 A=1 a{A}=~+2 ?=A", b"7".as_slice()),
+        (
+            "&=a{} [ {}=~+{} ] &=p [ a{A}=2 ] A=0 %=1 [ a{A}=3 ] [ a{A}=99 ] *=A<7 [ a{A}=1 ] p=() ?=A",
+            b"9".as_slice(),
+        ),
+    ] {
+        p0a_result(
+            &build_and_run_input_with_frontend(&p0a_frame(source), "6502/target/sim65_cli.s"),
+            0,
+            stdout,
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn p0b_failures_keep_published_template_and_do_not_start_runtime() {
+    let fixture = fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/template_p0b/invalid_rhs.vtl"),
+    )
+    .unwrap();
+    for (source, body, virtual_rhs) in [
+        (fixture, "{}=~", false),
+        ("&=a{} [ {}=~ ] a{A}=".to_owned(), "{}=~", false),
+        ("&=a{} [ {}=~ ] a{A}=q".to_owned(), "{}=~", false),
+        ("&=a{} [ {}=A+ ] a{A}=1".to_owned(), "{}=A+", true),
+        ("&=a{} [ {}=~ ] z{A}=1".to_owned(), "{}=~", false),
+        ("&=a{} [ {}=~ ] a{AB}=1".to_owned(), "{}=~", false),
+    ] {
+        p0a_result(
+            &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
+            130,
+            b"",
+        );
+        p0a_result(&p0a_probe(&source, Some(body), Some(virtual_rhs)), 0, b"");
+    }
+    let source = format!("&=a{{}} [ {{}}=~ ] a{{A}}={}", vec!["1"; 500].join(","));
+    p0a_result(
+        &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
+        132,
+        b"",
+    );
+    p0a_result(
+        &p0a_probe_status(&source, Some("{}=~"), Some((false, 4))),
+        0,
+        b"",
+    );
 }

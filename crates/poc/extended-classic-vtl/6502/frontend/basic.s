@@ -436,6 +436,9 @@ statement:
     lda call_target
     ldx call_target+1
     jmp cc_call
+@template_rhs_entry:
+    cpx #0
+    jeq @compile_operand
 @call_group:
     ; The opening parenthesis was consumed to distinguish `()` from a normal
     ; grouped operand. Compile the group contents, then continue the ordinary
@@ -547,6 +550,8 @@ statement:
     lda fe_compile_status
     jne @done
     lda target_index
+    cmp #'{'
+    jeq template_call
     cmp #'~'
     jeq @done
     cmp #'a'
@@ -946,6 +951,8 @@ statement:
 
 ; Skip source separators and comments inside the template body. Comments
 ; never enter the saved source and all physical newlines become canonical LF.
+; Expose one entry into the shared RHS path without adding a JSR frame.
+template_rhs_entry = @template_rhs_entry
 template_skip_separators:
     jsr peek
     lda look_state
@@ -1138,10 +1145,12 @@ template_append:
 
 ; Numeric label operands reuse the compile-run constant table, then delegate
 ; all owner-local definition/fixup behavior to the backend.
-; Parse a{X}=(), preserve the original one-byte lookahead, then feed the
+; Parse a{X}=RHS, preserve the original one-byte lookahead, then feed the
 ; saved template through the same statement compiler under a virtual reader.
 template_call:
     lda target_index
+    cmp #'{'
+    jeq @rhs_complete
     sta template_identity
     jsr take                         ; {
     jsr peek
@@ -1171,13 +1180,17 @@ template_call:
     cmp #'='
     jne syntax_error
     jsr take
+    ; A brace cannot be an ordinary target. It selects expansion after the
+    ; shared RHS path instead of the ordinary Write dispatch.
+    lda #'{'
+    sta target_index
     jsr peek
     lda look_state
     cmp #1
-    jne syntax_error
+    jne @normal_rhs
     lda look_byte
     cmp #'('
-    jne syntax_error
+    jne @normal_rhs
     jsr take
     jsr peek
     lda look_state
@@ -1185,12 +1198,13 @@ template_call:
     jne syntax_error
     lda look_byte
     cmp #')'
-    jne syntax_error
+    jne @group_rhs
     jsr take
     jsr peek
     jsr statement_end
     lda fe_compile_status
     jne @done
+@rhs_complete:
     ; statement_end validates without consuming the delimiter lookahead.
     lda look_state
     sta original_look_state
@@ -1266,6 +1280,12 @@ template_call:
     jmp syntax_error
 @done:
     rts
+@normal_rhs:
+    ldx #0
+    jmp template_rhs_entry
+@group_rhs:
+    ldx #1
+    jmp template_rhs_entry
 
 
 fe_label:
