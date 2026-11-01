@@ -93,6 +93,13 @@ fn malformed_and_undefined_invocations_are_compile_errors() {
     for statement in source.lines() {
         let mut machine = Machine::new();
         machine.execute_source("&=a{} [ A={} ]").unwrap();
+        // This P0a-only rejection became valid in P0b; keep the shared
+        // historical fixture intact for the 6502 P0a implementation.
+        if statement == "a{A}=1" {
+            machine.execute_source(statement).unwrap();
+            assert_eq!(machine.stack(), &[1]);
+            continue;
+        }
         assert!(
             matches!(
                 machine.execute_source(statement),

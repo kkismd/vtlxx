@@ -94,19 +94,19 @@ fn parse_template_header(rhs: &str) -> Option<char> {
         .then(|| bytes[0] as char)
 }
 
-fn parse_template_invocation(token: &str) -> Result<Option<(char, char)>, CompileError> {
+fn parse_template_invocation(token: &str) -> Result<Option<(char, char, &str)>, CompileError> {
     let bytes = token.as_bytes();
     if bytes.len() < 2 || !bytes[0].is_ascii_lowercase() || bytes[1] != b'{' {
         return Ok(None);
     }
-    if bytes.len() != 7 || !bytes[2].is_ascii_uppercase() || &bytes[3..] != b"}=()" {
+    if bytes.len() < 6 || !bytes[2].is_ascii_uppercase() || &bytes[3..5] != b"}=" {
         return Err(CompileError::Syntax);
     }
-    Ok(Some((bytes[0] as char, bytes[2] as char)))
+    Ok(Some((bytes[0] as char, bytes[2] as char, &token[5..])))
 }
 
 fn compile_template_invocation(
-    (template_identity, argument): (char, char),
+    (template_identity, argument, rhs): (char, char, &str),
     machine: &Machine,
     constants: &Constants,
     builder: &mut CodeBuilder,
@@ -115,6 +115,9 @@ fn compile_template_invocation(
         .template(template_identity)
         .ok_or(CompileError::UndefinedBinding)?;
     let mut staged = builder.clone();
+    if rhs != "()" {
+        compile_resolved_rhs(rhs, machine, constants, &mut staged)?;
+    }
     for statement in template.statements() {
         let bound = bind_statement(statement, argument);
         compile_statement(&bound, machine, constants, &mut staged)?;
@@ -611,7 +614,6 @@ mod tests {
             "a{}=()",
             "a{AB}=()",
             "a{a}=()",
-            "a{A}=1",
             "a{A}=",
             "a{A=()",
             "a{A}=() B=1+",
@@ -624,6 +626,64 @@ mod tests {
     }
 
     #[test]
+    fn template_operand_uses_normal_rhs_and_preserves_stack_and_reader() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ {}=~+{} ]").unwrap();
+        machine.execute_source("A=5 a{A}=10 ?=A ?=()").unwrap();
+        assert_eq!(machine.output(), b"15\n");
+        assert!(machine.stack().is_empty());
+        machine
+            .execute_source("==NUM,3 B=2 a{B}=(B+NUM) a{B}=1,4 C=7")
+            .unwrap();
+        assert_eq!(machine.register(1), Some(11));
+        assert_eq!(machine.register(2), Some(7));
+        assert_eq!(machine.stack(), &[1]);
+        machine.execute_source("a{B}=~+2").unwrap();
+        assert_eq!(machine.register(1), Some(14));
+        assert!(machine.stack().is_empty());
+        assert_eq!(
+            machine.template('a').unwrap().statements(),
+            &["{}=~+{}".to_owned()]
+        );
+    }
+
+    #[test]
+    fn template_operand_works_in_control_and_write_blocks() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ {}=~+{} ] &=p [ a{A}=2 ] A=0 %=1 [ a{A}=3 ] [ a{A}=99 ] *=A<7 [ a{A}=1 ] p=() B=8").unwrap();
+        assert_eq!(machine.register(0), Some(9));
+        assert_eq!(machine.register(1), Some(8));
+        assert!(machine.stack().is_empty());
+    }
+
+    #[test]
+    fn failed_template_operand_does_not_commit_builder() {
+        let mut machine = Machine::new();
+        machine.execute_source("&=a{} [ {}=~ ]").unwrap();
+        let mut builder = CodeBuilder::new();
+        builder.emit(Instruction::PushConst(7)).unwrap();
+        let original = builder.clone();
+        for (invocation, error) in [
+            (('a', 'A', "1+"), CompileError::Syntax),
+            (('a', 'A', "q"), CompileError::UndefinedBinding),
+            (('z', 'A', "1"), CompileError::UndefinedBinding),
+        ] {
+            assert_eq!(
+                compile_template_invocation(
+                    invocation,
+                    &machine,
+                    &Constants::default(),
+                    &mut builder
+                ),
+                Err(error)
+            );
+            assert_eq!(builder, original);
+        }
+        machine.execute_source("a{A}=1").unwrap();
+        assert_eq!(machine.register(0), Some(1));
+    }
+
+    #[test]
     fn failed_template_expansion_does_not_mutate_its_owner_or_runtime() {
         let mut machine = Machine::new();
         machine.execute_source("&=a{} [ A={} {}=A+ ]").unwrap();
@@ -631,7 +691,12 @@ mod tests {
         builder.emit(Instruction::PushConst(7)).unwrap();
         let original = builder.clone();
         assert_eq!(
-            compile_template_invocation(('a', 'B'), &machine, &Constants::default(), &mut builder),
+            compile_template_invocation(
+                ('a', 'B', "5"),
+                &machine,
+                &Constants::default(),
+                &mut builder
+            ),
             Err(CompileError::Syntax)
         );
         assert_eq!(builder, original);
