@@ -1,9 +1,21 @@
+; Game storage layout and quadrant contents.
+==SECTOR_BASE,71
+==ENEMY_HP_BASE,135
+==ENEMY_X_BASE,141
+==ENEMY_Y_BASE,147
+==ENEMY_END,153
+==PRNG_STATE,192
+==PRNG_MULTIPLIER,25173
+==PRNG_INCREMENT,13849
+==OBSERVED_FLAG,1000
+==ENEMY_HP,300
+
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
   &=r [
     A=~
-    B=(@(192)*25173)+13849
-    @=192,B
+    B=(@(PRNG_STATE)*PRNG_MULTIPLIER)+PRNG_INCREMENT
+    @=PRNG_STATE,B
     B=B%A
     %=B<0 [ B=B+A ]
     ~=B+1
@@ -33,6 +45,42 @@
     ]
     %=(C==0)+(C>=4) [ #=1 ]
     B=C
+  ]
+
+; Expand the current quadrant ( -- ). Reads U, V, X, Y and galaxy;
+; writes N, sector[71..134], enemy[135..152] and PRNG state.
+; Scratch C, H, I, J, L, M, P, R; r clobbers A and B.
+  &=q [
+    I=SECTOR_BASE
+    *=I<ENEMY_END [ @=I,0 I=I+1 ]
+    @=SECTOR_BASE+((X-1)*8)+(Y-1),4
+    M=@((U*8)+V-9)%OBSERVED_FLAG
+    N=M/100
+    P=(M%100)/10
+    R=M%10
+    C=1 H=N I=1
+    *=C<=3 [
+      *=H>0 [
+      ^=1
+        r=64
+        J=~-1
+        M=SECTOR_BASE+J
+        %=@(M)!=0 [ #=1 ]
+        @=M,C
+        %=C==1 [
+          L=(J/8)+1
+          J=(J%8)+1
+          @=ENEMY_HP_BASE+I-1,ENEMY_HP
+          @=ENEMY_X_BASE+I-1,L
+          @=ENEMY_Y_BASE+I-1,J
+          I=I+1
+        ]
+        H=H-1
+      ]
+      C=C+1
+      %=C==2 [ H=P ]
+      %=C==3 [ H=R ]
+    ]
   ]
 
 ; EC08_TEST_DEFINITIONS_END
