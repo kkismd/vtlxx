@@ -83,4 +83,21 @@
     ]
   ]
 
+; Initialize a mission ( -- ). The caller seeds PRNG once at startup.
+; Writes the game state, PRNG via g/q/r, and scratch A, B, C, D, E,
+; F, H, I, J, K, L, M, N, O, P, R, U, V, X, Y.
+  &=i [
+    D=30 E=4000 F=10 O=0
+    I=64 *=I<=70 [ @=I,0 I=I+1 ]
+    g=()
+    ~=B
+    r=8 U=~
+    r=8 V=~
+    X=V Y=U
+    q=()
+    B=~
+    @=160,D @=161,E @=162,F @=163,K @=164,B
+    @=165,U @=166,V @=167,X @=168,Y @=169,N @=170,O
+  ]
+
 ; EC08_TEST_DEFINITIONS_END
