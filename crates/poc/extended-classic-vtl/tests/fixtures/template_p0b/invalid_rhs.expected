@@ -1,0 +1,4 @@
+result: compile_error
+phase: invocation RHS
+Rust profile: B=7 from prior flush; template a remains published
+6502 profile: runtime does not start
