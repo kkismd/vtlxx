@@ -149,6 +149,16 @@ fn placement_matches_reference_and_preserves_unowned_state() {
     // With seed 0 the first candidate is index 25: deliberately occupy it.
     let exp = run(0, 517, 1, 1, 4, 2);
     assert_eq!(exp.attempts[0], 2);
+
+    // Occupy the 13th candidate with the ship, so the last star retries
+    // after the other twelve objects have already been placed.
+    let mut state = 0;
+    let mut ship = 0;
+    for _ in 0..13 {
+        ship = draw(&mut state);
+    }
+    let exp = run(0, 517, 1, 1, (ship / 8 + 1) as i16, (ship % 8 + 1) as i16);
+    assert_eq!(exp.attempts, [vec![1; 12], vec![2]].concat());
 }
 
 #[test]
