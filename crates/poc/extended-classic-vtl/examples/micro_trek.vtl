@@ -1,0 +1,38 @@
+; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
+; Writes A, B and storage[192].
+  &=r [
+    A=~
+    B=(@(192)*25173)+13849
+    @=192,B
+    B=B%A
+    %=B<0 [ B=B+A ]
+    ~=B+1
+  ]
+
+; Generate a complete galaxy ( -- ). Writes galaxy[0..63], K, B,
+; PRNG state and scratch A, C, H, I, J, L, M. r also writes B.
+; H holds the enemy distribution parameter across calls and retries.
+  &=g [
+    r=400
+    H=~+599
+  ^=1
+    I=0 C=0 K=0
+    *=I<64 [
+      r=100
+      J=~-1
+      J=J<5
+      C=C+J
+      r=H
+      L=~-1
+      M=(L<209)+(L<49)+(L<24)+(L<9)+(L<2)
+      K=K+M
+      r=8
+      L=~-1
+      @=I,(M*100)+(J*10)+L
+      I=I+1
+    ]
+    %=(C==0)+(C>=4) [ #=1 ]
+    B=C
+  ]
+
+; EC08_TEST_DEFINITIONS_END
