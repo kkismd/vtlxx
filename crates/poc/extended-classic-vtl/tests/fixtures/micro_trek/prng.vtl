@@ -1,0 +1,10 @@
+; ( n -- value ), caller guarantees 1..32767.
+; Direct and transitive writes: A,B and storage[192]; no named callees.
+&=r [
+  A=~
+  B=(@(192)*25173)+13849
+  @=192,B
+  B=B%A
+  %=B<0 [ B=B+A ]
+  ~=B+1
+]
