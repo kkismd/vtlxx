@@ -34,14 +34,15 @@
     ~=B+1
   ]
 
-; Generate a complete galaxy ( -- ). Writes galaxy[0..63], K, B,
-; PRNG state and scratch A, C, H, I, J, L, M. r also writes B.
+; Generate a complete galaxy ( -- ). Writes galaxy[0..63],
+; GALAXY_ENEMIES, GALAXY_BASES, PRNG state and scratch A, B, C,
+; H, I, J, L, M, T. T is the current attempt's enemy total.
 ; H holds the enemy distribution parameter across calls and retries.
   &=g [
     r=400
     H=~+599
   ^=1
-    I=0 C=0 K=0
+    I=0 C=0 T=0
     *=I<64 [
       r=100
       J=~-1
@@ -50,28 +51,30 @@
       r=H
       L=~-1
       M=(L<209)+(L<49)+(L<24)+(L<9)+(L<2)
-      K=K+M
+      T=T+M
       r=8
       L=~-1
       @=I,(M*100)+(J*10)+L
       I=I+1
     ]
     %=(C==0)+(C>=4) [ #=1 ]
-    B=C
+    @=GALAXY_ENEMIES,T @=GALAXY_BASES,C
   ]
 
-; Expand the current quadrant ( -- ). Reads U, V, X, Y and galaxy;
-; writes N, sector[71..134], enemy[135..152] and PRNG state.
+; Expand the current quadrant ( -- ). Reads quadrant/ship coordinates
+; and galaxy from storage; writes QUADRANT_ENEMIES, sector[71..134],
+; enemy[135..152] and PRNG state.
 ; Scratch C, H, I, J, L, M, P, R; r clobbers A and B.
   &=q [
     I=SECTOR_BASE
     *=I<ENEMY_END [ @=I,0 I=I+1 ]
-    @=SECTOR_BASE+((X-1)*8)+(Y-1),4
-    M=@((U*8)+V-9)%OBSERVED_FLAG
-    N=M/100
+    @=SECTOR_BASE+((@(SHIP_X)-1)*8)+(@(SHIP_Y)-1),4
+    M=@((@(QUADRANT_X)*8)+@(QUADRANT_Y)-9)%OBSERVED_FLAG
+    H=M/100
+    @=QUADRANT_ENEMIES,H
     P=(M%100)/10
     R=M%10
-    C=1 H=N I=1
+    C=1 I=1
     *=C<=3 [
       *=H>0 [
       ^=1
@@ -97,22 +100,16 @@
   ]
 
 ; Initialize a mission ( -- ). The caller seeds PRNG once at startup.
-; Writes the game state, PRNG via g/q/r, and scratch A, B, C, D, E,
-; F, H, I, J, K, L, M, N, O, P, R, U, V, X, Y.
+; Writes the game state, PRNG via g/q/r, and scratch A, B, C,
+; H, I, J, L, M, P, R, T.
   &=i [
-    D=30 E=4000 F=10 O=0
+    @=MISSION_DAYS,30 @=SHIP_ENERGY,4000 @=SHIP_TORPEDOES,10 @=DOCKED,0
     I=DEVICE_BASE *=I<DEVICE_END [ @=I,0 I=I+1 ]
     g=()
-    ~=B
-    r=8 U=~
-    r=8 V=~
-    X=V Y=U
+    r=8 A=~ @=QUADRANT_X,A
+    r=8 A=~ @=QUADRANT_Y,A
+    @=SHIP_X,@(QUADRANT_Y) @=SHIP_Y,@(QUADRANT_X)
     q=()
-    B=~
-    @=MISSION_DAYS,D @=SHIP_ENERGY,E @=SHIP_TORPEDOES,F
-    @=GALAXY_ENEMIES,K @=GALAXY_BASES,B
-    @=QUADRANT_X,U @=QUADRANT_Y,V @=SHIP_X,X @=SHIP_Y,Y
-    @=QUADRANT_ENEMIES,N @=DOCKED,O
   ]
 
 ; EC08_TEST_DEFINITIONS_END

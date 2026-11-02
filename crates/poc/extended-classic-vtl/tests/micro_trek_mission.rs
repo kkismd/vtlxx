@@ -100,8 +100,6 @@ fn check(m: &Machine, exp: &Mission) {
     }
     for (i, &value) in exp.scalars.iter().enumerate() {
         assert_eq!(m.storage(160 + i as u16), value, "scalar {i}");
-        let register = b"DEFKBUVXYNO"[i] - b'A';
-        assert_eq!(m.register(register as usize), Some(value));
     }
     assert_eq!(m.storage(192), exp.state);
     for i in (153..160).chain(171..192).chain(193..240) {
@@ -118,7 +116,7 @@ fn mission_and_replay_follow_the_same_prng_stream() {
         m.execute_source("i=()").unwrap();
         check(&m, &first);
         // Simulate damage and changed scalars before replay; never reseed.
-        m.execute_source("I=64 *=I<=70 [ @=I,99 I=I+1 ] D=1 E=2 F=3 O=1")
+        m.execute_source("I=64 *=I<=70 [ @=I,99 I=I+1 ] @=160,1 @=161,2 @=162,3 @=170,1 D=99 E=99 F=99 K=99 U=99 V=99 X=99 Y=99 N=99 O=99")
             .unwrap();
         m.execute_source("i=()").unwrap();
         check(&m, &second);
