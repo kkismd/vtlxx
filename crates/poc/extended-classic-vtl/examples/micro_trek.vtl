@@ -1,4 +1,15 @@
 ; Game storage layout and quadrant contents.
+==MISSION_DAYS,160
+==SHIP_ENERGY,161
+==SHIP_TORPEDOES,162
+==GALAXY_ENEMIES,163
+==GALAXY_BASES,164
+==QUADRANT_X,165
+==QUADRANT_Y,166
+==SHIP_X,167
+==SHIP_Y,168
+==QUADRANT_ENEMIES,169
+==DOCKED,170
 ==SECTOR_BASE,71
 ==ENEMY_HP_BASE,135
 ==ENEMY_X_BASE,141
@@ -21,14 +32,15 @@
     ~=B+1
   ]
 
-; Generate a complete galaxy ( -- ). Writes galaxy[0..63], K, B,
-; PRNG state and scratch A, C, H, I, J, L, M. r also writes B.
+; Generate a complete galaxy ( -- ). Writes galaxy[0..63],
+; GALAXY_ENEMIES, GALAXY_BASES, PRNG state and scratch A, B, C,
+; H, I, J, L, M, T. T is the current attempt's enemy total.
 ; H holds the enemy distribution parameter across calls and retries.
   &=g [
     r=400
     H=~+599
   ^=1
-    I=0 C=0 K=0
+    I=0 C=0 T=0
     *=I<64 [
       r=100
       J=~-1
@@ -37,28 +49,30 @@
       r=H
       L=~-1
       M=(L<209)+(L<49)+(L<24)+(L<9)+(L<2)
-      K=K+M
+      T=T+M
       r=8
       L=~-1
       @=I,(M*100)+(J*10)+L
       I=I+1
     ]
     %=(C==0)+(C>=4) [ #=1 ]
-    B=C
+    @=GALAXY_ENEMIES,T @=GALAXY_BASES,C
   ]
 
-; Expand the current quadrant ( -- ). Reads U, V, X, Y and galaxy;
-; writes N, sector[71..134], enemy[135..152] and PRNG state.
+; Expand the current quadrant ( -- ). Reads quadrant/ship coordinates
+; and galaxy from storage; writes QUADRANT_ENEMIES, sector[71..134],
+; enemy[135..152] and PRNG state.
 ; Scratch C, H, I, J, L, M, P, R; r clobbers A and B.
   &=q [
     I=SECTOR_BASE
     *=I<ENEMY_END [ @=I,0 I=I+1 ]
-    @=SECTOR_BASE+((X-1)*8)+(Y-1),4
-    M=@((U*8)+V-9)%OBSERVED_FLAG
-    N=M/100
+    @=SECTOR_BASE+((@(SHIP_X)-1)*8)+(@(SHIP_Y)-1),4
+    M=@((@(QUADRANT_X)*8)+@(QUADRANT_Y)-9)%OBSERVED_FLAG
+    H=M/100
+    @=QUADRANT_ENEMIES,H
     P=(M%100)/10
     R=M%10
-    C=1 H=N I=1
+    C=1 I=1
     *=C<=3 [
       *=H>0 [
       ^=1
