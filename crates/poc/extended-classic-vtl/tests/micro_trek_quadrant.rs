@@ -81,7 +81,7 @@ fn expected(seed: i16, content: i16, x: i16, y: i16) -> Expected {
 fn run(seed: i16, cell: i16, u: i16, v: i16, x: i16, y: i16) -> Expected {
     let mut m = machine(seed);
     m.execute_source(&format!(
-        "U={u} V={v} X={x} Y={y} @={},{}",
+        "@=165,{u} @=166,{v} @=167,{x} @=168,{y} @={},{}",
         (u - 1) * 8 + v - 1,
         cell
     ))
@@ -91,11 +91,12 @@ fn run(seed: i16, cell: i16, u: i16, v: i16, x: i16, y: i16) -> Expected {
     let exp = expected(seed, cell % 1000, x, y);
     m.execute_source("q=()").unwrap();
     assert_eq!(m.stack(), PREFIX);
-    assert_eq!(m.register(13), Some(cell % 1000 / 100));
+    assert_eq!(m.storage(169), cell % 1000 / 100);
     assert!(m.output().is_empty());
     for i in 0..=u16::MAX {
         let value = match i {
             71..=152 => exp.cells[(i - 71) as usize],
+            169 => cell % 1000 / 100,
             192 => exp.state,
             _ => before[i as usize],
         };
@@ -106,7 +107,7 @@ fn run(seed: i16, cell: i16, u: i16, v: i16, x: i16, y: i16) -> Expected {
         );
     }
     for (i, value) in registers.iter().enumerate() {
-        if !b"ABCHIJLMNPR".contains(&(b'A' + i as u8)) {
+        if !b"ABCHIJLMPR".contains(&(b'A' + i as u8)) {
             assert_eq!(
                 m.register(i),
                 *value,
@@ -116,6 +117,29 @@ fn run(seed: i16, cell: i16, u: i16, v: i16, x: i16, y: i16) -> Expected {
         }
     }
     exp
+}
+
+#[test]
+fn generated_galaxy_and_quadrant_use_only_storage_for_game_state() {
+    let mut m = machine(0);
+    m.execute_source("g=()").unwrap();
+    assert_eq!(
+        (m.storage(163), m.storage(164), m.storage(192)),
+        (26, 3, -16807)
+    );
+    // Seed zero gives quadrant (3, 7) the content 112. Invalidate all
+    // logical state registers so q can only obtain its inputs from storage.
+    m.execute_source("@=165,3 @=166,7 @=167,4 @=168,2 K=-9 B=-9 U=-9 V=-9 X=-9 Y=-9 N=-9")
+        .unwrap();
+    let exp = expected(-16807, 112, 4, 2);
+    m.execute_source("q=()").unwrap();
+    assert_eq!(m.stack(), PREFIX);
+    assert_eq!(m.storage(22), 112);
+    assert_eq!((m.storage(163), m.storage(164), m.storage(169)), (26, 3, 1));
+    assert_eq!(m.storage(192), exp.state);
+    for (index, value) in exp.cells.iter().enumerate() {
+        assert_eq!(m.storage(71 + index as u16), *value, "sector/enemy {index}");
+    }
 }
 
 #[test]

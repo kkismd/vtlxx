@@ -128,8 +128,8 @@ fn galaxy_draw_order_retries_thresholds_and_owned_state() {
         let registers: Vec<_> = (0..26).map(|i| m.register(i)).collect();
         m.execute_source("g=()").unwrap();
         assert_eq!(m.stack(), PREFIX, "seed {seed}");
-        assert_eq!(m.register(10), Some(expected.enemies), "K seed {seed}");
-        assert_eq!(m.register(1), Some(expected.bases), "B seed {seed}");
+        assert_eq!(m.storage(163), expected.enemies, "K seed {seed}");
+        assert_eq!(m.storage(164), expected.bases, "B seed {seed}");
         assert_eq!(m.storage(192), expected.state, "PRNG seed {seed}");
         for (i, &cell) in expected.cells.iter().enumerate() {
             assert_eq!(m.storage(i as u16), cell, "seed {seed}, cell {i}");
@@ -144,18 +144,19 @@ fn galaxy_draw_order_retries_thresholds_and_owned_state() {
             expected.bases
         );
         for i in 64..=u16::MAX {
-            if i != 192 {
+            if ![163, 164, 192].contains(&i) {
                 assert_eq!(m.storage(i), storage[i as usize], "storage[{i}]");
             }
         }
-        for name in b"DEFNOUVX" {
-            let i = usize::from(name - b'A');
-            assert_eq!(
-                m.register(i),
-                registers[i],
-                "register {}",
-                char::from(*name)
-            );
+        for (i, value) in registers.iter().enumerate() {
+            if !b"ABCHIJLMT".contains(&(b'A' + i as u8)) {
+                assert_eq!(
+                    m.register(i),
+                    *value,
+                    "register {}",
+                    char::from(b'A' + i as u8)
+                );
+            }
         }
         assert!(m.output().is_empty());
     }
@@ -191,8 +192,8 @@ fn seed_zero_has_a_fixed_galaxy() {
             expected_cells
         );
         assert_eq!(
-            (m.register(10), m.register(1), m.storage(192)),
-            (Some(26), Some(3), -16807)
+            (m.storage(163), m.storage(164), m.storage(192)),
+            (26, 3, -16807)
         );
     }
 }
