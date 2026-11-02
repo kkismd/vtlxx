@@ -1,4 +1,11 @@
 ; Game storage layout and quadrant contents.
+==DEVICE_BASE,64
+==DEVICE_END,71
+==SECTOR_BASE,71
+==ENEMY_HP_BASE,135
+==ENEMY_X_BASE,141
+==ENEMY_Y_BASE,147
+==ENEMY_END,153
 ==MISSION_DAYS,160
 ==SHIP_ENERGY,161
 ==SHIP_TORPEDOES,162
@@ -10,11 +17,6 @@
 ==SHIP_Y,168
 ==QUADRANT_ENEMIES,169
 ==DOCKED,170
-==SECTOR_BASE,71
-==ENEMY_HP_BASE,135
-==ENEMY_X_BASE,141
-==ENEMY_Y_BASE,147
-==ENEMY_END,153
 ==PRNG_STATE,192
 ==PRNG_MULTIPLIER,25173
 ==PRNG_INCREMENT,13849
@@ -95,6 +97,19 @@
       %=C==2 [ H=P ]
       %=C==3 [ H=R ]
     ]
+  ]
+
+; Initialize a mission ( -- ). The caller seeds PRNG once at startup.
+; Writes the game state, PRNG via g/q/r, and scratch A, B, C,
+; H, I, J, L, M, P, R, T.
+  &=i [
+    @=MISSION_DAYS,30 @=SHIP_ENERGY,4000 @=SHIP_TORPEDOES,10 @=DOCKED,0
+    I=DEVICE_BASE *=I<DEVICE_END [ @=I,0 I=I+1 ]
+    g=()
+    r=8 A=~ @=QUADRANT_X,A
+    r=8 A=~ @=QUADRANT_Y,A
+    @=SHIP_X,@(QUADRANT_Y) @=SHIP_Y,@(QUADRANT_X)
+    q=()
   ]
 
 ; EC08_TEST_DEFINITIONS_END
