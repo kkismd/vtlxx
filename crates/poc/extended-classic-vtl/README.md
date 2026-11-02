@@ -52,6 +52,8 @@ cargo test --manifest-path crates/poc/extended-classic-vtl/Cargo.toml
 cargo test --workspace
 ```
 
+Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Read` を受け取ります。`$` の PrimaryRead は NUL を読み捨てて `1..255` または EOF の `-1` を返し、入力エラーは runtime error になります。入力位置は同じ Machine の手続きと top-level で共有されます。未設定時は空入力です。現時点の Rust CLI は stdin をこの入力へ接続していません（後続 #313）。
+
 ## NMOS 6502 PoC の手動実行
 
 `ecvtl6502` は ECVTL source を既存の NMOS 6502 compiler で native code にし、`sim65` で実行します。Rust reference VMへのフォールバックはありません。実行には cc65 の `ca65`、`ld65`、`sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。

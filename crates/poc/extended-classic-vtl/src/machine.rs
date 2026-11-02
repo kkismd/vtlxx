@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    io::{self, Read},
+};
 
 use crate::{
     Cell,
@@ -28,6 +31,8 @@ pub struct Machine {
     templates: HashMap<char, CompletedTemplate>,
     builtins: Vec<(Primitive, ExecutableId)>,
     pub(crate) output: Vec<u8>,
+    input: Box<dyn Read>,
+    input_eof: bool,
 }
 
 impl Default for Machine {
@@ -51,9 +56,36 @@ impl Machine {
             templates: HashMap::new(),
             builtins: Vec::new(),
             output: Vec::new(),
+            input: Box::new(io::empty()),
+            input_eof: false,
         };
         machine.seed_builtins();
         machine
+    }
+
+    /// Replace the runtime input stream for this machine session.
+    pub fn set_input(&mut self, input: impl Read + 'static) {
+        self.input = Box::new(input);
+        self.input_eof = false;
+    }
+
+    pub(crate) fn read_char(&mut self) -> Result<Cell, RuntimeError> {
+        if self.input_eof {
+            return Ok(-1);
+        }
+        let mut byte = [0];
+        loop {
+            match self.input.read(&mut byte) {
+                Ok(0) => {
+                    self.input_eof = true;
+                    return Ok(-1);
+                }
+                Ok(_) if byte[0] != 0 => return Ok(byte[0] as Cell),
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => return Err(RuntimeError::InputError),
+            }
+        }
     }
 
     pub fn push(&mut self, value: Cell) {
@@ -178,6 +210,7 @@ impl Machine {
             (Primitive::LoadStorage, Some(('@', SourceRole::AppliedRead))),
             (Primitive::StoreStorage, Some(('@', SourceRole::Write))),
             (Primitive::PrintNumber, Some(('?', SourceRole::Write))),
+            (Primitive::ReadChar, Some(('$', SourceRole::PrimaryRead))),
             (Primitive::PrintChar, Some(('$', SourceRole::Write))),
             (Primitive::Add, Some(('+', SourceRole::BinaryOperator))),
             (Primitive::Sub, Some(('-', SourceRole::BinaryOperator))),
@@ -311,6 +344,7 @@ mod tests {
             ('@', SourceRole::Write, Primitive::StoreStorage),
             ('?', SourceRole::Write, Primitive::PrintNumber),
             ('$', SourceRole::Write, Primitive::PrintChar),
+            ('$', SourceRole::PrimaryRead, Primitive::ReadChar),
             ('+', SourceRole::BinaryOperator, Primitive::Add),
             ('-', SourceRole::BinaryOperator, Primitive::Sub),
             ('*', SourceRole::BinaryOperator, Primitive::Mul),
