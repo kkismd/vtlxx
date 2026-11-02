@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    io::{self, Read},
+    io::{self, Read, Write},
 };
 
 use crate::{
@@ -33,6 +33,7 @@ pub struct Machine {
     pub(crate) output: Vec<u8>,
     input: Box<dyn Read>,
     input_eof: bool,
+    output_sink: Option<Box<dyn Write>>,
 }
 
 impl Default for Machine {
@@ -58,6 +59,7 @@ impl Machine {
             output: Vec::new(),
             input: Box::new(io::empty()),
             input_eof: false,
+            output_sink: None,
         };
         machine.seed_builtins();
         machine
@@ -67,6 +69,31 @@ impl Machine {
     pub fn set_input(&mut self, input: impl Read + 'static) {
         self.input = Box::new(input);
         self.input_eof = false;
+    }
+
+    /// Send runtime output to a sink as well as retaining it in the output buffer.
+    pub fn set_output(&mut self, output: impl Write + 'static) {
+        self.output_sink = Some(Box::new(output));
+    }
+
+    pub(crate) fn emit(&mut self, mut bytes: &[u8]) -> Result<(), RuntimeError> {
+        if let Some(sink) = &mut self.output_sink {
+            while !bytes.is_empty() {
+                match sink.write(bytes) {
+                    Ok(0) => return Err(RuntimeError::OutputError),
+                    Ok(n) => {
+                        self.output.extend_from_slice(&bytes[..n]);
+                        bytes = &bytes[n..];
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(_) => return Err(RuntimeError::OutputError),
+                }
+            }
+            sink.flush().map_err(|_| RuntimeError::OutputError)?;
+        } else {
+            self.output.extend_from_slice(bytes);
+        }
+        Ok(())
     }
 
     pub(crate) fn read_char(&mut self) -> Result<Cell, RuntimeError> {

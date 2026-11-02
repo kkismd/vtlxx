@@ -1,8 +1,8 @@
 use std::{
     fs::{self, OpenOptions},
-    io::Write,
+    io::{Read, Write},
     path::PathBuf,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
     sync::atomic::{AtomicU64, Ordering},
 };
 
@@ -22,6 +22,34 @@ impl SourceFile {
         file.write_all(contents).unwrap();
         Self(path)
     }
+}
+
+#[test]
+fn prompt_is_visible_before_input_and_output_is_not_duplicated() {
+    let source = SourceFile::new(b"?=\"prompt\" A=$ $=A ?=() ");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+        .arg(&source.0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut prompt = [0; 6];
+    stdout.read_exact(&mut prompt).unwrap();
+    assert_eq!(&prompt, b"prompt");
+    child.stdin.take().unwrap().write_all(b"Z").unwrap();
+    let mut rest = Vec::new();
+    stdout.read_to_end(&mut rest).unwrap();
+    assert!(child.wait().unwrap().success());
+    assert_eq!(rest, b"Z\n");
+}
+
+#[test]
+fn empty_stdin_reports_eof() {
+    let source = SourceFile::new(b"A=$ ?=A");
+    let output = ecvtl(&[source.0.as_os_str()]);
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"-1");
 }
 
 impl Drop for SourceFile {
@@ -88,13 +116,20 @@ fn missing_file_and_invalid_utf8_are_input_errors() {
 }
 
 #[test]
-fn compile_and_runtime_failures_report_errors_without_stdout() {
+fn compile_and_runtime_failures_report_errors() {
     let compile = SourceFile::new(b"A=1+");
     let runtime = SourceFile::new(b"?=\"prior\" A=1/0");
     for (path, category) in [(&compile.0, "Compile"), (&runtime.0, "Runtime")] {
         let output = ecvtl(&[path.as_os_str()]);
         assert!(!output.status.success());
-        assert!(output.stdout.is_empty());
+        assert_eq!(
+            output.stdout,
+            if category == "Runtime" {
+                b"prior".as_slice()
+            } else {
+                b""
+            }
+        );
         assert!(String::from_utf8_lossy(&output.stderr).contains(category));
     }
 }

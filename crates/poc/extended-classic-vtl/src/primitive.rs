@@ -73,9 +73,7 @@ impl Primitive {
                     .value_stack
                     .last()
                     .ok_or(RuntimeError::StackUnderflow)?;
-                machine
-                    .output
-                    .extend_from_slice(value.to_string().as_bytes());
+                machine.emit(value.to_string().as_bytes())?;
                 machine.value_stack.pop();
             }
             Self::ReadChar => {
@@ -87,7 +85,7 @@ impl Primitive {
                     .value_stack
                     .last()
                     .ok_or(RuntimeError::StackUnderflow)?;
-                machine.output.push(value as u8);
+                machine.emit(&[value as u8])?;
                 machine.value_stack.pop();
             }
         }
@@ -113,6 +111,55 @@ fn binary(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn output_failures_preserve_operand_and_successful_prefix() {
+        use std::{
+            cell::RefCell,
+            io::{self, Write},
+            rc::Rc,
+        };
+        struct Sink {
+            bytes: Rc<RefCell<Vec<u8>>>,
+            limit: usize,
+            fail_flush: bool,
+        }
+        impl Write for Sink {
+            fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+                let n = bytes
+                    .len()
+                    .min(self.limit.saturating_sub(self.bytes.borrow().len()));
+                if n == 0 {
+                    return Err(io::ErrorKind::BrokenPipe.into());
+                }
+                self.bytes.borrow_mut().extend_from_slice(&bytes[..n]);
+                Ok(n)
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                if self.fail_flush {
+                    Err(io::ErrorKind::BrokenPipe.into())
+                } else {
+                    Ok(())
+                }
+            }
+        }
+        for (limit, fail_flush, expected) in [(2, false, &b"12"[..]), (10, true, &b"123"[..])] {
+            let bytes = Rc::new(RefCell::new(Vec::new()));
+            let mut machine = super::Machine::new();
+            machine.set_output(Sink {
+                bytes: bytes.clone(),
+                limit,
+                fail_flush,
+            });
+            machine.push(123);
+            assert_eq!(
+                super::Primitive::PrintNumber.execute(&mut machine),
+                Err(super::RuntimeError::OutputError)
+            );
+            assert_eq!(machine.stack(), &[123]);
+            assert_eq!(machine.output(), expected);
+            assert_eq!(&*bytes.borrow(), expected);
+        }
+    }
     use super::*;
 
     #[test]
