@@ -25,6 +25,7 @@ pub(crate) enum Instruction {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RuntimeError {
+    InputError,
     StackUnderflow,
     DivisionByZero,
     RemainderByZero,

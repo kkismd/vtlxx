@@ -19,6 +19,7 @@ pub(crate) enum Primitive {
     Ge,
     PrintNumber,
     PrintChar,
+    ReadChar,
 }
 
 impl Primitive {
@@ -77,6 +78,10 @@ impl Primitive {
                     .extend_from_slice(value.to_string().as_bytes());
                 machine.value_stack.pop();
             }
+            Self::ReadChar => {
+                let value = machine.read_char()?;
+                machine.value_stack.push(value);
+            }
             Self::PrintChar => {
                 let value = *machine
                     .value_stack
@@ -109,6 +114,29 @@ fn binary(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_preserves_stack_on_success_eof_and_error() {
+        struct Broken;
+        impl std::io::Read for Broken {
+            fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("failure"))
+            }
+        }
+        let mut machine = Machine::new();
+        machine.push(42);
+        machine.set_input(std::io::Cursor::new(vec![0, 255]));
+        Primitive::ReadChar.execute(&mut machine).unwrap();
+        assert_eq!(machine.stack(), &[42, 255]);
+        Primitive::ReadChar.execute(&mut machine).unwrap();
+        assert_eq!(machine.stack(), &[42, 255, -1]);
+        machine.set_input(Broken);
+        assert_eq!(
+            Primitive::ReadChar.execute(&mut machine),
+            Err(RuntimeError::InputError)
+        );
+        assert_eq!(machine.stack(), &[42, 255, -1]);
+    }
 
     #[test]
     fn register_and_storage_stack_effects() {
