@@ -334,6 +334,7 @@ Cell の low 8 bits を 1 byte として出力します。この例は `A` を�
 ```
 
 quoted ASCII bytes を順に character output します。string は一般の runtime value ではありません。
+actual 6502 compiler でも同じ構文を使用でき、改行は自動追加されません。
 
 ### Newline
 

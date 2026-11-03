@@ -276,6 +276,114 @@ fn compile_stack_201_byte_fixture_matches_reference() {
     assert_eq!(target.stdout, reference.stdout);
 }
 
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn literal_output_matches_reference_and_preserves_runtime_state() {
+    let temp = TestDir::new();
+    let cases: &[(&str, &str, &[u8])] = &[
+        ("hello", "?=\"HELLO\"", b"HELLO"),
+        ("empty", "?=\"\"", b""),
+        ("contents", "?=\"A B;[ ]\\C\"", b"A B;[ ]\\C"),
+        ("nul-tab", "?=\"A\0\tB\"", b"A\0\tB"),
+        ("adjacent", "?=\"A\" ?=42 ?=() $=66", b"A42\nB"),
+        ("stack", "~=7 ?=\"OK\" A=~ ?=A", b"OK7"),
+        (
+            "control",
+            "?=\"T\" &=p [ ?=\"P\" ?=1 ] p=() %=1 [ ?=\"I\" ] A=0 *=A<2 [ ?=\"W\" A=A+1 ] p=() ?=() $=66",
+            b"TP1IWWP1\nB",
+        ),
+        (
+            "template-owner",
+            "&=a{} [ {}=1 ] &=p [ ?=\"P\" ] a{A}=() ?=\"T\" p=() a{A}=() ?=A",
+            b"TP1",
+        ),
+    ];
+    for &(name, source, expected) in cases {
+        let path = temp.0.join(format!("{name}-reference.vtl"));
+        fs::write(&path, source).unwrap();
+        let reference = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+            .arg(&path)
+            .output()
+            .unwrap();
+        let target = run_program_with_input(&temp, name, source.as_bytes(), b"");
+        assert!(reference.status.success(), "{name}: {reference:?}");
+        assert!(target.status.success(), "{name}: {target:?}");
+        assert_eq!(reference.stdout, expected, "{name}");
+        assert_eq!(target.stdout, reference.stdout, "{name}");
+    }
+
+    let input = run_program_with_input(&temp, "input", b"?=\"PROMPT: \" A=$ ?=A", b"A");
+    assert!(input.status.success(), "{input:?}");
+    assert_eq!(input.stdout, b"PROMPT: 65");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn literal_output_crosses_chunk_boundaries() {
+    let temp = TestDir::new();
+    for length in [255, 256, 511] {
+        // Vary the bytes around chunk boundaries so omissions and repeats are visible.
+        let literal: String = (0..length)
+            .map(|i| (b'A' + (i % 26) as u8) as char)
+            .collect();
+        let source = format!("?=\"{literal}\"");
+        let path = temp.0.join(format!("reference-{length}.vtl"));
+        fs::write(&path, &source).unwrap();
+        let reference = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+            .arg(&path)
+            .output()
+            .unwrap();
+        let target =
+            run_program_with_input(&temp, &format!("chunk-{length}"), source.as_bytes(), b"");
+        assert!(reference.status.success(), "{length}: {reference:?}");
+        assert!(target.status.success(), "{length}: {target:?}");
+        assert_eq!(reference.stdout, literal.as_bytes());
+        assert_eq!(target.stdout, reference.stdout);
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn invalid_or_oversized_literals_do_not_start_runtime() {
+    let temp = TestDir::new();
+    for (index, source) in [
+        "?=\"unterminated",
+        "?=\"line\nend\"",
+        "?=\"line\rend\"",
+        "?=\"A\"tail",
+        "?=\"é\"",
+        "?=\"A\"+1",
+        "?=\"A\"?=2",
+        "A=\"A\"",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let source = format!("?=42 {source}");
+        let result =
+            run_program_with_input(&temp, &format!("invalid-{index}"), source.as_bytes(), b"");
+        assert!(!result.status.success(), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("syntax error"),
+            "{source}: {result:?}"
+        );
+    }
+
+    let source = format!(
+        "&=a{{}} [ {{}}=1 ] &=p [ ?=\"{}\" ] ?=\"{}\" p=()",
+        "A".repeat(1100),
+        "B".repeat(1100)
+    );
+    let result = run_program_with_input(&temp, "arena-full", source.as_bytes(), b"");
+    assert!(!result.status.success(), "{result:?}");
+    assert!(result.stdout.is_empty(), "{result:?}");
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("compilation failed"),
+        "{result:?}"
+    );
+}
+
 // A timeout must also clean up a stuck CLI, so failing streaming tests cannot
 // leave a child running or wait forever for its output.
 struct TimedChild(Child);
@@ -335,6 +443,49 @@ fn interactive_prompts_are_visible_before_each_input() {
     receive(b"65> ");
     stdin.write_all(b"B").unwrap();
     receive(b"66");
+    assert!(wait_bounded(&mut child.0).success());
+    assert!(rx.recv_timeout(Duration::from_secs(2)).is_err());
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn interactive_literal_prompt_precedes_input() {
+    let temp = TestDir::new();
+    let source = temp.0.join("interactive-input.vtl");
+    fs::write(
+        &source,
+        b"?=\"ENTER ONE CHARACTER: \"\nA=$\n?=\"ASCII: \"\n?=A\n?=()\n",
+    )
+    .unwrap();
+    let mut child = TimedChild(
+        Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+            .arg(&source)
+            .arg("--interactive")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stdout = child.0.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut byte = [0];
+        while let Ok(1) = stdout.read(&mut byte) {
+            if tx.send(byte[0]).is_err() {
+                break;
+            }
+        }
+    });
+    let receive = |expected: &[u8]| {
+        for &byte in expected {
+            assert_eq!(rx.recv_timeout(Duration::from_secs(20)).unwrap(), byte);
+        }
+    };
+    receive(b"ENTER ONE CHARACTER: ");
+    assert!(rx.recv_timeout(Duration::from_millis(100)).is_err());
+    child.0.stdin.take().unwrap().write_all(b"A\n").unwrap();
+    receive(b"ASCII: 65\n");
     assert!(wait_bounded(&mut child.0).success());
     assert!(rx.recv_timeout(Duration::from_secs(2)).is_err());
 }
