@@ -544,7 +544,7 @@ fn template_definitions_are_saved_and_published_without_runtime_code() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn template_registry_points_to_canonical_saved_source() {
-    let source = b"&=a{} [ A={} ; discarded ]\n{}=MAX{} ]";
+    let source = b"&=a{} [ A={} ; discarded ]\n{}=.MAX{} ]";
     let mut framed = vec![source.len() as u8, (source.len() >> 8) as u8];
     framed.extend_from_slice(source);
     framed.push(b'Z');

@@ -322,6 +322,67 @@ fn dotted_constant_errors_do_not_start_runtime() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn dotted_constant_sources_match_both_implementations() {
+    use vtlxx_poc_extended_classic_vtl::Machine;
+
+    let temp = TestDir::new();
+    for (name, source, expected) in [
+        (
+            "shared-forms",
+            "A=1 .MAX \t:=\t3 .LOOP:=1 ; comment\r\n^=.LOOP A=A+1 %=A<.MAX [ #=.LOOP ] ?=A ?=\".MAX\"",
+            b"3.MAX".as_slice(),
+        ),
+        (
+            "shared-template",
+            ".GAINA:=2 .BIASA:=1 &=t{} [ {}={}*.GAIN{} {}={}+.BIAS{} ] A=3 t{A}=() ?=A",
+            b"7".as_slice(),
+        ),
+        (
+            "shared-storage",
+            ".ADDR:=7 .TWO:=2 @=.ADDR,.TWO ?=@(.ADDR)+.TWO",
+            b"4".as_slice(),
+        ),
+    ] {
+        let mut machine = Machine::new();
+        machine.execute_source(source).unwrap();
+        assert_eq!(machine.output(), expected, "{name}");
+        assert_runtime_input_output(&temp, name, source.as_bytes(), b"", expected);
+    }
+
+    for (index, source) in [
+        ".TWO:=2 A=1.TWO",
+        ".TWO:=2 A=.TWO.TWO",
+        ".NEG:=-1 A=1.NEG",
+        ".MAX:=16.NEXT:=2",
+        "A=.UNDEFINED",
+        "&=p [ .INNER:=1 ]",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let mut machine = Machine::new();
+        assert!(machine.execute_source(source).is_err(), "{source}");
+        let output = run_program_with_input(
+            &temp,
+            &format!("shared-error-{index}"),
+            source.as_bytes(),
+            b"",
+        );
+        assert!(!output.status.success(), "{source}: {output:?}");
+        assert!(output.stdout.is_empty(), "{source}: {output:?}");
+    }
+
+    let source = ".GOOD:=1 ?=42 &=p [ ?=.GOOD ] A=.MISSING";
+    let mut machine = Machine::new();
+    assert!(machine.execute_source(source).is_err());
+    assert_eq!(machine.output(), b"42");
+    let output = run_program_with_input(&temp, "shared-failure-profile", source.as_bytes(), b"");
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn p0a_template_calibration_example_matches_reference_output_bytes() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples/p0a_template_calibration.vtl");

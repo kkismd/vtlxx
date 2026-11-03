@@ -4,7 +4,7 @@
 .importzp fe_compile_status, cc_arg, cc_data_length
 
 .segment "RODATA"
-expected_source: .byte "A={}",10,"{}=MAX{}"
+expected_source: .byte "A={}",10,"{}=.MAX{}"
 expected_source_end:
 
 .segment "ZEROPAGE"

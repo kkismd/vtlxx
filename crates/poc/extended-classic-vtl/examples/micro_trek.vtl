@@ -1,34 +1,34 @@
 ; Game storage layout and quadrant contents.
-==DEVICE_BASE,64
-==DEVICE_END,71
-==SECTOR_BASE,71
-==ENEMY_HP_BASE,135
-==ENEMY_X_BASE,141
-==ENEMY_Y_BASE,147
-==ENEMY_END,153
-==MISSION_DAYS,160
-==SHIP_ENERGY,161
-==SHIP_TORPEDOES,162
-==GALAXY_ENEMIES,163
-==GALAXY_BASES,164
-==QUADRANT_X,165
-==QUADRANT_Y,166
-==SHIP_X,167
-==SHIP_Y,168
-==QUADRANT_ENEMIES,169
-==DOCKED,170
-==PRNG_STATE,192
-==PRNG_MULTIPLIER,25173
-==PRNG_INCREMENT,13849
-==OBSERVED_FLAG,1000
-==ENEMY_HP,300
+.DEVICE_BASE := 64
+.DEVICE_END := 71
+.SECTOR_BASE := 71
+.ENEMY_HP_BASE := 135
+.ENEMY_X_BASE := 141
+.ENEMY_Y_BASE := 147
+.ENEMY_END := 153
+.MISSION_DAYS := 160
+.SHIP_ENERGY := 161
+.SHIP_TORPEDOES := 162
+.GALAXY_ENEMIES := 163
+.GALAXY_BASES := 164
+.QUADRANT_X := 165
+.QUADRANT_Y := 166
+.SHIP_X := 167
+.SHIP_Y := 168
+.QUADRANT_ENEMIES := 169
+.DOCKED := 170
+.PRNG_STATE := 192
+.PRNG_MULTIPLIER := 25173
+.PRNG_INCREMENT := 13849
+.OBSERVED_FLAG := 1000
+.ENEMY_HP := 300
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
   &=r [
     A=~
-    B=(@(PRNG_STATE)*PRNG_MULTIPLIER)+PRNG_INCREMENT
-    @=PRNG_STATE,B
+    B=(@(.PRNG_STATE)*.PRNG_MULTIPLIER)+.PRNG_INCREMENT
+    @=.PRNG_STATE,B
     B=B%A
     %=B<0 [ B=B+A ]
     ~=B+1
@@ -58,7 +58,7 @@
       I=I+1
     ]
     %=(C==0)+(C>=4) [ #=1 ]
-    @=GALAXY_ENEMIES,T @=GALAXY_BASES,C
+    @=.GALAXY_ENEMIES,T @=.GALAXY_BASES,C
   ]
 
 ; Expand the current quadrant ( -- ). Reads quadrant/ship coordinates
@@ -66,12 +66,12 @@
 ; enemy[135..152] and PRNG state.
 ; Scratch C, H, I, J, L, M, P, R; r clobbers A and B.
   &=q [
-    I=SECTOR_BASE
-    *=I<ENEMY_END [ @=I,0 I=I+1 ]
-    @=SECTOR_BASE+((@(SHIP_X)-1)*8)+(@(SHIP_Y)-1),4
-    M=@((@(QUADRANT_X)*8)+@(QUADRANT_Y)-9)%OBSERVED_FLAG
+    I=.SECTOR_BASE
+    *=I<.ENEMY_END [ @=I,0 I=I+1 ]
+    @=.SECTOR_BASE+((@(.SHIP_X)-1)*8)+(@(.SHIP_Y)-1),4
+    M=@((@(.QUADRANT_X)*8)+@(.QUADRANT_Y)-9)%.OBSERVED_FLAG
     H=M/100
-    @=QUADRANT_ENEMIES,H
+    @=.QUADRANT_ENEMIES,H
     P=(M%100)/10
     R=M%10
     C=1 I=1
@@ -80,15 +80,15 @@
       ^=1
         r=64
         J=~-1
-        M=SECTOR_BASE+J
+        M=.SECTOR_BASE+J
         %=@(M)!=0 [ #=1 ]
         @=M,C
         %=C==1 [
           L=(J/8)+1
           J=(J%8)+1
-          @=ENEMY_HP_BASE+I-1,ENEMY_HP
-          @=ENEMY_X_BASE+I-1,L
-          @=ENEMY_Y_BASE+I-1,J
+          @=.ENEMY_HP_BASE+I-1,.ENEMY_HP
+          @=.ENEMY_X_BASE+I-1,L
+          @=.ENEMY_Y_BASE+I-1,J
           I=I+1
         ]
         H=H-1
@@ -103,12 +103,12 @@
 ; Writes the game state, PRNG via g/q/r, and scratch A, B, C,
 ; H, I, J, L, M, P, R, T.
   &=i [
-    @=MISSION_DAYS,30 @=SHIP_ENERGY,4000 @=SHIP_TORPEDOES,10 @=DOCKED,0
-    I=DEVICE_BASE *=I<DEVICE_END [ @=I,0 I=I+1 ]
+    @=.MISSION_DAYS,30 @=.SHIP_ENERGY,4000 @=.SHIP_TORPEDOES,10 @=.DOCKED,0
+    I=.DEVICE_BASE *=I<.DEVICE_END [ @=I,0 I=I+1 ]
     g=()
-    r=8 A=~ @=QUADRANT_X,A
-    r=8 A=~ @=QUADRANT_Y,A
-    @=SHIP_X,@(QUADRANT_Y) @=SHIP_Y,@(QUADRANT_X)
+    r=8 A=~ @=.QUADRANT_X,A
+    r=8 A=~ @=.QUADRANT_Y,A
+    @=.SHIP_X,@(.QUADRANT_Y) @=.SHIP_Y,@(.QUADRANT_X)
     q=()
   ]
 

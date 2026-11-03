@@ -4,16 +4,16 @@
 ; A is calibrated twice to prove repeated invocation.
 ; Template definition and invocation have no runtime stack effect.
 
-==GAINA,2
-==GAINB,3
-==GAINC,4
-==BIASA,1
-==BIASB,-2
-==BIASC,0
+.GAINA := 2
+.GAINB := 3
+.GAINC := 4
+.BIASA := 1
+.BIASB := -2
+.BIASC := 0
 
   &=t{} [
     ; First stage: x*k+b. Holes form GAINA/BIASA, etc.
-    {}={}*GAIN{}+BIAS{}
+    {}={}*.GAIN{}+.BIAS{}
     ; Second stage: multiply the intermediate result by two.
     {}={}*2
   ]

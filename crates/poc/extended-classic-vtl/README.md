@@ -27,7 +27,7 @@ Extended Classic VTL (ECVTL) は、classic VTL の小さい表面構文を保ち
 - [#191](https://github.com/kkismd/vtlxx/issues/191): anonymous block / structured control の設計
 - [#265](https://github.com/kkismd/vtlxx/issues/265): anonymous block の `[ ... ]` 一本化
 - [#280](https://github.com/kkismd/vtlxx/issues/280): value stack 接続記号を `~` に変更
-- [#241](https://github.com/kkismd/vtlxx/issues/241), [#242](https://github.com/kkismd/vtlxx/issues/242), [#255](https://github.com/kkismd/vtlxx/issues/255), [#283](https://github.com/kkismd/vtlxx/issues/283): 名前付き整数
+- [#469](https://github.com/kkismd/vtlxx/issues/469), [#255](https://github.com/kkismd/vtlxx/issues/255): 名前付き整数の構文と定義順
 - [#194](https://github.com/kkismd/vtlxx/issues/194): EC03 Tracker
 
 ## 実行方法
@@ -279,21 +279,23 @@ ECVTL の expression は、小さい parser と source role binding で構成さ
 
 ### 名前付き整数
 
-トップレベルの source sequence で `==NAME,value` と書くと、整数に名前を付けられます。定義コマンドは runtime code を生成しません。
+トップレベルの source sequence で `.NAME := value` と書くと、整数に名前を付けられます。参照するときも `.NAME` と書きます。定義は runtime code を生成しません。
 
 ```vtl
-==BOARD_BASE,16
-==LOOP,1
-  A=BOARD_BASE+2
-^=LOOP
-  #=LOOP
+.BOARD_BASE := 16
+.LOOP := 1
+  A=.BOARD_BASE+2
+^=.LOOP
+  #=.LOOP
 ```
 
-名前は ASCII 大文字で始まる 2〜16 byte の `[A-Z][A-Z0-9_]+` です。1文字の `A`〜`Z` は従来どおり register です。値は `-32768`〜`32767` の符号付き decimal literal 1個に限ります。定数名や式を値には書けません。
+名前本体は ASCII 大文字で始まる 2〜16 byte の `[A-Z][A-Z0-9_]+` で、接頭の `.` は長さに含めず、定数表にも保存しません。1文字の `A`〜`Z` は従来どおり register です。値は `-32768`〜`32767` の符号付き decimal literal 1個に限ります。定数名や式を値には書けません。旧宣言 `==NAME,value` と、`.` を付けない複数文字の定数参照は受理しません。式の等価比較 `==` は引き続き使えます。
+
+宣言の前後は通常の statement と同じ区切りを使います。例えば `A=1 .MAX:=10 B=.MAX` や `.MAX:=10 .MIN:=-1` のように同じ行に書けます。`.` と名前、`:` と `=` はそれぞれ連続させ、`:=` の前後には ASCII space / HTAB を入れられます。宣言の途中で改行することはできません。値の直後には空白、改行、`;` コメントまたは source の終端が必要です。
 
 定義後の RHS 式、数値ラベルの `^=` と `#=` から参照できます。手続きや anonymous block の中で定義することはできません。未定義名の参照と同名の再定義は compile error です。異なる名前に同じ値を指定できます。`^=` / `#=` で使う値には既存のラベル範囲 `0..32767` が適用されます。
 
-定数表は `execute_source` 1回の source processing 中だけ存在します。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで定数名を再利用するには再定義が必要です。runtime の binding や object にはなりません。
+定数表は compile-run の source processing 中だけ存在し、runtime に定数名や表を残しません。Rust の `execute_source` では呼び出し1回ごとに表を作ります。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで定数名を再利用するには再定義が必要です。6502 の EC07 profile は compile-run あたり16件まで、Rust reference はその target 固有の件数制限を設けません。
 
 ### Comma operand
 
@@ -715,7 +717,7 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 
 [`examples/maze_dfs.vtl`](examples/maze_dfs.vtl) は、固定 4×4 迷路を再帰を使わずに探索します。迷路、訪問済み状態、現在の経路、各深さで次に試す方向を別々の indexed storage 領域に置きます。右から進んだ cell 2 の行き止まりで一度戻り、goal への経路の cell 数 `7` を表示します。
 
-この例では `VISITED_BASE`、`PATH_BASE`、`DIRECTION_BASE` を定義し、storage 領域の基点を手続き内から参照します。
+この例では `.VISITED_BASE`、`.PATH_BASE`、`.DIRECTION_BASE` を定義し、storage 領域の基点を手続き内から参照します。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
@@ -733,7 +735,7 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 
 ## Example: P0a 手続きテンプレートによる整数測定値補正
 
-[`examples/p0a_template_calibration.vtl`](examples/p0a_template_calibration.vtl) は、3チャンネルの整数測定値をそれぞれの倍率・補正値で補正します。1つのテンプレート本文を A/B/C に展開し、Aには同じテンプレートをもう一度適用します。`GAIN{}` / `BIAS{}` の穴とチャンネル名を連結して名前付き整数を解決します。
+[`examples/p0a_template_calibration.vtl`](examples/p0a_template_calibration.vtl) は、3チャンネルの整数測定値をそれぞれの倍率・補正値で補正します。1つのテンプレート本文を A/B/C に展開し、Aには同じテンプレートをもう一度適用します。`.GAIN{}` / `.BIAS{}` の穴にチャンネル名を入れ、展開後の名前付き整数を解決します。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
