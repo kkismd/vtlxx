@@ -1,7 +1,7 @@
 ; Runtime I/O helpers use only the #273 serial adapters.
 .setcpu "6502"
 
-.export rt_print_char, rt_print_number, rt_read_char
+.export rt_print_char, rt_print_number, rt_print_bytes, rt_read_char
 .import rt_need_one, rt_overflow, rt_push, serial_in, serial_out
 .importzp rt_depth, rt_stack, rt_input_eof
 
@@ -11,6 +11,10 @@ number_high:    .res 1
 number_digit:   .res 1
 number_place:   .res 1
 number_started: .res 1
+bytes_pointer:  .res 2
+
+.segment "BSS"
+bytes_remaining: .res 1
 
 .segment "RODATA"
 decimal_low:  .byte <10000, <1000, <100, <10, <1
@@ -52,6 +56,24 @@ rt_print_char:
     lda rt_stack,x
     jsr serial_out
     dec rt_depth
+    rts
+
+; Target-private ABI: A/X = address, Y = byte count (1..255). The adapter
+; may clobber all registers and flags, so keep the cursor and count in RAM.
+rt_print_bytes:
+    sta bytes_pointer
+    stx bytes_pointer+1
+    sty bytes_remaining
+@next_byte:
+    ldy #0
+    lda (bytes_pointer),y
+    jsr serial_out
+    inc bytes_pointer
+    bne @pointer_ready
+    inc bytes_pointer+1
+@pointer_ready:
+    dec bytes_remaining
+    bne @next_byte
     rts
 
 rt_print_number:

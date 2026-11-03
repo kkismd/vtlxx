@@ -81,6 +81,8 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_frontend -- --ignored
 ```
 
+`?="..."` は ASCII bytes を改行なしで出力する。文字列は生成コード arena 内に最大255 byteずつ格納し、実行時に固定長 helper で出力する。空文字列は出力せず、escape と複数行文字列には対応しない。共有 arena の容量不足や不正な文字列では runtime を開始しない。
+
 ## P0a template definition（#356）
 
 `&=a{} [ ... ]` は lowercase identity 1 byte のcompile-only template definitionである。本文は通常のRHS compilerへ渡さず、register assignment (`A..Z=`) と hole assignment (`{}=`) の形、および `{}` holeだけを検証する。コメントを除いたstatement sourceを元の文字順で共有arenaへ保存し、statement間はLF 1 byteで区切る。全条件と `cc_source_finish` が成功した後にだけ26-entry registryへ公開する。空本文・holeなし・不正header/body・名前衝突・arena容量不足ではcompile-runを失敗させ、runtimeを開始しない。template registryはcompile-runごとにresetされる。

@@ -18,6 +18,7 @@
 .import cc_work_push, cc_work_pop
 .import cc_is_bound, cc_publish, cc_resolve
 .import cc_push_const, cc_call, cc_load_reg, cc_store_reg
+.import cc_literal_output_begin, cc_literal_output_byte, cc_literal_output_finish
 .import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
@@ -304,6 +305,50 @@ take:
     sta look_state
     rts
 
+; Stream a quoted ASCII literal to the backend without retaining source.
+; Entered by tail jump from statement, whose stack guard covers these calls.
+literal_output:
+    jsr take
+    jsr cc_literal_output_begin
+    lda cc_status
+    jne backend_error
+@next:
+    jsr peek
+    lda fe_compile_status
+    bne @done
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'"'
+    beq @end
+    cmp #10
+    jeq syntax_error
+    cmp #13
+    jeq syntax_error
+    cmp #$80
+    jcs syntax_error
+    jsr cc_literal_output_byte
+    lda cc_status
+    jne backend_error
+    jsr take
+    jmp @next
+@end:
+    jsr take
+    jsr peek
+    lda fe_compile_status
+    bne @done
+    jsr statement_end
+    lda fe_compile_status
+    bne @done
+    jsr cc_literal_output_finish
+    lda cc_status
+    jne backend_error
+@done:
+    rts
+
 ; Skip logical-line separators and comments, leaving the first target byte.
 skip_separators:
     jsr peek
@@ -467,6 +512,8 @@ statement:
     cmp #1
     jne @compile_operand
     lda look_byte
+    cmp #'"'
+    jeq literal_output
     cmp #'('
     jne @compile_operand
     jsr take

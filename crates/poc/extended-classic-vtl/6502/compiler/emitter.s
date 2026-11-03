@@ -4,8 +4,9 @@
 .export cc_push_const, cc_call, cc_return, cc_jump, cc_jz
 .export cc_load_reg, cc_store_reg
 .export cc_jump_placeholder, cc_jz_placeholder, cc_patch_here, cc_jump_to
-.import cc_reserve, cc_write_byte_raw, cc_mark, cc_patch, cc_track_patch
-.import rt_push, rt_pop_condition, rt_load_reg, rt_store_reg
+.export cc_literal_output_begin, cc_literal_output_byte, cc_literal_output_finish
+.import cc_reserve, cc_write_byte_raw, cc_emit_byte, cc_mark, cc_patch, cc_track_patch
+.import rt_push, rt_pop_condition, rt_load_reg, rt_store_reg, rt_print_bytes
 .importzp cc_status, cc_arg, cc_cursor
 
 .segment "ZEROPAGE"
@@ -13,7 +14,90 @@ em_word:  .res 2
 em_patch: .res 2
 em_index: .res 1
 
+.segment "BSS"
+literal_patch: .res 2
+literal_start: .res 2
+literal_count: .res 1
+literal_byte:  .res 1
+
 .segment "CODE"
+; Stream bytes into code arena chunks, with a tracked jump over each payload.
+; An empty literal emits nothing. State is private to this sequential emitter.
+cc_literal_output_begin:
+    lda #0
+    sta literal_count
+    rts
+
+; A = next validated content byte. A full chunk is finished only when the
+; following byte arrives, so each emitted chunk has a count in 1..255.
+cc_literal_output_byte:
+    sta literal_byte
+    lda cc_status
+    bne @done
+    lda literal_count
+    cmp #255
+    bne @start_if_needed
+    jsr cc_literal_output_finish
+    lda cc_status
+    bne @done
+@start_if_needed:
+    lda literal_count
+    bne @append
+    jsr cc_jump_placeholder
+    sta literal_patch
+    stx literal_patch+1
+    lda cc_status
+    bne @done
+    jsr cc_mark
+    sta literal_start
+    stx literal_start+1
+@append:
+    lda literal_byte
+    jsr cc_emit_byte
+    lda cc_status
+    bne @done
+    inc literal_count
+@done:
+    rts
+
+; Reserve the entire fixed call template before patching or writing it.
+cc_literal_output_finish:
+    lda cc_status
+    bne @done
+    lda literal_count
+    beq @done
+    lda #9
+    jsr cc_reserve
+    lda cc_status
+    bne @done
+    lda literal_patch
+    ldx literal_patch+1
+    jsr cc_patch_here
+    lda cc_status
+    bne @done
+    lda #$a9               ; LDA #<literal_start
+    jsr cc_write_byte_raw
+    lda literal_start
+    jsr cc_write_byte_raw
+    lda #$a2               ; LDX #>literal_start
+    jsr cc_write_byte_raw
+    lda literal_start+1
+    jsr cc_write_byte_raw
+    lda #$a0               ; LDY #count
+    jsr cc_write_byte_raw
+    lda literal_count
+    jsr cc_write_byte_raw
+    lda #$20               ; JSR rt_print_bytes
+    jsr cc_write_byte_raw
+    lda #<rt_print_bytes
+    jsr cc_write_byte_raw
+    lda #>rt_print_bytes
+    jsr cc_write_byte_raw
+    lda #0
+    sta literal_count
+@done:
+    rts
+
 ; A/X = raw Cell bits. LDA #low; LDX #high; JSR rt_push.
 cc_push_const:
     sta em_word

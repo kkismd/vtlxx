@@ -153,6 +153,12 @@ sim65 の直接終了入口。`halt` のリンク命令は `4C F9 FF` であり�
 - sim65_frontend、sim65_cli、sim65_negative、sim65_examples のignored suiteで
   IF/While/P0a、6例（Queens両版92解）、通常syntax/transport/backend失敗を確認する。
 
+## 文字列出力追加時の監査（#472）
+
+`statement` の guard 後、文字列の処理へ tail JMP する。source の読取は既存の `peek` を直接呼ぶため追加は最大 11 B。backend の最深経路は `cc_literal_output_byte` → `cc_literal_output_finish` → `cc_patch_here` → `cc_patch` → `cc_untrack_patch` → `cc_patch_bit_address` で、同時に生存する JSR は5個、追加10 B。placeholder の追跡も同じ上界内であり、局所 PHA はない。従来の statement 上界15 Bと K=24 B を超えない。runtime helper は `serial_out` を JSR し、runtime stack の既存条件を維持する。
+
+同じ sim6502 CLI の14 source をリンクした比較では、ZEROPAGE は239→241 B、BSS は3922→3929 B、CODE は7361→7633 B、RODATA は49 Bのまま。2 KiB arena は変更していない。
+
 ## 再監査条件
 
 4入口の追加・迂回、JSR/tail JMPの変更、PHA/PHPや保存レジスタの追加、
