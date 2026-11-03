@@ -666,6 +666,24 @@ block 内の numeric label は意味論上 surrounding owner の label namespace
 
 opener / closer の改行配置には今後評価する余地がありますが、同一 source 内では style を統一し、indentation depth 自体は #200 の rule から一意に決めます。
 
+## Example: 1024
+
+[`examples/1024.vtl`](examples/1024.vtl) は 4×4 の盤面で同じ数を合わせて 1024 を目指すゲームです。repository root から Rust CLI で起動します。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
+  crates/poc/extended-classic-vtl/examples/1024.vtl
+```
+
+`W` / `A` / `S` / `D` で上下左右、`R` で新しいゲーム、`Q` で終了します。小文字も使えます。通常の端末ではコマンドを入力して Enter を押してください。入力文字と改行は端末の echo として表示されます。
+
+同じ source の 6502 適合を試すコマンドは次のとおりです。現行の 6502 compiler ではコンパイル資源エラーとなり、ゲームを実行できません。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
+  crates/poc/extended-classic-vtl/examples/1024.vtl --interactive
+```
+
 ## Example: Eight Queens
 
 [`examples/eight_queens.vtl`](examples/eight_queens.vtl) は current ECVTL の user-facing example です。
