@@ -78,6 +78,22 @@ Unix ホストの端末で対話するには `--interactive` を指定します�
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- path/to/program.vtl --interactive
 ```
 
+1文字の入力を試すには、Rust/Cargo と上記の cc65 ツールを PATH に用意し、repository root から次を実行します。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
+  crates/poc/extended-classic-vtl/examples/interactive_input.vtl --interactive
+```
+
+改行のない `ENTER ONE CHARACTER: ` が表示されたら、通常の端末設定で `A` を押して Enter で確定します。入力文字と改行は端末の echo による表示です。
+
+```text
+ENTER ONE CHARACTER: A
+ASCII: 65
+```
+
+サンプルは1文字を読み、その ASCII 値を十進数で表示して正常終了します。追加の入力は不要です。EOF の場合は `ASCII: -1` を表示します。
+
 対話モードの stdin は pipe や file にも接続できます。再現可能な入力を使う一括実行には `--runtime-input path/to/input.bin` を使えます。このオプションと `--interactive` は併用できません。対話モードでは stdout を逐次出力します。
 
 sim65 の実行上限は一括モードでは既定で 4,000,000 cycles、対話モードでは無制限です。どちらのモードでも `--cycle-limit` に正の10進数を指定できます。
