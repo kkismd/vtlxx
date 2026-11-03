@@ -189,12 +189,40 @@ impl Constants {
             .ok_or(CompileError::Syntax)
     }
 
-    fn expand_rhs(&self, rhs: &str) -> Result<String, CompileError> {
+    fn expand_rhs(&self, rhs: &str, machine: &Machine) -> Result<String, CompileError> {
         let mut expanded = String::new();
         let mut offset = 0;
         while offset < rhs.len() {
             let byte = rhs.as_bytes()[offset];
             if byte == b'.' {
+                // A completed prefix cannot be followed by another value. Closing
+                // open groups lets the existing expression parser check prefixes
+                // within nested operands without teaching it constant names.
+                let depth = expanded.bytes().fold(0usize, |depth, byte| match byte {
+                    b'(' => depth + 1,
+                    b')' => depth.saturating_sub(1),
+                    _ => depth,
+                });
+                let mut prefix = expanded.clone();
+                prefix.extend(std::iter::repeat_n(')', depth));
+                if !prefix.is_empty()
+                    && compile_rhs(&prefix, machine, &mut CodeBuilder::new()).is_ok()
+                {
+                    return Err(CompileError::Syntax);
+                }
+                // Parenthesized literals must not turn an adjacent primary
+                // identity into an applied-read call (e.g. `a.TWO` -> `a(2)`).
+                if let Some((index, identity)) = expanded.char_indices().next_back()
+                    && machine.resolve(identity, SourceRole::AppliedRead).is_some()
+                {
+                    let mut before_identity = expanded[..index].to_owned();
+                    before_identity.extend(std::iter::repeat_n(')', depth));
+                    if before_identity.is_empty()
+                        || compile_rhs(&before_identity, machine, &mut CodeBuilder::new()).is_err()
+                    {
+                        return Err(CompileError::Syntax);
+                    }
+                }
                 offset += 1;
                 let start = offset;
                 while offset < rhs.len()
@@ -205,7 +233,9 @@ impl Constants {
                     offset += 1;
                 }
                 let name = &rhs[start..offset];
+                expanded.push('(');
                 expanded.push_str(&self.resolve(name)?.to_string());
+                expanded.push(')');
             } else {
                 let ch = rhs[offset..].chars().next().ok_or(CompileError::Syntax)?;
                 expanded.push(ch);
@@ -222,7 +252,7 @@ fn compile_resolved_rhs(
     constants: &Constants,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
-    compile_rhs(&constants.expand_rhs(rhs)?, machine, builder)
+    compile_rhs(&constants.expand_rhs(rhs, machine)?, machine, builder)
 }
 
 #[derive(Clone, Copy)]
@@ -277,17 +307,41 @@ fn next_source_token<'a>(
     line: &'a str,
     offset: &mut usize,
 ) -> Result<Option<&'a str>, CompileError> {
-    let start = *offset;
-    let rest = &line[start..];
+    let rest = &line[*offset..];
     let indent = rest.len() - rest.trim_start_matches([' ', '\t']).len();
     if rest.as_bytes().get(indent) == Some(&b'.') {
-        if start != 0 {
+        let start = *offset + indent;
+        let bytes = line.as_bytes();
+        let mut end = start + 1;
+        while end < bytes.len()
+            && (bytes[end].is_ascii_uppercase()
+                || bytes[end].is_ascii_digit()
+                || bytes[end] == b'_')
+        {
+            end += 1;
+        }
+        while end < bytes.len() && matches!(bytes[end], b' ' | b'\t') {
+            end += 1;
+        }
+        if bytes.get(end..end + 2) != Some(b":=") {
             return Err(CompileError::Syntax);
         }
-        let declaration = &rest[indent..];
-        let end = declaration.find(';').unwrap_or(declaration.len());
-        *offset = line.len();
-        return Ok(Some(&declaration[..end]));
+        end += 2;
+        while end < bytes.len() && matches!(bytes[end], b' ' | b'\t') {
+            end += 1;
+        }
+        if bytes.get(end) == Some(&b'-') {
+            end += 1;
+        }
+        let digits = end;
+        while end < bytes.len() && bytes[end].is_ascii_digit() {
+            end += 1;
+        }
+        if end == digits || (end < bytes.len() && !matches!(bytes[end], b' ' | b'\t' | b';')) {
+            return Err(CompileError::Syntax);
+        }
+        *offset = end;
+        return Ok(Some(&line[start..end]));
     }
     next_statement(line, offset)
 }
@@ -537,6 +591,33 @@ mod tests {
 
         machine.execute_source(".MAX:=2\nB=3 A=.MAXaB").unwrap();
         assert_eq!(machine.register(0), Some(5));
+    }
+
+    #[test]
+    fn adjacent_constant_cannot_create_an_applied_read() {
+        let mut machine = Machine::new();
+        machine
+            .publish_initial(
+                'a',
+                SourceRole::AppliedRead,
+                CodeBuilder::new().finish().unwrap(),
+            )
+            .unwrap();
+        machine
+            .publish_initial(
+                'a',
+                SourceRole::BinaryOperator,
+                CodeBuilder::new().finish().unwrap(),
+            )
+            .unwrap();
+        assert!(matches!(
+            machine.execute_source(".TWO:=2 A=a.TWO"),
+            Err(SourceError::Compile(_))
+        ));
+        assert!(matches!(
+            machine.execute_source(".TWO:=2 A=1+(a.TWO)"),
+            Err(SourceError::Compile(_))
+        ));
     }
 
     #[test]

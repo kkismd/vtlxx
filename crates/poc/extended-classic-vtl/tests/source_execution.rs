@@ -43,8 +43,11 @@ fn named_integer_errors_reject_invalid_definitions_and_references() {
         ". NAME:=1",
         ".BAD : =1",
         ".BAD:=\n1",
-        ".BAD:=1 A=2",
-        "A=1 .BAD:=2",
+        ".BAD:=16A=1",
+        ".BAD:=16.NEXT:=2",
+        ".BAD:=16+2",
+        ".BAD\n:=1",
+        "&=t{} [ .BAD:=1 ]",
         "&=p [\n.INNER:=2\n]",
         "%=1 [\n.INNER:=2\n]",
         "*=0 [\n.INNER:=2\n]",
@@ -60,6 +63,54 @@ fn named_integer_errors_reject_invalid_definitions_and_references() {
         let mut machine = Machine::new();
         assert!(
             matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn declarations_share_normal_source_form_separators() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("A=1 .MAX := 16 .MIN:=-1 B=.MAX C=.MIN .END:=4;comment\nD=.END")
+        .unwrap();
+    assert_eq!(
+        (
+            machine.register(0),
+            machine.register(1),
+            machine.register(2),
+            machine.register(3)
+        ),
+        (Some(1), Some(16), Some(-1), Some(4))
+    );
+}
+
+#[test]
+fn constant_references_remain_distinct_values() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".TWO:=2 .NEG:=-1 .TWO3:=23 A=.TWO+.TWO B=1+.TWO C=.NEG D=.TWO3")
+        .unwrap();
+    assert_eq!(
+        (
+            machine.register(0),
+            machine.register(1),
+            machine.register(2),
+            machine.register(3)
+        ),
+        (Some(4), Some(3), Some(-1), Some(23))
+    );
+    assert!(machine.stack().is_empty());
+    for rhs in [
+        "1.TWO", ".TWO.TWO", "1.NEG", ".NEG.TWO", "(1).TWO", "A.TWO", "@(1.TWO)",
+    ] {
+        let mut machine = Machine::new();
+        let source = format!(".TWO:=2 .NEG:=-1 A={rhs}");
+        assert!(
+            matches!(
+                machine.execute_source(&source),
+                Err(SourceError::Compile(_))
+            ),
             "{source}"
         );
     }
