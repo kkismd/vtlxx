@@ -27,7 +27,7 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
     // This namespace belongs to one source compilation, not to Machine.
     let mut constants = Constants::default();
     while let Some(token) = reader.next().map_err(SourceError::Compile)? {
-        if let Some(definition) = token.text.strip_prefix("==") {
+        if let Some(definition) = token.text.strip_prefix('.') {
             constants.define(definition).map_err(SourceError::Compile)?;
             continue;
         }
@@ -158,7 +158,9 @@ impl Constants {
     }
 
     fn define(&mut self, definition: &str) -> Result<(), CompileError> {
-        let (name, value) = definition.split_once(',').ok_or(CompileError::Syntax)?;
+        let (name, value) = definition.split_once(":=").ok_or(CompileError::Syntax)?;
+        let name = name.trim_end_matches([' ', '\t']);
+        let value = value.trim_matches([' ', '\t']);
         if !Self::valid_name(name)
             || self.0.iter().any(|(existing, _)| existing == name)
             || value.is_empty()
@@ -187,14 +189,42 @@ impl Constants {
             .ok_or(CompileError::Syntax)
     }
 
-    fn expand_rhs(&self, rhs: &str) -> Result<String, CompileError> {
+    fn expand_rhs(&self, rhs: &str, machine: &Machine) -> Result<String, CompileError> {
         let mut expanded = String::new();
         let mut offset = 0;
         while offset < rhs.len() {
             let byte = rhs.as_bytes()[offset];
-            if byte.is_ascii_uppercase() {
-                let start = offset;
+            if byte == b'.' {
+                // A completed prefix cannot be followed by another value. Closing
+                // open groups lets the existing expression parser check prefixes
+                // within nested operands without teaching it constant names.
+                let depth = expanded.bytes().fold(0usize, |depth, byte| match byte {
+                    b'(' => depth + 1,
+                    b')' => depth.saturating_sub(1),
+                    _ => depth,
+                });
+                let mut prefix = expanded.clone();
+                prefix.extend(std::iter::repeat_n(')', depth));
+                if !prefix.is_empty()
+                    && compile_rhs(&prefix, machine, &mut CodeBuilder::new()).is_ok()
+                {
+                    return Err(CompileError::Syntax);
+                }
+                // Parenthesized literals must not turn an adjacent primary
+                // identity into an applied-read call (e.g. `a.TWO` -> `a(2)`).
+                if let Some((index, identity)) = expanded.char_indices().next_back()
+                    && machine.resolve(identity, SourceRole::AppliedRead).is_some()
+                {
+                    let mut before_identity = expanded[..index].to_owned();
+                    before_identity.extend(std::iter::repeat_n(')', depth));
+                    if before_identity.is_empty()
+                        || compile_rhs(&before_identity, machine, &mut CodeBuilder::new()).is_err()
+                    {
+                        return Err(CompileError::Syntax);
+                    }
+                }
                 offset += 1;
+                let start = offset;
                 while offset < rhs.len()
                     && (rhs.as_bytes()[offset].is_ascii_uppercase()
                         || rhs.as_bytes()[offset].is_ascii_digit()
@@ -203,11 +233,9 @@ impl Constants {
                     offset += 1;
                 }
                 let name = &rhs[start..offset];
-                if name.len() == 1 {
-                    expanded.push_str(name);
-                } else {
-                    expanded.push_str(&self.resolve(name)?.to_string());
-                }
+                expanded.push('(');
+                expanded.push_str(&self.resolve(name)?.to_string());
+                expanded.push(')');
             } else {
                 let ch = rhs[offset..].chars().next().ok_or(CompileError::Syntax)?;
                 expanded.push(ch);
@@ -224,7 +252,7 @@ fn compile_resolved_rhs(
     constants: &Constants,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
-    compile_rhs(&constants.expand_rhs(rhs)?, machine, builder)
+    compile_rhs(&constants.expand_rhs(rhs, machine)?, machine, builder)
 }
 
 #[derive(Clone, Copy)]
@@ -241,7 +269,10 @@ struct SourceReader<'a> {
 impl<'a> SourceReader<'a> {
     fn new(source: &'a str) -> Self {
         Self {
-            lines: source.split('\n').collect(),
+            lines: source
+                .split('\n')
+                .map(|line| line.strip_suffix('\r').unwrap_or(line))
+                .collect(),
             line: 0,
             offset: 0,
         }
@@ -249,7 +280,7 @@ impl<'a> SourceReader<'a> {
 
     fn next(&mut self) -> Result<Option<Token<'a>>, CompileError> {
         while let Some(line) = self.lines.get(self.line) {
-            if let Some(text) = next_statement(line, &mut self.offset)? {
+            if let Some(text) = next_source_token(line, &mut self.offset)? {
                 return Ok(Some(Token { text }));
             }
             self.line += 1;
@@ -262,7 +293,7 @@ impl<'a> SourceReader<'a> {
         let mut line_index = self.line;
         let mut offset = self.offset;
         while let Some(line) = self.lines.get(line_index) {
-            if let Some(text) = next_statement(line, &mut offset)? {
+            if let Some(text) = next_source_token(line, &mut offset)? {
                 return Ok(Some(Token { text }));
             }
             line_index += 1;
@@ -270,6 +301,49 @@ impl<'a> SourceReader<'a> {
         }
         Ok(None)
     }
+}
+
+fn next_source_token<'a>(
+    line: &'a str,
+    offset: &mut usize,
+) -> Result<Option<&'a str>, CompileError> {
+    let rest = &line[*offset..];
+    let indent = rest.len() - rest.trim_start_matches([' ', '\t']).len();
+    if rest.as_bytes().get(indent) == Some(&b'.') {
+        let start = *offset + indent;
+        let bytes = line.as_bytes();
+        let mut end = start + 1;
+        while end < bytes.len()
+            && (bytes[end].is_ascii_uppercase()
+                || bytes[end].is_ascii_digit()
+                || bytes[end] == b'_')
+        {
+            end += 1;
+        }
+        while end < bytes.len() && matches!(bytes[end], b' ' | b'\t') {
+            end += 1;
+        }
+        if bytes.get(end..end + 2) != Some(b":=") {
+            return Err(CompileError::Syntax);
+        }
+        end += 2;
+        while end < bytes.len() && matches!(bytes[end], b' ' | b'\t') {
+            end += 1;
+        }
+        if bytes.get(end) == Some(&b'-') {
+            end += 1;
+        }
+        let digits = end;
+        while end < bytes.len() && bytes[end].is_ascii_digit() {
+            end += 1;
+        }
+        if end == digits || (end < bytes.len() && !matches!(bytes[end], b' ' | b'\t' | b';')) {
+            return Err(CompileError::Syntax);
+        }
+        *offset = end;
+        return Ok(Some(&line[start..end]));
+    }
+    next_statement(line, offset)
 }
 
 fn compile_source_statement(
@@ -446,7 +520,7 @@ fn compile_statement(
             let label: i32 = if rhs.bytes().all(|byte| byte.is_ascii_digit()) && !rhs.is_empty() {
                 rhs.parse().map_err(|_| CompileError::Syntax)?
             } else {
-                i32::from(constants.resolve(rhs)?)
+                i32::from(constants.resolve(rhs.strip_prefix('.').ok_or(CompileError::Syntax)?)?)
             };
             let result = if target == '^' {
                 builder.define_numeric_label(label)
@@ -515,8 +589,35 @@ mod tests {
             .publish_initial('a', SourceRole::BinaryOperator, operator.finish().unwrap())
             .unwrap();
 
-        machine.execute_source("==MAX,2 B=3 A=MAXaB").unwrap();
+        machine.execute_source(".MAX:=2\nB=3 A=.MAXaB").unwrap();
         assert_eq!(machine.register(0), Some(5));
+    }
+
+    #[test]
+    fn adjacent_constant_cannot_create_an_applied_read() {
+        let mut machine = Machine::new();
+        machine
+            .publish_initial(
+                'a',
+                SourceRole::AppliedRead,
+                CodeBuilder::new().finish().unwrap(),
+            )
+            .unwrap();
+        machine
+            .publish_initial(
+                'a',
+                SourceRole::BinaryOperator,
+                CodeBuilder::new().finish().unwrap(),
+            )
+            .unwrap();
+        assert!(matches!(
+            machine.execute_source(".TWO:=2 A=a.TWO"),
+            Err(SourceError::Compile(_))
+        ));
+        assert!(matches!(
+            machine.execute_source(".TWO:=2 A=1+(a.TWO)"),
+            Err(SourceError::Compile(_))
+        ));
     }
 
     #[test]
@@ -527,10 +628,10 @@ mod tests {
             machine.template('a').unwrap().statements(),
             &["{}={}+1".to_owned()]
         );
-        machine.execute_source("&=b{} [ A=MAX{} {}=A+ ]").unwrap();
+        machine.execute_source("&=b{} [ A=.MAX{} {}=A+ ]").unwrap();
         assert_eq!(
             machine.template('b').unwrap().statements(),
-            &["A=MAX{}".to_owned(), "{}=A+".to_owned()]
+            &["A=.MAX{}".to_owned(), "{}=A+".to_owned()]
         );
         assert_eq!(machine.register(0), Some(0));
         assert!(Machine::new().template('a').is_none());
@@ -553,8 +654,8 @@ mod tests {
     #[test]
     fn template_invocation_survives_source_calls_and_uses_current_constants() {
         let mut machine = Machine::new();
-        machine.execute_source("&=a{} [ A=MAX{} ]").unwrap();
-        machine.execute_source("==MAXX,7 A=2 a{X}=()").unwrap();
+        machine.execute_source("&=a{} [ A=.MAX{} ]").unwrap();
+        machine.execute_source(".MAXX:=7\nA=2 a{X}=()").unwrap();
         assert_eq!(machine.register(0), Some(7));
         assert_eq!(
             machine.execute_source("a{X}=()"),
@@ -633,7 +734,7 @@ mod tests {
         assert_eq!(machine.output(), b"15\n");
         assert!(machine.stack().is_empty());
         machine
-            .execute_source("==NUM,3 B=2 a{B}=(B+NUM) a{B}=1,4 C=7")
+            .execute_source(".NUM:=3\nB=2 a{B}=(B+.NUM) a{B}=1,4 C=7")
             .unwrap();
         assert_eq!(machine.register(1), Some(11));
         assert_eq!(machine.register(2), Some(7));
