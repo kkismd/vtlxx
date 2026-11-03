@@ -3,21 +3,19 @@ use vtlxx_poc_extended_classic_vtl::{CompileError, Machine, RuntimeError, Source
 #[test]
 fn named_integers_resolve_in_rhs_procedures_and_numeric_labels() {
     let mut machine = Machine::new();
-    machine
-        .execute_source(
-            "==BOARD_BASE,16 ==NEG_ONE,-1 ==ABCDEFGHIJKLMNOP,7 ==ALIAS,16 \
-             ==LOOP,3 &=p [ B=BOARD_BASE+2 C=NEG_ONE D=ABCDEFGHIJKLMNOP ] \
-             #=LOOP A=99 ^=LOOP A=ALIAS p=()",
-        )
-        .unwrap();
-    assert_eq!(machine.register(0), Some(16));
-    assert_eq!(machine.register(1), Some(18));
-    assert_eq!(machine.register(2), Some(-1));
-    assert_eq!(machine.register(3), Some(7));
-
+    machine.execute_source(".BOARD_BASE:=16\n.NEG_ONE:=-1\n.ABCDEFGHIJKLMNOP:=7\n.ALIAS:=16\n.LOOP:=3\n&=p [ B=.BOARD_BASE+2 C=.NEG_ONE D=.ABCDEFGHIJKLMNOP ] #=.LOOP A=99 ^=.LOOP A=.ALIAS p=()").unwrap();
+    assert_eq!(
+        (
+            machine.register(0),
+            machine.register(1),
+            machine.register(2),
+            machine.register(3)
+        ),
+        (Some(16), Some(18), Some(-1), Some(7))
+    );
     let mut machine = Machine::new();
     machine
-        .execute_source("==LOOP,1 ^=LOOP A=A+1 %=A<3 [ #=LOOP ]")
+        .execute_source(".LOOP:=1\n^=.LOOP A=A+1 %=A<3 [ #=.LOOP ]")
         .unwrap();
     assert_eq!(machine.register(0), Some(3));
 }
@@ -25,27 +23,39 @@ fn named_integers_resolve_in_rhs_procedures_and_numeric_labels() {
 #[test]
 fn named_integer_errors_reject_invalid_definitions_and_references() {
     for source in [
-        "A=UNDEFINED ==UNDEFINED,1",
-        "==DUP,1 ==DUP,2",
-        "==A,1",
-        "==lower,1",
-        "==Bad,1",
-        "==BAD-CHAR,1",
-        "==ABCDEFGHIJKLMNOPQ,1",
-        "==BAD,32768",
-        "==BAD,-32769",
-        "==BAD,1+2",
-        "==OTHER,1 ==BAD,OTHER",
-        "==BAD,+1",
-        "==BAD,1,2",
-        "==BAD,1 &=p [ ==INNER,2 ]",
-        "%=1 [ ==INNER,2 ]",
-        "*=0 [ ==INNER,2 ]",
-        "==NEG,-1 ^=NEG",
-        "==NEG,-1 #=NEG",
-        "==UNKNOWN,1 A=MISSING",
-        "==MAX,2 A=MAXIMUM",
-        "==MAX,2 A=MAXfoo",
+        "==OLD,1",
+        "A=MAX",
+        "^=LOOP",
+        "#=LOOP",
+        "A=.UNDEFINED\n.UNDEFINED:=1",
+        ".DUP:=1\n.DUP:=2",
+        ".A:=1",
+        ".lower:=1",
+        ".Bad:=1",
+        ".BAD-CHAR:=1",
+        ".ABCDEFGHIJKLMNOPQ:=1",
+        ".BAD:=32768",
+        ".BAD:=-32769",
+        ".BAD:=1+2",
+        ".OTHER:=1\n.BAD:=.OTHER",
+        ".BAD:=+1",
+        ".BAD:=1,2",
+        ". NAME:=1",
+        ".BAD : =1",
+        ".BAD:=\n1",
+        ".BAD:=1 A=2",
+        "A=1 .BAD:=2",
+        "&=p [\n.INNER:=2\n]",
+        "%=1 [\n.INNER:=2\n]",
+        "*=0 [\n.INNER:=2\n]",
+        ".NEG:=-1\n^=.NEG",
+        ".NEG:=-1\n#=.NEG",
+        ".UNKNOWN:=1\nA=.MISSING",
+        ".MAX:=2\nA=.MAXIMUM",
+        ".MAX:=2\nA=.MAXfoo",
+        "A=.A",
+        "A=..MAX",
+        "A=.max",
     ] {
         let mut machine = Machine::new();
         assert!(
@@ -58,36 +68,63 @@ fn named_integer_errors_reject_invalid_definitions_and_references() {
 #[test]
 fn named_integer_boundaries_and_failed_compilation() {
     let mut machine = Machine::new();
-    machine
-        .execute_source("==MAX_CELL,32767 ==MIN_CELL,-32768 A=MAX_CELL B=MIN_CELL ?=\"MAX_CELL\"")
-        .unwrap();
+    machine.execute_source("  .MAX_CELL \t:=\t32767 ; comment\r\n.MIN_CELL:=-32768\r\n.AB:=2\r\nA=.MAX_CELL B=.MIN_CELL C=.AB ?=\".MAX_CELL\"").unwrap();
     assert_eq!(machine.register(0), Some(32767));
     assert_eq!(machine.register(1), Some(-32768));
-    assert_eq!(machine.output(), b"MAX_CELL");
-
-    assert_eq!(
-        machine.execute_source("==GOOD,1 C=GOOD D=UNKNOWN"),
-        Err(SourceError::Compile(CompileError::Syntax))
-    );
-    assert_eq!(machine.register(2), Some(0));
-    assert_eq!(
-        machine.execute_source("C=GOOD"),
-        Err(SourceError::Compile(CompileError::Syntax))
-    );
+    assert_eq!(machine.register(2), Some(2));
+    assert_eq!(machine.output(), b".MAX_CELL");
+    assert!(matches!(
+        machine.execute_source(".GOOD:=1\nC=.GOOD D=.UNKNOWN"),
+        Err(SourceError::Compile(_))
+    ));
+    assert_eq!(machine.register(2), Some(2));
+    assert!(matches!(
+        machine.execute_source("C=.GOOD"),
+        Err(SourceError::Compile(_))
+    ));
 }
 
 #[test]
 fn named_integer_namespace_is_one_execute_source_call() {
     let mut machine = Machine::new();
-    machine.execute_source("==VALUE,9 &=p [ A=VALUE ]").unwrap();
+    machine
+        .execute_source(".VALUE:=9\n&=p [ A=.VALUE ]")
+        .unwrap();
     machine.execute_source("p=()").unwrap();
     assert_eq!(machine.register(0), Some(9));
-    assert_eq!(
-        machine.execute_source("B=VALUE"),
-        Err(SourceError::Compile(CompileError::Syntax))
-    );
-    machine.execute_source("==VALUE,4 C=VALUE").unwrap();
+    assert!(matches!(
+        machine.execute_source("B=.VALUE"),
+        Err(SourceError::Compile(_))
+    ));
+    machine.execute_source(".VALUE:=4\nC=.VALUE").unwrap();
     assert_eq!(machine.register(2), Some(4));
+    assert!(matches!(
+        Machine::new().execute_source("A=.VALUE"),
+        Err(SourceError::Compile(_))
+    ));
+}
+
+#[test]
+fn dotted_constants_work_in_storage_control_and_templates() {
+    let mut machine = Machine::new();
+    machine.execute_source(".ADDR:=5\n.LIMIT:=3\n.GAINA:=2\n.AB:=7\n&=t{} [ {}={}*.GAIN{} ] A=1 B=7 @=.ADDR,.AB C=@(.ADDR) %=B==.AB [ t{A}=() ] *=A<.LIMIT [ A=A+1 ]").unwrap();
+    assert_eq!(machine.register(0), Some(3));
+    assert_eq!(machine.register(2), Some(7));
+}
+
+#[test]
+fn invalid_constant_in_unfinished_procedure_preserves_flushed_effects() {
+    let mut machine = Machine::new();
+    assert!(matches!(
+        machine.execute_source("A=7 &=p [ B=.MISSING ]"),
+        Err(SourceError::Compile(_))
+    ));
+    assert_eq!(machine.register(0), Some(7));
+    assert_eq!(machine.register(1), Some(0));
+    assert!(matches!(
+        machine.execute_source("p=()"),
+        Err(SourceError::Compile(_))
+    ));
 }
 
 #[test]
@@ -419,7 +456,7 @@ fn while_conditions_use_normal_rhs_expressions() {
         ("A=3 *=0 [ A=99 ] ?=A", b"3".as_slice()),
         ("A=1 *=A [ A=0 ] ?=A", b"0"),
         ("A=-2 *=A [ A=A+1 ] ?=A", b"0"),
-        ("==LIMIT,3 A=0 *=(A<LIMIT) [ A=A+1 ] ?=A", b"3"),
+        (".LIMIT:=3\nA=0 *=(A<.LIMIT) [ A=A+1 ] ?=A", b"3"),
         ("A=0 *=(A<3)*2 [ A=A+1 ] ?=A*4", b"12"),
     ] {
         let mut machine = Machine::new();
