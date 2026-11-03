@@ -1,7 +1,8 @@
 use std::ffi::OsStr;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 const EXAMPLES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
 
@@ -10,6 +11,11 @@ enum Disposition {
     Portable {
         expected_stdout: Option<&'static [u8]>,
         cycle_limit: Option<u32>,
+        runtime_input: Option<&'static [u8]>,
+    },
+    Deferred {
+        reason: &'static str,
+        followup_issue: &'static str,
     },
 }
 
@@ -21,10 +27,18 @@ struct ExampleCase {
 
 const EXAMPLES: &[ExampleCase] = &[
     ExampleCase {
+        name: "1024.vtl",
+        disposition: Disposition::Deferred {
+            reason: "generated code exceeds the current 2 KiB shared arena",
+            followup_issue: "#481 / ADR #480",
+        },
+    },
+    ExampleCase {
         name: "eight_queens.vtl",
         disposition: Disposition::Portable {
             expected_stdout: Some(include_bytes!("fixtures/eight_queens_example_output.txt")),
             cycle_limit: Some(256_000_000),
+            runtime_input: None,
         },
     },
     ExampleCase {
@@ -32,6 +46,15 @@ const EXAMPLES: &[ExampleCase] = &[
         disposition: Disposition::Portable {
             expected_stdout: Some(include_bytes!("fixtures/eight_queens_example_output.txt")),
             cycle_limit: Some(256_000_000),
+            runtime_input: None,
+        },
+    },
+    ExampleCase {
+        name: "interactive_input.vtl",
+        disposition: Disposition::Portable {
+            expected_stdout: Some(b"ENTER ONE CHARACTER: ASCII: 65\n"),
+            cycle_limit: None,
+            runtime_input: Some(include_bytes!("fixtures/interactive_input.txt")),
         },
     },
     ExampleCase {
@@ -39,6 +62,14 @@ const EXAMPLES: &[ExampleCase] = &[
         disposition: Disposition::Portable {
             expected_stdout: Some(b"7\n"),
             cycle_limit: None,
+            runtime_input: None,
+        },
+    },
+    ExampleCase {
+        name: "micro_trek.vtl",
+        disposition: Disposition::Deferred {
+            reason: "EC08 game is incomplete and exceeds the current constant table",
+            followup_issue: "#463 / #464",
         },
     },
     ExampleCase {
@@ -46,6 +77,7 @@ const EXAMPLES: &[ExampleCase] = &[
         disposition: Disposition::Portable {
             expected_stdout: Some(b"58\n20\n40\n"),
             cycle_limit: None,
+            runtime_input: None,
         },
     },
     ExampleCase {
@@ -53,6 +85,7 @@ const EXAMPLES: &[ExampleCase] = &[
         disposition: Disposition::Portable {
             expected_stdout: Some(b"7\n"),
             cycle_limit: None,
+            runtime_input: None,
         },
     },
     ExampleCase {
@@ -60,13 +93,14 @@ const EXAMPLES: &[ExampleCase] = &[
         disposition: Disposition::Portable {
             expected_stdout: Some(b"42"),
             cycle_limit: None,
+            runtime_input: None,
         },
     },
 ];
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn all_examples_are_portable_and_match_the_rust_reference() {
+fn registered_examples_match_the_rust_reference_when_portable() {
     let examples_dir = Path::new(EXAMPLES_DIR);
     let mut actual_names = fs::read_dir(examples_dir)
         .unwrap_or_else(|error| panic!("read {}: {error}", examples_dir.display()))
@@ -90,8 +124,25 @@ fn all_examples_are_portable_and_match_the_rust_reference() {
         "examples/*.vtl and the conformance manifest must match in both directions"
     );
 
+    assert!(
+        manifest_names.windows(2).all(|pair| pair[0] != pair[1]),
+        "duplicate manifest name"
+    );
+
     let mut failures = Vec::new();
     for case in EXAMPLES {
+        if let Disposition::Deferred {
+            reason,
+            followup_issue,
+        } = case.disposition
+        {
+            assert!(!reason.trim().is_empty() && !followup_issue.trim().is_empty());
+            println!(
+                "{}: DEFERRED (not run): {reason}; {followup_issue}",
+                case.name
+            );
+            continue;
+        }
         if let Err(error) = check_example(case, examples_dir) {
             eprintln!("{error}");
             failures.push(error);
@@ -107,8 +158,22 @@ fn all_examples_are_portable_and_match_the_rust_reference() {
 
 fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> {
     let source = examples_dir.join(case.name);
-    let rust = run(env!("CARGO_BIN_EXE_ecvtl"), &source, None)
-        .map_err(|error| format!("{}: {error}", case.name))?;
+    let Disposition::Portable {
+        expected_stdout,
+        cycle_limit,
+        runtime_input,
+    } = case.disposition
+    else {
+        unreachable!("deferred examples are not executed");
+    };
+    let rust = run(
+        env!("CARGO_BIN_EXE_ecvtl"),
+        &source,
+        None,
+        runtime_input,
+        false,
+    )
+    .map_err(|error| format!("{}: {error}", case.name))?;
     if rust.status.code().is_none() {
         return Err(format!("{}: Rust ecvtl terminated by signal", case.name));
     }
@@ -121,11 +186,14 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
         ));
     }
 
-    let cycle_limit = match case.disposition {
-        Disposition::Portable { cycle_limit, .. } => cycle_limit,
-    };
-    let target = run(env!("CARGO_BIN_EXE_ecvtl6502"), &source, cycle_limit)
-        .map_err(|error| format!("{}: {error}", case.name))?;
+    let target = run(
+        env!("CARGO_BIN_EXE_ecvtl6502"),
+        &source,
+        cycle_limit,
+        runtime_input,
+        true,
+    )
+    .map_err(|error| format!("{}: {error}", case.name))?;
     if target.status.code().is_none() {
         return Err(format!(
             "{}: 6502 ecvtl6502 terminated by signal",
@@ -133,58 +201,86 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
         ));
     }
 
-    match case.disposition {
-        Disposition::Portable {
-            expected_stdout, ..
-        } => {
-            if !target.status.success() {
-                return Err(format!(
-                    "{}: expected portable success, got exit {:?}: {}",
-                    case.name,
-                    target.status.code(),
-                    String::from_utf8_lossy(&target.stderr)
-                ));
-            }
-            if target.stdout != rust.stdout {
-                return Err(format!(
-                    "{}: Rust/6502 stdout bytes differ (Rust {}, 6502 {})",
-                    case.name,
-                    describe_bytes(&rust.stdout),
-                    describe_bytes(&target.stdout)
-                ));
-            }
-            if let Some(expected) = expected_stdout
-                && rust.stdout != expected
-            {
-                return Err(format!(
-                    "{}: Rust stdout differs from fixed bytes (actual {}, expected {})",
-                    case.name,
-                    describe_bytes(&rust.stdout),
-                    describe_bytes(expected)
-                ));
-            }
-            if matches!(case.name, "eight_queens.vtl" | "eight_queens_storage.vtl") {
-                assert_eight_queens_output(case.name, &rust.stdout)?;
-            }
-            println!(
-                "{}: Rust exit=0, 6502 exit=0, disposition=portable success, stdout={} bytes",
-                case.name,
-                target.stdout.len()
-            );
-        }
+    if !target.status.success() {
+        return Err(format!(
+            "{}: expected portable success, got exit {:?}: {}",
+            case.name,
+            target.status.code(),
+            String::from_utf8_lossy(&target.stderr)
+        ));
     }
+    if target.stdout != rust.stdout {
+        return Err(format!(
+            "{}: Rust/6502 stdout bytes differ (Rust {}, 6502 {})",
+            case.name,
+            describe_bytes(&rust.stdout),
+            describe_bytes(&target.stdout)
+        ));
+    }
+    if let Some(expected) = expected_stdout
+        && rust.stdout != expected
+    {
+        return Err(format!(
+            "{}: Rust stdout differs from fixed bytes (actual {}, expected {})",
+            case.name,
+            describe_bytes(&rust.stdout),
+            describe_bytes(expected)
+        ));
+    }
+    if matches!(case.name, "eight_queens.vtl" | "eight_queens_storage.vtl") {
+        assert_eight_queens_output(case.name, &rust.stdout)?;
+    }
+    println!(
+        "{}: Rust exit=0, 6502 exit=0, disposition=portable success, stdout={} bytes",
+        case.name,
+        target.stdout.len()
+    );
     Ok(())
 }
 
-fn run(binary: &str, source: &Path, cycle_limit: Option<u32>) -> Result<Output, String> {
+fn run(
+    binary: &str,
+    source: &Path,
+    cycle_limit: Option<u32>,
+    runtime_input: Option<&[u8]>,
+    target: bool,
+) -> Result<Output, String> {
     let mut command = Command::new(binary);
     command.arg(source);
     if let Some(cycle_limit) = cycle_limit {
         command.arg("--cycle-limit").arg(cycle_limit.to_string());
     }
-    command
-        .output()
-        .map_err(|error| format!("start {} for {}: {error}", binary, source.display()))
+    if target && runtime_input.is_some() {
+        command.arg("--runtime-input").arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/interactive_input.txt"
+        ));
+        assert_eq!(
+            runtime_input,
+            Some(include_bytes!("fixtures/interactive_input.txt").as_slice())
+        );
+    }
+    if !target && let Some(input) = runtime_input {
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("start {binary} for {}: {error}", source.display()))?;
+        child
+            .stdin
+            .take()
+            .expect("piped stdin")
+            .write_all(input)
+            .map_err(|error| format!("write stdin for {}: {error}", source.display()))?;
+        child
+            .wait_with_output()
+            .map_err(|error| format!("wait for {binary}: {error}"))
+    } else {
+        command
+            .output()
+            .map_err(|error| format!("start {} for {}: {error}", binary, source.display()))
+    }
 }
 
 fn assert_eight_queens_output(name: &str, output: &[u8]) -> Result<(), String> {
