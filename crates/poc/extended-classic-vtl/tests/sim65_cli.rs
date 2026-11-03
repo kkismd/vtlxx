@@ -1,8 +1,10 @@
 use std::fs;
+use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::mpsc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 type RuntimeInputCase = (&'static str, &'static [u8], &'static [u8], &'static [u8]);
@@ -74,6 +76,12 @@ fn help_and_argument_errors_do_not_need_cc65() {
     assert!(help.status.success());
     assert!(String::from_utf8_lossy(&help.stdout).contains("--runtime-input"));
     assert!(String::from_utf8_lossy(&help.stdout).contains("--cycle-limit"));
+    assert!(String::from_utf8_lossy(&help.stdout).contains("--interactive"));
+
+    let conflict = run_cli(&["source.vtl", "--interactive", "--runtime-input", "input"]);
+    assert_eq!(conflict.status.code(), Some(2));
+    assert!(conflict.stdout.is_empty());
+    assert!(!conflict.stderr.is_empty());
 
     let invalid = run_cli(&["--unknown"]);
     assert!(!invalid.status.success());
@@ -266,4 +274,205 @@ fn compile_stack_201_byte_fixture_matches_reference() {
     assert_eq!(target.status.code(), reference.status.code(), "{target:?}");
     assert_eq!(reference.stdout, b"0");
     assert_eq!(target.stdout, reference.stdout);
+}
+
+// A timeout must also clean up a stuck CLI, so failing streaming tests cannot
+// leave a child running or wait forever for its output.
+struct TimedChild(Child);
+
+impl Drop for TimedChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn wait_bounded(child: &mut Child) -> std::process::ExitStatus {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        assert!(Instant::now() < deadline, "interactive CLI timed out");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn interactive_prompts_are_visible_before_each_input() {
+    let temp = TestDir::new();
+    let source = temp.0.join("prompt.vtl");
+    fs::write(&source, b"$=62 $=32 A=$ ?=A $=62 $=32 B=$ ?=B").unwrap();
+    let mut child = TimedChild(
+        Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+            .arg(&source)
+            .arg("--interactive")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stdout = child.0.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut byte = [0];
+        while let Ok(1) = stdout.read(&mut byte) {
+            if tx.send(byte[0]).is_err() {
+                break;
+            }
+        }
+    });
+    let receive = |expected: &[u8]| {
+        for &byte in expected {
+            assert_eq!(rx.recv_timeout(Duration::from_secs(20)).unwrap(), byte);
+        }
+    };
+    receive(b"> ");
+    let mut stdin = child.0.stdin.take().unwrap();
+    stdin.write_all(b"A").unwrap();
+    receive(b"65> ");
+    stdin.write_all(b"B").unwrap();
+    receive(b"66");
+    assert!(wait_bounded(&mut child.0).success());
+    assert!(rx.recv_timeout(Duration::from_secs(2)).is_err());
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn interactive_input_bytes_eof_and_output_match_batch() {
+    let temp = TestDir::new();
+    let source_bytes = b"A=$ B=$ C=$ D=$ ?=A ?=B ?=C ?=D";
+    let input = [0, 0x7f, 0x80, 0xff];
+    let batch = run_program_with_input(&temp, "batch-comparison", source_bytes, &input);
+    assert!(batch.status.success(), "{:?}", batch.stderr);
+    let source = temp.0.join("interactive-comparison.vtl");
+    fs::write(&source, source_bytes).unwrap();
+    let mut child = TimedChild(
+        Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+            .arg(&source)
+            .arg("--interactive")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    child.0.stdin.take().unwrap().write_all(&input).unwrap();
+    assert!(wait_bounded(&mut child.0).success());
+    let mut actual = Vec::new();
+    child
+        .0
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_end(&mut actual)
+        .unwrap();
+    assert_eq!(actual, batch.stdout);
+    assert_eq!(actual, b"127128255-1");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn interactive_early_exit_compile_failure_and_cycle_limit() {
+    let temp = TestDir::new();
+    let source = temp.0.join("early.vtl");
+    fs::write(&source, b"?=42").unwrap();
+    let mut child = TimedChild(
+        Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+            .arg(&source)
+            .arg("--interactive")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    // Keep stdin open throughout: the child must not wait for an input EOF.
+    assert!(wait_bounded(&mut child.0).success());
+    let mut output = Vec::new();
+    child
+        .0
+        .stdout
+        .take()
+        .unwrap()
+        .read_to_end(&mut output)
+        .unwrap();
+    assert_eq!(output, b"42");
+
+    let limited = Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+        .arg(&source)
+        .args(["--interactive", "--cycle-limit", "1"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!limited.status.success());
+    assert!(limited.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&limited.stderr).contains("cycle limit"));
+
+    fs::write(&source, b"A=").unwrap();
+    let invalid = Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+        .arg(&source)
+        .arg("--interactive")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!invalid.status.success());
+    assert!(invalid.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("compilation failed"));
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn interactive_cycle_limit_arguments_are_forwarded_only_when_requested() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let temp = TestDir::new();
+    let source = temp.0.join("arguments.vtl");
+    let log = temp.0.join("sim65-args");
+    let wrapper = temp.0.join("sim65");
+    fs::write(&source, b"A=1").unwrap();
+    let real = Command::new("which").arg("sim65").output().unwrap();
+    assert!(real.status.success());
+    let real = String::from_utf8(real.stdout).unwrap();
+    fs::write(
+        &wrapper,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SIM65_ARGS_LOG\"\nexec '{}' \"$@\"\n",
+            real.trim().replace('\'', "'\\''")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(temp.0.clone())
+            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
+    for (extra, expected) in [
+        (vec!["--interactive"], None),
+        (
+            vec!["--interactive", "--cycle-limit", "4000000"],
+            Some("4000000"),
+        ),
+        (vec![], Some("4000000")),
+    ] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+            .arg(&source)
+            .args(extra)
+            .env("PATH", &path)
+            .env("SIM65_ARGS_LOG", &log)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        let args = fs::read_to_string(&log).unwrap();
+        let args: Vec<_> = args.lines().collect();
+        match expected {
+            Some(limit) => assert!(args.windows(2).any(|w| w == ["-x", limit]), "{args:?}"),
+            None => assert!(!args.contains(&"-x"), "{args:?}"),
+        }
+    }
 }
