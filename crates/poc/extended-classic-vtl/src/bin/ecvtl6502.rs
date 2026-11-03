@@ -1,20 +1,22 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_CYCLE_LIMIT: u32 = 4_000_000;
 const MAX_SOURCE_LEN: usize = u16::MAX as usize;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
-const USAGE: &str = "Usage: ecvtl6502 <source.vtl> [--runtime-input <path>] [--cycle-limit <cycles>]\n\
+const USAGE: &str = "Usage: ecvtl6502 <source.vtl> [--runtime-input <path> | --interactive] [--cycle-limit <cycles>]\n\
 Compile ECVTL source with the NMOS 6502 target and run it with sim65.\n\
 Options:\n\
   --runtime-input <path>  Supply raw runtime input bytes\n\
-  --cycle-limit <cycles>  Set sim65 cycle limit (default: 4000000)\n\
+  --interactive           Connect runtime input and output to standard I/O\n\
+  --cycle-limit <cycles>  Set sim65 cycle limit (default: 4000000; unlimited in interactive mode)\n\
   -h, --help              Show this help\n";
 
 struct TempDir(PathBuf);
@@ -50,7 +52,8 @@ impl Drop for TempDir {
 struct Arguments {
     source: PathBuf,
     runtime_input: Option<PathBuf>,
-    cycle_limit: u32,
+    cycle_limit: Option<u32>,
+    interactive: bool,
 }
 
 #[derive(Debug)]
@@ -63,13 +66,19 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
     let mut args = args.into_iter();
     let mut source = None;
     let mut runtime_input = None;
-    let mut cycle_limit = DEFAULT_CYCLE_LIMIT;
+    let mut cycle_limit = None;
+    let mut interactive = false;
     let mut cycle_limit_seen = false;
     while let Some(arg) = args.next() {
         if arg == "-h" || arg == "--help" {
             return Ok(ParsedArguments::Help);
         }
-        if arg == "--runtime-input" {
+        if arg == "--interactive" {
+            if interactive {
+                return Err("--interactive may be specified only once".into());
+            }
+            interactive = true;
+        } else if arg == "--runtime-input" {
             if runtime_input.is_some() {
                 return Err("--runtime-input may be specified only once".into());
             }
@@ -91,23 +100,31 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
             if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
                 return Err("--cycle-limit requires a positive decimal integer".into());
             }
-            cycle_limit = value
+            let parsed_limit = value
                 .parse::<u32>()
                 .map_err(|_| "--cycle-limit is outside the supported range".to_string())?;
-            if cycle_limit == 0 {
+            if parsed_limit == 0 {
                 return Err("--cycle-limit must be greater than zero".into());
             }
+            cycle_limit = Some(parsed_limit);
         } else if arg.to_string_lossy().starts_with('-') {
             return Err(format!("unknown option: {}", arg.to_string_lossy()));
         } else if source.replace(PathBuf::from(arg)).is_some() {
             return Err("exactly one source file is supported".into());
         }
     }
+    if interactive && runtime_input.is_some() {
+        return Err("--interactive and --runtime-input are mutually exclusive".into());
+    }
+    if !interactive && cycle_limit.is_none() {
+        cycle_limit = Some(DEFAULT_CYCLE_LIMIT);
+    }
     let source = source.ok_or_else(|| "a source file path is required".to_string())?;
     Ok(ParsedArguments::Run(Arguments {
         source,
         runtime_input,
         cycle_limit,
+        interactive,
     }))
 }
 
@@ -157,7 +174,11 @@ fn require_success(stage: &str, tool: &str, output: &Output) -> Result<(), Strin
     ))
 }
 
-fn build_and_run(input: &[u8], cycle_limit: u32) -> Result<Output, String> {
+fn build_and_run(
+    input: &[u8],
+    cycle_limit: Option<u32>,
+    interactive: bool,
+) -> Result<Output, String> {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         "6502/target/sim65_cli.s",
@@ -208,16 +229,64 @@ fn build_and_run(input: &[u8], cycle_limit: u32) -> Result<Output, String> {
     let output = run_tool("ld65", "link", &link_args, &[])?;
     require_success("link", "ld65", &output)?;
 
-    run_tool(
-        "sim65",
-        "execute",
-        &[
-            OsStr::new("-x"),
-            OsStr::new(&cycle_limit.to_string()),
-            executable.as_os_str(),
-        ],
-        input,
-    )
+    let mut command = Command::new("sim65");
+    if let Some(limit) = cycle_limit {
+        command.arg("-x").arg(limit.to_string());
+    }
+    command.arg(&executable);
+    if !interactive {
+        let mut args = Vec::new();
+        let limit = cycle_limit.map(|n| n.to_string());
+        if let Some(ref limit) = limit {
+            args.extend([OsStr::new("-x"), OsStr::new(limit)]);
+        }
+        args.push(executable.as_os_str());
+        return run_tool("sim65", "execute", &args, input);
+    }
+    let mut child = command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("execute: could not start sim65: {error}"))?;
+    let mut child_stdin = child.stdin.take().expect("piped stdin");
+    let frame = input.to_vec();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        let result = (|| -> Result<(), String> {
+            let write = |error: io::Error| {
+                if error.kind() == io::ErrorKind::BrokenPipe {
+                    None
+                } else {
+                    Some(format!("write sim65 stdin: {error}"))
+                }
+            };
+            if let Err(error) = child_stdin.write_all(&frame) {
+                return write(error).map_or(Ok(()), Err);
+            }
+            let mut input = io::stdin().lock();
+            let mut buffer = [0; 4096];
+            loop {
+                let count = input
+                    .read(&mut buffer)
+                    .map_err(|error| format!("read stdin: {error}"))?;
+                if count == 0 {
+                    return Ok(());
+                }
+                if let Err(error) = child_stdin.write_all(&buffer[..count]) {
+                    return write(error).map_or(Ok(()), Err);
+                }
+            }
+        })();
+        let _ = sender.send(result);
+    });
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("execute: could not collect sim65 output: {error}"))?;
+    if let Ok(Err(error)) = receiver.try_recv() {
+        return Err(format!("execute: {error}"));
+    }
+    Ok(output)
 }
 
 fn execute(arguments: Arguments) -> Result<Output, String> {
@@ -229,7 +298,7 @@ fn execute(arguments: Arguments) -> Result<Output, String> {
         None => Vec::new(),
     };
     let input = frame_input(&source, &runtime_input)?;
-    build_and_run(&input, arguments.cycle_limit)
+    build_and_run(&input, arguments.cycle_limit, arguments.interactive)
 }
 
 fn report_simulation_failure(output: &Output) -> (i32, String) {
@@ -374,17 +443,41 @@ mod tests {
         .unwrap()
         {
             ParsedArguments::Run(arguments) => {
-                assert_eq!(arguments.cycle_limit, 256_000_000);
+                assert_eq!(arguments.cycle_limit, Some(256_000_000));
                 assert_eq!(arguments.runtime_input, Some(PathBuf::from("input.bin")));
             }
             ParsedArguments::Help => panic!("expected run arguments"),
         }
         match parse_arguments(["source.vtl".into()]).unwrap() {
             ParsedArguments::Run(arguments) => {
-                assert_eq!(arguments.cycle_limit, DEFAULT_CYCLE_LIMIT);
+                assert_eq!(arguments.cycle_limit, Some(DEFAULT_CYCLE_LIMIT));
             }
             ParsedArguments::Help => panic!("expected run arguments"),
         }
+        match parse_arguments(["source.vtl".into(), "--interactive".into()]).unwrap() {
+            ParsedArguments::Run(arguments) => {
+                assert!(arguments.interactive);
+                assert_eq!(arguments.cycle_limit, None);
+            }
+            ParsedArguments::Help => panic!("expected run arguments"),
+        }
+        assert!(
+            parse_arguments([
+                "source.vtl".into(),
+                "--interactive".into(),
+                "--runtime-input".into(),
+                "input".into()
+            ])
+            .is_err()
+        );
+        assert!(
+            parse_arguments([
+                "source.vtl".into(),
+                "--interactive".into(),
+                "--interactive".into()
+            ])
+            .is_err()
+        );
     }
 
     #[test]

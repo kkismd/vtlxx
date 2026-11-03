@@ -72,7 +72,15 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
   path/to/program.vtl --runtime-input path/to/input.bin
 ```
 
-sim65 の実行上限は既定で 4,000,000 cycles です。必要な実行でのみ `--cycle-limit` に正の10進数を指定できます。
+端末で対話するには `--interactive` を指定します。prompt は改行がなくても表示され、通常の端末設定では文字の後に Enter を押して入力します。プログラムが用意する終了操作で終了でき、Ctrl-C でも中断できます。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- path/to/program.vtl --interactive
+```
+
+対話モードの stdin は pipe や file にも接続できます。再現可能な入力を使う一括実行には `--runtime-input path/to/input.bin` を使えます。このオプションと `--interactive` は併用できません。対話モードでは stdout を逐次出力します。
+
+sim65 の実行上限は一括モードでは既定で 4,000,000 cycles、対話モードでは無制限です。どちらのモードでも `--cycle-limit` に正の10進数を指定できます。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
