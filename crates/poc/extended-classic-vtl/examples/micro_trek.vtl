@@ -22,6 +22,18 @@
 .PRNG_INCREMENT := 13849
 .OBSERVED_FLAG := 1000
 .ENEMY_HP := 300
+.ASCII_TAB := 9
+.ASCII_LF := 10
+.ASCII_CR := 13
+.ASCII_SPACE := 32
+.ASCII_PLUS := 43
+.ASCII_MINUS := 45
+.ASCII_ZERO := 48
+.ASCII_NINE := 57
+.INT_PREFIX := -3276
+.PARSE_VALID := 1
+.PARSE_INVALID := 0
+.PARSE_EOF := -1
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -110,6 +122,63 @@
     r=8 A=~ @=.QUADRANT_Y,A
     @=.SHIP_X,@(.QUADRANT_Y) @=.SHIP_Y,@(.QUADRANT_X)
     q=()
+  ]
+
+; Decimal line parser ( -- value status ). No storage writes or callees;
+; scratch A..H are caller-saved. B is leading/sign/digits/trailing/CR/invalid
+; (0..5), C is negative, D accumulates negatively, E records any input.
+  &=n [
+    B=0 C=0 D=0 E=0 F=1
+    *=F [
+      A=$
+      %=(A==.ASCII_LF)+(A==.PARSE_EOF) [
+        F=0
+      ] [
+        E=1 H=B
+        %=H==4 [ B=5 ]
+        %=(H<4)*(A==.ASCII_CR) [
+          B=5
+          %=(H==2)+(H==3) [ B=4 ]
+        ] [
+          %=(H==0)+(H==1) [
+            %=(A==.ASCII_SPACE)+(A==.ASCII_TAB) [
+              %=H==1 [ B=5 ]
+            ] [
+              %=(A==.ASCII_PLUS)+(A==.ASCII_MINUS) [
+                B=5
+                %=H==0 [ B=1 C=A==.ASCII_MINUS ]
+              ] [
+                B=5
+                %=(A>=.ASCII_ZERO)*(A<=.ASCII_NINE) [
+                  B=2 D=.ASCII_ZERO-A
+                ]
+              ]
+            ]
+          ]
+          %=H==2 [
+            %=(A==.ASCII_SPACE)+(A==.ASCII_TAB) [ B=3 ] [
+              B=5
+              %=(A>=.ASCII_ZERO)*(A<=.ASCII_NINE) [
+                G=A-.ASCII_ZERO
+                %=(D>.INT_PREFIX)+((D==.INT_PREFIX)*(G<=(7+C))) [
+                  D=(D*10)-G B=2
+                ]
+              ]
+            ]
+          ]
+          %=H==3 [
+            %=(A!=.ASCII_SPACE)*(A!=.ASCII_TAB) [ B=5 ]
+          ]
+        ]
+      ]
+    ]
+    %=(B==2)+(B==3)+(B==4) [
+      %=C==0 [ D=0-D ]
+      ~=D ~=.PARSE_VALID
+    ] [
+      ~=0
+      %=(A==.PARSE_EOF)*(E==0) [ ~=.PARSE_EOF ] [ ~=.PARSE_INVALID ]
+    ]
   ]
 
 ; EC08_TEST_DEFINITIONS_END
