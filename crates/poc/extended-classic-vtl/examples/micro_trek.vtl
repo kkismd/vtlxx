@@ -34,6 +34,11 @@
 .PARSE_VALID := 1
 .PARSE_INVALID := 0
 .PARSE_EOF := -1
+.COURSE_MAX := 360
+.COURSE_STEP := 90
+.COURSE_SCALE := 45
+.COURSE_VALID := 1
+.COURSE_EOF := -1
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -179,6 +184,25 @@
       ~=0
       %=(A==.PARSE_EOF)*(E==0) [ ~=.PARSE_EOF ] [ ~=.PARSE_INVALID ]
     ]
+  ]
+
+; Course input ( -- dx dy status ). Direct scratch A..F; n adds G, H.
+; No storage writes; input and COURSE prompt are the only effects.
+  &=c [
+  ^=1
+    ?="COURSE: "
+    n=()
+    B=~ A=~
+    %=B==.PARSE_EOF [ ~=0 ~=0 ~=.COURSE_EOF #=2 ]
+    %=(B!=.PARSE_VALID)+(A<0)+(A>.COURSE_MAX) [ #=1 ]
+    C=(A+.COURSE_SCALE)/.COURSE_STEP
+    D=A-(C*.COURSE_STEP)
+    %=((C==0)+(C==4)) [ E=0-.COURSE_SCALE F=D ]
+    %=C==1 [ E=D F=.COURSE_SCALE ]
+    %=C==2 [ E=.COURSE_SCALE F=0-D ]
+    %=C==3 [ E=0-D F=0-.COURSE_SCALE ]
+    ~=E ~=F ~=.COURSE_VALID
+  ^=2
   ]
 
 ; EC08_TEST_DEFINITIONS_END
