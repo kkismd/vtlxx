@@ -122,7 +122,14 @@ fe_compile_run:
     jeq source_error
     cmp #2
     beq @complete
+    lda look_byte
+    cmp #'.'
+    beq @definition
     jsr statement
+    jmp @checked
+@definition:
+    jsr fe_definition
+@checked:
     lda fe_compile_status
     bne @failed
     lda cc_status
@@ -386,9 +393,6 @@ skip_separators:
 
 statement:
     compile_stack_guard
-    lda look_byte
-    cmp #'='
-    jeq fe_definition
     lda look_byte
     sta target_index
     jsr take
@@ -1355,20 +1359,12 @@ fe_label:
 @done:
     rts
 
-; Top-level `==NAME,value`. The table is compile-run local and never emitted.
+; Top-level `.NAME := value`. The table is compile-run local and never emitted.
 fe_definition:
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne syntax_error
-    lda look_byte
-    cmp #'='
-    jne syntax_error
     jsr take
     jsr scan_constant_name
     lda fe_compile_status
-    bne @definition_done
+    jne @definition_done
     jsr constant_find
     bcc :+
     jmp syntax_error             ; duplicate
@@ -1378,7 +1374,23 @@ fe_definition:
     bcc :+
     jmp syntax_error
 :
-    jsr expect_comma
+    jsr skip_horizontal
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #':'
+    jne syntax_error
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'='
+    jne syntax_error
+    jsr take
+    jsr skip_horizontal
     lda fe_compile_status
     bne @definition_done
     jsr peek
@@ -1418,6 +1430,23 @@ fe_definition:
 @definition_done:
     rts
 
+; Consume only space and tab; a newline cannot occur inside a declaration.
+skip_horizontal:
+    jsr peek
+    lda look_state
+    cmp #1
+    bne @done
+    lda look_byte
+    cmp #' '
+    beq @skip
+    cmp #9
+    bne @done
+@skip:
+    jsr take
+    jmp skip_horizontal
+@done:
+    rts
+
 expect_comma:
     jsr peek
     lda look_state
@@ -1443,6 +1472,9 @@ resolve_label_operand:
     cmp #'9'+1
     bcc @decimal
 @named:
+    cmp #'.'
+    jne syntax_error
+    jsr take
     jsr scan_constant_name
     lda fe_compile_status
     bne @done
@@ -1758,6 +1790,8 @@ value:
 @minus:
     cmp #'-'
     jeq @literal
+    cmp #'.'
+    jeq @named
     cmp #'A'
     bcc @applied
     cmp #'Z'+1
@@ -1766,31 +1800,12 @@ value:
     sbc #'A'
     pha
     jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    bne @register
-    lda look_byte
-    cmp #'A'
-    bcc @name_digit
-    cmp #'Z'+1
-    bcc @named
-@name_digit:
-    lda look_byte
-    cmp #'0'
-    bcc @register
-    cmp #'9'+1
-    bcc @named
-    cmp #'_'
-    bne @register
-@named:
     pla
-    clc
-    adc #'A'
-    sta constant_name
-    lda #1
-    sta constant_length
-    jsr scan_constant_tail
+    tax
+    jmp cc_load_reg
+@named:
+    jsr take
+    jsr scan_constant_name
     lda fe_compile_status
     beq :+
     jmp @done
@@ -1803,10 +1818,6 @@ value:
     lda literal
     ldx literal+1
     jmp cc_push_const
-@register:
-    pla
-    tax
-    jmp cc_load_reg
 @applied:
     cmp #'@'
     jne syntax_error

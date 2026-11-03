@@ -211,6 +211,117 @@ fn template_runs_without_test_sentinel_and_compile_failure_is_nonzero() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn dotted_constants_compile_and_execute_in_source_order() {
+    let temp = TestDir::new();
+    let cases: &[(&str, &str, &[u8])] = &[
+        (
+            "forms",
+            "A=1 .MAX:=16 .MIN:=-1 B=.MAX C=.MIN ?=A ?=B ?=C",
+            b"116-1",
+        ),
+        (
+            "whitespace",
+            "; comment\r\n \t.AB \t:=\t-1; comment\r\n.ABCDEFGHIJKLMNOP:=32767 .LOW:=-32768 ?=.AB ?=.ABCDEFGHIJKLMNOP ?=.LOW",
+            b"-132767-32768",
+        ),
+        (
+            "arithmetic",
+            ".TWO:=2 .NEG:=-1 .TWO3:=23 A=.TWO+.TWO B=1+.TWO C=.NEG D=.TWO3 ?=A ?=B ?=C ?=D ?=(A==4) ?=(B!=2)",
+            b"43-12311",
+        ),
+        (
+            "storage-control",
+            ".ADDR:=5 .LIMIT:=3 .VALUE:=7 @=.ADDR,.VALUE A=@(.ADDR) %=A==.VALUE [ ?=A ] B=0 *=B<.LIMIT [ B=B+1 ] ?=B",
+            b"73",
+        ),
+        (
+            "labels-procedure",
+            ".LOOP:=1 .INNER:=4 &=p [ ?=.INNER ] A=0 ^=.LOOP A=A+1 %=A<3 [ #=.LOOP ] p=() ?=A",
+            b"43",
+        ),
+        (
+            "template",
+            ".GAINA:=2 .BIASA:=1 &=t{} [ {}={}*.GAIN{} {}={}+.BIAS{} ] A=3 t{A}=() ?=A ?=\".GAINA\" B=7 ?=B",
+            b"7.GAINA7",
+        ),
+        (
+            "template-operand",
+            ".GAINA:=2 .INIT:=3 &=t{} [ {}={}*.GAIN{} ] A=1 t{A}=(.INIT+1) ?=A B=9 ?=B",
+            b"29",
+        ),
+        ("same-value", ".FOO:=2 .BAR:=2 ?=.FOO ?=.BAR", b"22"),
+    ];
+    for &(name, source, expected) in cases {
+        assert_runtime_input_output(&temp, name, source.as_bytes(), b"", expected);
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn dotted_constant_errors_do_not_start_runtime() {
+    let temp = TestDir::new();
+    let cases = [
+        "==OLD,1",
+        "A=MAX",
+        "^=LOOP",
+        "#=LOOP",
+        ". NAME:=1",
+        ".MAX : =1",
+        ".MAX\n:=16",
+        ".MAX:=\n16",
+        ".MAX:=16A=1",
+        ".MAX:=16.NEXT:=2",
+        ".MAX:=16+2",
+        ".A:=1",
+        ".lower:=1",
+        ".ABCDEFGHIJKLMNOPQ:=1",
+        ".MAX:=32768",
+        ".MAX:=-32769",
+        ".MAX:=+1",
+        ".MAX:=1,2",
+        ".OTHER:=1 .MAX:=.OTHER",
+        ".DUP:=1 .DUP:=2",
+        "A=.LATER .LATER:=1",
+        ".MAX:=2 A=.MAXIMUM",
+        "A=.MISSING",
+        "A=.A",
+        "A=..MAX",
+        "A=.max",
+        ".NEG:=-1 ^=.NEG",
+        ".NEG:=-1 #=.NEG",
+        "&=p [ .INNER:=1 A=.INNER ]",
+        "%=1 [ .INNER:=1 ]",
+        "*=0 [ .INNER:=1 ]",
+        "&=p [ ==INNER,1 ]",
+        "%=1 [ ==INNER,1 ]",
+        "*=0 [ ==INNER,1 ]",
+        "&=t{} [ .INNER:=1 ]",
+        ".TWO:=2 A=1.TWO",
+        ".TWO:=2 A=.TWO.TWO",
+        ".NEG:=-1 A=1.NEG",
+        ".TWO:=2 A=.TWO3",
+        ".A0:=0 .A1:=1 .A2:=2 .A3:=3 .A4:=4 .A5:=5 .A6:=6 .A7:=7 .A8:=8 .A9:=9 .B0:=0 .B1:=1 .B2:=2 .B3:=3 .B4:=4 .B5:=5 .B6:=6",
+        ".GAINA:=2 &=t{} [ {}={}*.GAIN{} ] t{A}=() A=.MISSING",
+    ];
+    for (index, source) in cases.iter().enumerate() {
+        let source = format!("?=42 {source}");
+        let result = run_program_with_input(
+            &temp,
+            &format!("constant-error-{index}"),
+            source.as_bytes(),
+            b"",
+        );
+        assert!(!result.status.success(), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("compilation failed"),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn p0a_template_calibration_example_matches_reference_output_bytes() {
     let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("examples/p0a_template_calibration.vtl");

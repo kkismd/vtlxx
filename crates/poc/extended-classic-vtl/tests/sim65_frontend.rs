@@ -144,6 +144,40 @@ fn expect(source: &str, status: i32, output: &[u8]) {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn invalid_constant_does_not_publish_a_partial_entry() {
+    let basic =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("6502/frontend/basic.s"))
+            .unwrap();
+    let basic = basic.replacen(
+        "@failed:\n    ; Abort only an active temporary source save.",
+        "@failed:\n    lda constant_count\n    cmp #1\n    beq :+\n    lda #99\n    jmp halt\n:\n    ; Abort only an active temporary source save.",
+        1,
+    );
+    for invalid in [
+        ".BAD:=1+2",
+        ".BAD:=32768",
+        ".BAD:=1A=2",
+        ".GOOD:=2",
+        ".BAD :=",
+    ] {
+        let source = format!(".GOOD:=1 {invalid}");
+        let mut input = (source.len() as u16).to_le_bytes().to_vec();
+        input.extend_from_slice(source.as_bytes());
+        let result = build_and_run_custom(
+            &input,
+            "tests/fixtures/sim65/frontend_basic.s",
+            Some(&basic),
+        );
+        assert!(
+            matches!(result.status.code(), Some(2 | 3)),
+            "{source}: {result:?}"
+        );
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn basic_source_compiles_and_executes() {
     expect("", 0, b"Z");
     expect("A=40", 0, b"Z");
@@ -164,7 +198,7 @@ fn basic_source_compiles_and_executes() {
     expect("&=p [ ] &=q [ ] p=() q=()", 0, b"Z");
     expect("&=p [ ?=1 ] &=q [ ?=2 ] q=() p=()", 0, b"21Z");
     expect("&=p [ ?=1 ] &=q [ p=() ] q=()", 0, b"1Z");
-    expect("==VALUE,42 &=p [ ?=VALUE ] p=()", 0, b"42Z");
+    expect(".VALUE:=42 &=p [ ?=.VALUE ] p=()", 0, b"42Z");
     expect("~=42 &=p [ ] p=~ ?=~", 0, b"42Z");
     expect("A=0 &=p [ A=A+1 ] p=() ?=A", 0, b"1Z");
     expect("&=p [ %=1 [ ?=7 ] ] p=()", 0, b"7Z");
@@ -199,7 +233,7 @@ fn basic_source_compiles_and_executes() {
     expect("A=0 *=A<4 [ A=A+1 ] ?=A", 0, b"4Z");
     expect("A=1 *=A [ A=0 ] ?=A", 0, b"0Z");
     expect("A=-2 *=A [ A=A+1 ] ?=A", 0, b"0Z");
-    expect("==LIMIT,3 A=0 *=(A<LIMIT) [ A=A+1 ] ?=A", 0, b"3Z");
+    expect(".LIMIT:=3 A=0 *=(A<.LIMIT) [ A=A+1 ] ?=A", 0, b"3Z");
     expect("A=0 *=A<3*2 [ A=A+1 ] ?=A*4", 0, b"12Z");
     expect("~=1 *=~ [ A=1 ~=0 ] ?=A", 0, b"1Z");
     expect("~=2 *=~-1 [ ~=1 ] ?=A", 0, b"0Z");
@@ -210,7 +244,7 @@ fn basic_source_compiles_and_executes() {
     expect("A=0 *=A<2 [ %=1 [ A=A+1 ] ] ?=A", 0, b"2Z");
     expect("A=0 %=1 [ *=A<2 [ A=A+1 ] ] ?=A", 0, b"2Z");
     expect("A=0 *=A<2 [ A=A+1 *=0 [ A=99 ] ] ?=A", 0, b"2Z");
-    expect("==VALUE,42 %=1 [ ?=VALUE ]", 0, b"42Z");
+    expect(".VALUE:=42 %=1 [ ?=.VALUE ]", 0, b"42Z");
     expect("%=1 [ #=2 ?=1 ^=2 ?=8 ]", 0, b"8Z");
     let nested_16 = format!("{}?=9{}", "%=1 [ ".repeat(16), " ]".repeat(16));
     expect(&nested_16, 0, b"9Z");
@@ -233,28 +267,28 @@ fn basic_source_compiles_and_executes() {
     expect("?=2==2 ?=2!=3 ?=2<3 ?=2<=2 ?=3>2 ?=3>=3", 0, b"111111Z");
     expect("?=2==3 ?=2!=2 ?=3<2 ?=3<=2 ?=2>3 ?=2>=3", 0, b"000000Z");
     expect("?=7/2 ?=7%2 ?=3-8", 0, b"31-5Z");
-    expect("==BOARD_BASE,16 A=BOARD_BASE+2 ?=A", 0, b"18Z");
-    expect("==NEG_ONE,-1 A=NEG_ONE ?=A", 0, b"-1Z");
+    expect(".BOARD_BASE:=16 A=.BOARD_BASE+2 ?=A", 0, b"18Z");
+    expect(".NEG_ONE:=-1 A=.NEG_ONE ?=A", 0, b"-1Z");
     // The first jump reaches END; the later backward jump is compiled and
     // patched but remains unreachable, keeping this fixture finite.
     expect(
-        "==LOOP,1 ==END,2 A=LOOP #=END ^=LOOP #=LOOP ^=END ?=A",
+        ".LOOP:=1 .END:=2 A=.LOOP #=.END ^=.LOOP #=.LOOP ^=.END ?=A",
         0,
         b"1Z",
     );
     expect("#=32767 ^=32767 #=0 ^=0 ?=7", 0, b"7Z");
     expect(
-        "==SAME_ONE,1 ==SAME_TWO,1 A=SAME_ONE+SAME_TWO ?=A",
+        ".SAME_ONE:=1 .SAME_TWO:=1 A=.SAME_ONE+.SAME_TWO ?=A",
         0,
         b"2Z",
     );
-    expect("==ABCDEFGHIJKLMNOP,32767 ?=ABCDEFGHIJKLMNOP", 0, b"32767Z");
+    expect(".ABCDEFGHIJKLMNOP:=32767 ?=.ABCDEFGHIJKLMNOP", 0, b"32767Z");
     expect(
-        "==C0,100 ==C1,101 ==C2,102 ==C3,103 ==C4,104 ==C5,105 ==C6,106 ==C7,107 ==C8,108 ==C9,109 ==C10,110 ==C11,111 ==C12,112 ==C13,113 ==ABCDEFGHIJKLMNOP,114 ==C15,115 ?=C0 ?=C7 ?=C13 ?=ABCDEFGHIJKLMNOP ?=C15",
+        ".C0:=100 .C1:=101 .C2:=102 .C3:=103 .C4:=104 .C5:=105 .C6:=106 .C7:=107 .C8:=108 .C9:=109 .C10:=110 .C11:=111 .C12:=112 .C13:=113 .ABCDEFGHIJKLMNOP:=114 .C15:=115 ?=.C0 ?=.C7 ?=.C13 ?=.ABCDEFGHIJKLMNOP ?=.C15",
         0,
         b"100107113114115Z",
     );
-    expect("==ZERO,0 ?=2==2", 0, b"1Z");
+    expect(".ZERO:=0 ?=2==2", 0, b"1Z");
     expect("A=1 ; a comment\n\tA=A+1 ?=A", 0, b"2Z");
     let long_source = format!("{}?=42", " ".repeat(254));
     expect(&long_source, 0, b"42Z");
@@ -285,17 +319,17 @@ fn malformed_source_never_starts_runtime() {
         "?=7 A=",
         "?=1 ?=",
         "A=1+z",
-        "A=BEFORE\n==BEFORE,1",
-        "==DUP,1 ==DUP,2",
-        "==A,1",
-        "==aB,1",
-        "==AB$,1",
-        "==ABCDEFGHIJKLMNOPQ,1",
-        "==LOW,-32769",
-        "==HIGH,32768",
-        "==EXPR,1+2",
-        "==REF,OTHER",
-        "==C0,0 ==C1,1 ==C2,2 ==C3,3 ==C4,4 ==C5,5 ==C6,6 ==C7,7 ==C8,8 ==C9,9 ==C10,10 ==C11,11 ==C12,12 ==C13,13 ==C14,14 ==C15,15 ==C16,16",
+        "A=.BEFORE\n.BEFORE:=1",
+        ".DUP:=1 .DUP:=2",
+        ".A:=1",
+        ".aB:=1",
+        ".AB$:=1",
+        ".ABCDEFGHIJKLMNOPQ:=1",
+        ".LOW:=-32769",
+        ".HIGH:=32768",
+        ".EXPR:=1+2",
+        ".REF:=OTHER",
+        ".C0:=0 .C1:=1 .C2:=2 .C3:=3 .C4:=4 .C5:=5 .C6:=6 .C7:=7 .C8:=8 .C9:=9 .C10:=10 .C11:=11 .C12:=12 .C13:=13 .C14:=14 .C15:=15 .C16:=16",
         "A=UNKNOWN",
         "&=",
         "&=P [ ]",
@@ -351,7 +385,7 @@ fn malformed_source_never_starts_runtime() {
         "[ ]",
         "]",
         "%=1 [ ] ]",
-        "==NEG,-1 ^=NEG",
+        ".NEG:=-1 ^=.NEG",
         "^=-1",
         "#=32768",
         "^=32768",
@@ -364,8 +398,8 @@ fn malformed_source_never_starts_runtime() {
                 4
             } else if source.contains("3276")
                 || source.contains("32768")
-                || source == "==REF,OTHER"
-                || source == "==NEG,-1 ^=NEG"
+                || source == ".REF:=OTHER"
+                || source == ".NEG:=-1 ^=.NEG"
                 || source == "^=-1"
             {
                 3
@@ -458,8 +492,8 @@ fn primary_read_compile_failure_does_not_start_runtime() {
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn template_definitions_are_saved_and_published_without_runtime_code() {
     expect("&=a{} [ {}={}+1 ]", 0, b"Z");
-    expect("&=a{} [ A=MAX{} ; ignored ]\n]", 0, b"Z");
-    expect("&=a{} [ A=MAX{}\n{}=A+ ]", 0, b"Z");
+    expect("&=a{} [ A=.MAX{} ; ignored ]\n]", 0, b"Z");
+    expect("&=a{} [ A=.MAX{}\n{}=A+ ]", 0, b"Z");
     expect("&=a{} [ A={} B= ]", 0, b"Z");
     expect("&=a{} [ A={} ] &=b{} [ {}=A{} ]", 0, b"Z");
     expect("&=p [ ?=7 ] &=a{} [ A={} ] p=()", 0, b"7Z");
@@ -556,8 +590,8 @@ fn template_calls_expand_into_the_current_caller() {
         0,
         b"111Z",
     );
-    expect("&=a{} [ A=MAX{} ] a{A}=()", 2, b"");
-    expect("==MAXA,3 &=a{} [ A=MAX{} ] a{A}=() ?=A", 0, b"3Z");
+    expect("&=a{} [ A=.MAX{} ] a{A}=()", 2, b"");
+    expect(".MAXA:=3 &=a{} [ A=.MAX{} ] a{A}=() ?=A", 0, b"3Z");
     expect("&=a{} [ A={} ] a{C}=() ?=C", 0, b"0Z");
     expect("&=a{} [ {}={} ] a{A}=()", 0, b"Z");
     expect("&=a{} [ {}={}+1 ] A=0 &=p [ a{A}=() ?=A ] p=()", 0, b"1Z");
@@ -932,7 +966,7 @@ fn p0b_shared_fixture_and_rhs_forms_match_reference() {
 
     for (source, stdout) in [
         (
-            "==NUM,3 &=a{} [ {}=~+{} ] B=2 a{B}=(B+NUM) a{B}=1,4 ?=B ?=~",
+            ".NUM:=3 &=a{} [ {}=~+{} ] B=2 a{B}=(B+.NUM) a{B}=1,4 ?=B ?=~",
             b"111".as_slice(),
         ),
         ("&=a{} [ {}=~+{} ] ~=4 A=1 a{A}=~+2 ?=A", b"7".as_slice()),
