@@ -72,7 +72,7 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
   path/to/program.vtl --runtime-input path/to/input.bin
 ```
 
-端末で対話するには `--interactive` を指定します。prompt は改行がなくても表示され、通常の端末設定では文字の後に Enter を押して入力します。プログラムが用意する終了操作で終了でき、Ctrl-C でも中断できます。
+Unix ホストの端末で対話するには `--interactive` を指定します。prompt は改行がなくても表示され、通常の端末設定では文字の後に Enter を押して入力します。プログラムが用意する終了操作で終了でき、Ctrl-C でも中断できます。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- path/to/program.vtl --interactive

@@ -1,9 +1,12 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(unix)]
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -174,6 +177,63 @@ fn require_success(stage: &str, tool: &str, output: &Output) -> Result<(), Strin
     ))
 }
 
+// Once the child exits, wake the input worker and wait for its final result.
+// Readable input is handled before cancellation, so an already observed input
+// failure cannot be lost when the child and input become ready together.
+#[cfg(unix)]
+fn transfer_input<R: Read + AsRawFd, W: Write>(
+    mut input: R,
+    mut output: W,
+    frame: &[u8],
+    cancel: io::PipeReader,
+) -> Result<(), String> {
+    fn write_bytes(output: &mut impl Write, bytes: &[u8]) -> Result<bool, String> {
+        match output.write_all(bytes) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::BrokenPipe => Ok(false),
+            Err(error) => Err(format!("write sim65 stdin: {error}")),
+        }
+    }
+    if !write_bytes(&mut output, frame)? {
+        return Ok(());
+    }
+    let mut buffer = [0; 4096];
+    loop {
+        let mut fds = [
+            libc::pollfd {
+                fd: input.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: cancel.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+        ];
+        // The descriptors remain owned and open for the duration of poll.
+        let ready = unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) };
+        if ready < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(format!("poll stdin: {error}"));
+        }
+        if fds[0].revents != 0 {
+            let count = input
+                .read(&mut buffer)
+                .map_err(|error| format!("read stdin: {error}"))?;
+            if count == 0 || !write_bytes(&mut output, &buffer[..count])? {
+                return Ok(());
+            }
+        }
+        if fds[1].revents != 0 {
+            return Ok(());
+        }
+    }
+}
+
 fn build_and_run(
     input: &[u8],
     cycle_limit: Option<u32>,
@@ -243,50 +303,53 @@ fn build_and_run(
         args.push(executable.as_os_str());
         return run_tool("sim65", "execute", &args, input);
     }
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| format!("execute: could not start sim65: {error}"))?;
-    let mut child_stdin = child.stdin.take().expect("piped stdin");
-    let frame = input.to_vec();
-    let (sender, receiver) = std::sync::mpsc::channel();
-    thread::spawn(move || {
-        let result = (|| -> Result<(), String> {
-            let write = |error: io::Error| {
-                if error.kind() == io::ErrorKind::BrokenPipe {
-                    None
-                } else {
-                    Some(format!("write sim65 stdin: {error}"))
-                }
+    #[cfg(not(unix))]
+    return Err("interactive mode requires a Unix host".into());
+    #[cfg(unix)]
+    {
+        let (cancel, mut wake) =
+            io::pipe().map_err(|error| format!("execute: create input cancellation: {error}"))?;
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| format!("execute: could not start sim65: {error}"))?;
+        let child_stdin = child.stdin.take().expect("piped stdin");
+        let frame = input.to_vec();
+        let worker = thread::spawn(move || {
+            // Poll and read the same unbuffered descriptor.
+            let fd = unsafe { libc::dup(libc::STDIN_FILENO) };
+            if fd < 0 {
+                return Err(format!("read stdin: {}", io::Error::last_os_error()));
+            }
+            // dup returned a new owned descriptor.
+            let input = unsafe { fs::File::from_raw_fd(fd) };
+            transfer_input(input, child_stdin, &frame, cancel)
+        });
+        let output = child.wait_with_output();
+        // Closing the wake endpoint also wakes poll if the write fails.
+        let _ = wake.write_all(&[1]);
+        drop(wake);
+        let transfer = worker
+            .join()
+            .map_err(|_| "execute: stdin worker panicked".to_string())?;
+        let output =
+            output.map_err(|error| format!("execute: could not collect sim65 output: {error}"))?;
+        if let Err(error) = transfer {
+            let detail = if output.status.success() {
+                String::from_utf8_lossy(&output.stderr).trim().to_string()
+            } else {
+                report_simulation_failure(&output).1
             };
-            if let Err(error) = child_stdin.write_all(&frame) {
-                return write(error).map_or(Ok(()), Err);
-            }
-            let mut input = io::stdin().lock();
-            let mut buffer = [0; 4096];
-            loop {
-                let count = input
-                    .read(&mut buffer)
-                    .map_err(|error| format!("read stdin: {error}"))?;
-                if count == 0 {
-                    return Ok(());
-                }
-                if let Err(error) = child_stdin.write_all(&buffer[..count]) {
-                    return write(error).map_or(Ok(()), Err);
-                }
-            }
-        })();
-        let _ = sender.send(result);
-    });
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("execute: could not collect sim65 output: {error}"))?;
-    if let Ok(Err(error)) = receiver.try_recv() {
-        return Err(format!("execute: {error}"));
+            return Err(if detail.is_empty() {
+                format!("execute: {error}")
+            } else {
+                format!("execute: {error}; {detail}")
+            });
+        }
+        Ok(output)
     }
-    Ok(output)
 }
 
 fn execute(arguments: Arguments) -> Result<Output, String> {
@@ -368,6 +431,59 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn child_exit_waits_for_an_in_flight_input_error() {
+        use std::sync::mpsc;
+
+        struct FailingInput {
+            fd: io::PipeReader,
+            entered: mpsc::Sender<()>,
+            release: mpsc::Receiver<()>,
+        }
+        impl AsRawFd for FailingInput {
+            fn as_raw_fd(&self) -> std::os::fd::RawFd {
+                self.fd.as_raw_fd()
+            }
+        }
+        impl Read for FailingInput {
+            fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+                self.entered.send(()).unwrap();
+                self.release.recv().unwrap();
+                Err(io::Error::other("injected input failure"))
+            }
+        }
+        let (input, mut ready) = io::pipe().unwrap();
+        let (cancel, mut wake) = io::pipe().unwrap();
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let (release_tx, release_rx) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            transfer_input(
+                FailingInput {
+                    fd: input,
+                    entered: entered_tx,
+                    release: release_rx,
+                },
+                Vec::new(),
+                b"frame",
+                cancel,
+            )
+        });
+        ready.write_all(b"x").unwrap();
+        entered_rx.recv().unwrap();
+        // Child exit is observed before the input failure is delivered.
+        wake.write_all(b"x").unwrap();
+        assert!(!worker.is_finished());
+        release_tx.send(()).unwrap();
+        assert!(
+            worker
+                .join()
+                .unwrap()
+                .unwrap_err()
+                .contains("injected input failure")
+        );
+    }
 
     #[test]
     fn framing_preserves_source_and_binary_runtime_input() {
