@@ -1,0 +1,225 @@
+; 1024: 4x4 sliding tile game. Board occupies storage 0..15,
+; line buffer 16..19, PRNG 20, score high/low 21..22, moves 23,
+; changed 24, win 25, and CR continuation 26.
+
+; r: ( n -- value ); reads/writes storage[20]; clobbers A,B.
+  &=r [
+    A=~
+    B=(@(20)*25173)+13849
+    @=20,B
+    B=B%A
+    %=B<0 [ B=B+A ]
+    ~=B+1
+  ]
+
+; n: ( -- ); reads board and storage[20], writes one empty cell and
+; storage[20]; calls r; clobbers A..F. Caller guarantees an empty cell.
+  &=n [
+    C=0 D=0
+    *=C<16 [
+      %=@(C)==0 [ D=D+1 ]
+      C=C+1
+    ]
+    r=D
+    E=~
+    C=0
+    *=E>0 [
+      %=@(C)==0 [ E=E-1 ]
+      C=C+1
+    ]
+    F=C-1
+    r=10
+    E=~
+    %=E==10 [ @=F,2 ] [ @=F,1 ]
+  ]
+
+; m: ( direction -- ); reads/writes board, buffer, score and changed;
+; clobbers G..N. Each pair is merged once, then removed from the buffer.
+  &=m [
+    G=~
+    @=24,0
+    H=0
+    *=H<4 [
+      I=H*4 J=1
+      %=G==1 [ I=I+3 J=-1 ]
+      %=G==2 [ I=H J=4 ]
+      %=G==3 [ I=H+12 J=-4 ]
+      K=0 L=0
+      *=K<4 [ @=16+K,0 K=K+1 ]
+      K=0
+      *=K<4 [
+        M=@(I+(K*J))
+        %=M!=0 [ @=16+L,M L=L+1 ]
+        K=K+1
+      ]
+      K=0
+      *=K<3 [
+        M=@(16+K) N=@(17+K)
+        %=(M!=0)*(M==N) [
+          M=M+M
+          @=16+K,M
+          ; Avoid overflow in the base-10000 score and saturate the high cell.
+          %=(@(21)==32767)*(@(22)>(9999-M)) [
+            @=22,9999
+          ] [
+            N=@(22)+M
+            %=N>=10000 [
+              N=N-10000
+              @=21,@(21)+1
+            ]
+            @=22,N
+          ]
+          L=K+1
+          *=L<3 [ @=16+L,@(17+L) L=L+1 ]
+          @=19,0
+        ]
+        K=K+1
+      ]
+      K=0
+      *=K<4 [
+        M=I+(K*J) N=@(16+K)
+        %=@(M)!=N [ @=24,1 ]
+        @=M,N
+        K=K+1
+      ]
+      H=H+1
+    ]
+  ]
+
+; p: ( value -- ); writes output only, clobbers V,W.
+  &=p [
+    V=~ W=1
+    %=V>=10 [ W=2 ]
+    %=V>=100 [ W=3 ]
+    %=V>=1000 [ W=4 ]
+    W=(8-W)/2
+    *=W>0 [ $=32 W=W-1 ]
+    %=V==0 [ $=46 ] [ ?=V ]
+    W=1
+    %=V>=10 [ W=2 ]
+    %=V>=100 [ W=3 ]
+    %=V>=1000 [ W=4 ]
+    W=(7-W)/2
+    *=W>0 [ $=32 W=W-1 ]
+  ]
+
+; f: ( -- ); reads board, score and moves; writes output; clobbers I,J,V,W.
+  &=f [
+    ?="1024" ?=()
+    ?="SCORE: "
+    %=@(21)>0 [
+      ?=@(21)
+      %=@(22)<1000 [ $=48 ]
+      %=@(22)<100 [ $=48 ]
+      %=@(22)<10 [ $=48 ]
+    ]
+    ?=@(22) ?="  MOVES: " ?=@(23) ?=() ?=()
+    I=0
+    *=I<4 [
+      ?="+-------+-------+-------+-------+" ?=()
+      ?="|       |       |       |       |" ?=()
+      J=0
+      *=J<4 [ $=124 p=@((I*4)+J) J=J+1 ]
+      $=124 ?=()
+      ?="|       |       |       |       |" ?=()
+      I=I+1
+    ]
+    ?="+-------+-------+-------+-------+" ?=() ?=()
+  ]
+
+; c: ( -- command ); reads input, reads/writes storage[26], clobbers X,Y.
+  &=c [
+    X=$
+    %=@(26) [
+      @=26,0
+      %=X==10 [ X=$ ]
+    ]
+    Y=0
+    %=X==-1 [ Y=-1 ] [
+      %=(X==10)+(X==13) [
+        %=X==13 [ @=26,1 ]
+      ] [
+        Y=X
+        *=((X!=10)*(X!=13))*(X!=-1) [ X=$ ]
+        %=X==-1 [ Y=-1 ]
+        %=X==13 [ @=26,1 ]
+        %=Y>=97 [ %=Y<=122 [ Y=Y-32 ] ]
+        %=Y!=-1 [
+          %=(((((Y==87)+(Y==65))+(Y==83))+(Y==68))+(Y==82))+(Y==81)==0 [ Y=0 ]
+        ]
+      ]
+    ]
+    ~=Y
+  ]
+
+; e: ( -- available ); reads board, clobbers I,J, leaves 0 or 1.
+  &=e [
+    I=0 J=0
+    *=I<16 [
+      %=@(I)==0 [ J=1 ]
+      %=(I%4)<3 [ %=@(I)==@(I+1) [ J=1 ] ]
+      %=I<12 [ %=@(I)==@(I+4) [ J=1 ] ]
+      I=I+1
+    ]
+    ~=J
+  ]
+
+; i: ( -- ); resets board, buffer, score, moves and flags, calls n twice;
+; reads/writes [20], preserves stream and [26], clobbers A..F.
+  &=i [
+    C=0
+    *=C<20 [ @=C,0 C=C+1 ]
+    @=21,0 @=22,0 @=23,0 @=24,0 @=25,0
+    n=() n=()
+  ]
+
+; g: ( -- ); owns game control and output, calls i,f,c,m,n,e;
+; reads/writes storage[0..26], clobbers A..P,V..Y.
+  &=g [
+    i=()
+    f=()
+    ?="WASD MOVE  R RESTART  Q QUIT" ?=()
+    O=1
+    *=O [
+      ?="> "
+      c=() N=~
+      %=(N==-1)+(N==81) [ O=0 ] [
+        %=N==82 [
+          i=() f=()
+          ?="WASD MOVE  R RESTART  Q QUIT" ?=()
+        ] [
+          e=() P=~
+          P=(P==0)+@(25)
+          %=P [ ?="R OR Q ONLY" ?=() ] [
+            %=N==0 [ ?="INVALID COMMAND" ?=() ] [
+              %=N==65 [ N=0 ]
+              %=N==68 [ N=1 ]
+              %=N==87 [ N=2 ]
+              %=N==83 [ N=3 ]
+              m=N
+              %=@(24)==0 [ ?="NO MOVE" ?=() ] [
+                %=@(23)<32767 [ @=23,@(23)+1 ]
+                n=()
+                N=0
+                *=N<16 [ %=@(N)==1024 [ @=25,1 ] N=N+1 ]
+                f=()
+                P=0
+                %=@(25) [ P=1 ?="YOU WIN!" ?=() ] [
+                  e=() N=~
+                  %=N==0 [ P=1 ?="GAME OVER" ?=() ]
+                ]
+                %=P [ ?="R RESTART  Q QUIT" ?=() ] [
+                  ?="WASD MOVE  R RESTART  Q QUIT" ?=()
+                ]
+              ]
+            ]
+          ]
+        ]
+      ]
+    ]
+  ]
+
+; GAME1024_TEST_DEFINITIONS_END
+  @=20,12345
+  @=26,0
+  g=()
