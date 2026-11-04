@@ -62,6 +62,8 @@
 .COMMAND_CANCEL := 0
 .COMMAND_COMMIT := 1
 .COMMAND_EOF := -1
+.PHASER_OVERLOAD := 500
+.OVERLOAD_POWER := 9
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -411,6 +413,43 @@
     %=C==3 [ E=0-D F=0-.COURSE_SCALE ]
     ~=E ~=F ~=.COURSE_VALID
   ^=2
+  ]
+
+; Phaser ( -- command-status ). I is the slot and J is the fixed power;
+; h/k/t clobber A..F, while n clobbers A..H. No PRNG draws.
+  &=f [
+    t=4
+    %=@(.DEVICE_BASE+3)>0 [ ~=.COMMAND_CANCEL #=3 ]
+  ^=1
+    ?="ENERGY ? " n=()
+    B=~ A=~
+    %=B==.PARSE_EOF [ ~=.COMMAND_EOF #=3 ]
+    %=(B!=.PARSE_VALID)+(A<0) [ #=1 ]
+    %=A==0 [ ~=.COMMAND_CANCEL #=3 ]
+    %=A>@(.SHIP_ENERGY) [
+      ?="SORRY ! WE HAVE ONLY " ?=@(.SHIP_ENERGY) ?=" UNITS" ?=() #=1
+    ]
+    @=.SHIP_ENERGY,@(.SHIP_ENERGY)-A
+    %=@(.QUADRANT_ENEMIES)==0 [ ?="MISSED!!" ?=() ] [
+      J=A/@(.QUADRANT_ENEMIES)
+      I=1
+      *=I<=.ENEMY_SLOTS [
+        %=@(.ENEMY_HP_BASE+I-1)>0 [
+          %=J>=.PHASER_OVERLOAD [
+            ?="PHASER'S OVER LOAD !" ?=()
+            @=.DEVICE_BASE+3,1 t=4 J=.OVERLOAD_POWER
+          ]
+          ~=J h=I K=~
+          ?=K ?=" UNITS HIT  KLINGON("
+          ?=@(.ENEMY_X_BASE+I-1) ?=@(.ENEMY_Y_BASE+I-1) ?=")" ?=()
+          ~=I k=K
+          %=@(.ENEMY_HP_BASE+I-1)==0 [ ?="### DESTROYED ###" ?=() ] [ ?="# DAMAGED #" ?=() ]
+        ]
+        I=I+1
+      ]
+    ]
+    ~=.COMMAND_COMMIT
+  ^=3
   ]
 
 ; Warp departure ( -- command-status ). I retains factor across n/c;
