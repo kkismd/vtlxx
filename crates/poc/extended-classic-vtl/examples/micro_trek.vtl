@@ -51,6 +51,31 @@
     ~=B+1
   ]
 
+; Device display ( device-id -- ). Reads the device; writes A and B.
+  &=t [
+    A=~ B=@(.DEVICE_BASE+A-1)
+    %=A==1 [ ?="*SHORT RANGE SENSOR*" ]
+    %=A==2 [ ?="*COMPUTER*" ]
+    %=A==3 [ ?="*LONG RANGE SENSOR*" ]
+    %=A==4 [ ?="*PHASER*" ]
+    %=A==5 [ ?="*WARP*" ]
+    %=A==6 [ ?="*TORPEDOES*" ]
+    %=B!=0 [
+      ?="DAMAGED!" ?=() ?=B ?=() ?=" YEARS ESTIMATED FOR REPAIR."
+    ]
+    ?=()
+  ]
+
+; Random damage event ( -- ). Writes the selected device and PRNG state;
+; r and t clobber A and B. The first draw is protected on the value stack.
+  &=j [
+    r=6
+    r=3
+    B=~ A=~
+    @=.DEVICE_BASE+A-1,@(.DEVICE_BASE+A-1)+B
+    t=A
+  ]
+
 ; Generate a complete galaxy ( -- ). Writes galaxy[0..63],
 ; GALAXY_ENEMIES, GALAXY_BASES, PRNG state and scratch A, B, C,
 ; H, I, J, L, M, T. T is the current attempt's enemy total.
