@@ -74,6 +74,18 @@
 .MAP_SHIP := 69
 .STARDATE_BASE := 3230
 .LOW_ENERGY := 1000
+.ASCII_LOWER_A := 97
+.ASCII_LOWER_Z := 122
+.ASCII_CASE := 32
+.CMD_G := 71
+.CMD_L := 76
+.CMD_S := 83
+.CMD_P := 80
+.CMD_R := 82
+.CMD_W := 87
+.CMD_T := 84
+.CMD_HELP := 63
+.CMD_X := 88
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -625,6 +637,50 @@
   ^=2
     ~=.COMMAND_COMMIT
   ^=3
+  ]
+
+; Read and dispatch one complete COMMAND line ( -- command-status ).
+; Direct scratch A, B, C, D; callees own all persistent writes.
+  &=b [
+    ?="COMMAND :"
+    B=0 C=0 D=1
+    *=D [
+      A=$
+      %=(A==.ASCII_LF)+(A==.PARSE_EOF) [ D=0 ] [
+        %=B==0 [
+          B=3
+          %=(A!=.ASCII_SPACE)*(A!=.ASCII_TAB)*(A!=.ASCII_CR) [ C=A B=1 ]
+        ] [
+          %=B==1 [
+            %=A==.ASCII_CR [ B=2 ] [
+              %=(A!=.ASCII_SPACE)*(A!=.ASCII_TAB) [ B=3 ]
+            ]
+          ] [ %=B==2 [ B=3 ] ]
+        ]
+      ]
+    ]
+    %=(B==0)+(B==3) [
+      %=A==.PARSE_EOF [ ~=.COMMAND_EOF ] [ ~=.COMMAND_CANCEL ] #=1
+    ]
+    %=(C>=.ASCII_LOWER_A)*(C<=.ASCII_LOWER_Z) [ C=C-.ASCII_CASE ]
+    %=C==.CMD_X [ ~=.COMMAND_EOF #=1 ]
+    %=C==.CMD_G [ m=() ~=.COMMAND_CANCEL #=1 ]
+    %=C==.CMD_L [ l=() ~=.COMMAND_CANCEL #=1 ]
+    %=C==.CMD_S [ s=() ~=.COMMAND_CANCEL #=1 ]
+    %=C==.CMD_R [ v=() ~=.COMMAND_CANCEL #=1 ]
+    %=C==.CMD_P [ f=() #=1 ]
+    %=C==.CMD_W [ w=() #=1 ]
+    %=C==.CMD_T [ o=() #=1 ]
+    %=C==.CMD_HELP [
+      ?="*HELP*" ?=() ?="S : SHORT RANGE SENSOR" ?=()
+      ?="G : GALAXY MAP" ?=() ?="L : LONG RANGE SENSOR" ?=()
+      ?="P : PHASER" ?=() ?="W : WARP" ?=()
+      ?="T : TORPEDOES" ?=() ?="R : STATUS REPORT" ?=()
+      ?="X : EXIT" ?=() ?="? : HELP" ?=()
+      ~=.COMMAND_CANCEL #=1
+    ]
+    %=A==.PARSE_EOF [ ~=.COMMAND_EOF ] [ ~=.COMMAND_CANCEL ]
+  ^=1
   ]
 
 ; EC08_TEST_DEFINITIONS_END
