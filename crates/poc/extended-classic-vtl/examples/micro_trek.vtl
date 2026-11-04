@@ -67,6 +67,11 @@
 .TORPEDO_DAMAGE := 500
 .BASE_UNIT := 10
 .STAR_KIND := 3
+.MAP_EMPTY := 46
+.MAP_ENEMY := 75
+.MAP_BASE := 66
+.MAP_STAR := 42
+.MAP_SHIP := 69
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -118,6 +123,32 @@
       ]
       ?=" ..." ?=@(.QUADRANT_Y)-1 ?="..." ?=@(.QUADRANT_Y)
       ?="..." ?=@(.QUADRANT_Y)+1 ?=()
+    ]
+  ]
+
+; Short-range scan ( -- ). Direct scratch I, J, K; t clobbers A, B.
+; Reads the sector and device state without changing storage or drawing random numbers.
+  &=s [
+    ?="NOW: QUADRANT(" ?=@(.QUADRANT_X) ?=@(.QUADRANT_Y)
+    ?=") SECTOR(" ?=@(.SHIP_X) ?=@(.SHIP_Y) ?=")" ?=()
+    t=1
+    %=@(.DEVICE_BASE)==0 [
+      I=1
+      *=I<=.SECTOR_LIMIT [
+        ?=I J=1
+        *=J<=.SECTOR_LIMIT [
+          K=@(.SECTOR_BASE+((I-1)*.SECTOR_LIMIT)+J-1)
+          ?=" "
+          %=K==0 [ $=.MAP_EMPTY ]
+          %=K==1 [ $=.MAP_ENEMY ]
+          %=K==.BASE_KIND [ $=.MAP_BASE ]
+          %=K==.STAR_KIND [ $=.MAP_STAR ]
+          %=K==4 [ $=.MAP_SHIP ]
+          J=J+1
+        ]
+        ?=() I=I+1
+      ]
+      ?="  1 2 3 4 5 6 7 8" ?=()
     ]
   ]
 
