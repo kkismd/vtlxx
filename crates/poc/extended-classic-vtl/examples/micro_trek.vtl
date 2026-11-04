@@ -46,6 +46,8 @@
 .TORPEDO_MAX := 10
 .DEVICE_LIMIT := 70
 .SECTOR_LIMIT := 8
+.DAMAGE_TRIGGER := 200
+.ENEMY_SLOTS := 6
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -92,6 +94,36 @@
     E=(C*C)+(D*D)+.HIT_SCALE
     F=B/E
     ~=((.HIT_SCALE*F)+((.HIT_SCALE*(B%E))/E))+1
+  ]
+
+; Counterattack ( -- ). I and T hold the slot and total across r/h;
+; direct scratch H, I, S, T, U, and transitive scratch A..F.
+; Writes live enemy HP, ship energy, PRNG, and optionally one device.
+  &=a [
+    %=@(.QUADRANT_ENEMIES)>0 [
+      ?="*KLINGON ATTACK" ?=()
+      %=@(.DOCKED)!=0 [
+        ?="STARBASE PROTECT ENTERPRISE." ?=()
+      ] [
+        I=1 T=0
+        *=I<=.ENEMY_SLOTS [
+          H=@(.ENEMY_HP_BASE+I-1)
+          %=H>0 [
+            r=H U=~ U=(U-1)/2
+            @=.ENEMY_HP_BASE+I-1,H-U
+            ~=U h=I S=~ T=T+S
+            ?=S ?=" UNITS HIT FROM KLINGON ("
+            ?=@(.ENEMY_X_BASE+I-1) ?=@(.ENEMY_Y_BASE+I-1) ?=")" ?=()
+          ]
+          I=I+1
+        ]
+        @=.SHIP_ENERGY,@(.SHIP_ENERGY)-T
+        %=T>=.DAMAGE_TRIGGER [
+          ?="## SHIELD SCREEN FELL DOWN ##" ?=()
+          j=()
+        ]
+      ]
+    ]
   ]
 
 ; Apply a hit ( enemy-slot damage -- ). Writes scratch A..D and, on
