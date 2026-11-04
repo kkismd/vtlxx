@@ -47,6 +47,59 @@ fn direct_input_to_real_trajectory_commits_once() {
 }
 
 #[test]
+fn departure_crosses_multiple_quadrants_before_rebuilding_final_sector() {
+    let mut m = machine("10\n0\n");
+    // The old sector's (8,4) is occupied, but belongs to neither intermediate
+    // nor final quadrant. The middle quadrant has enemies; only the final
+    // quadrant's one enemy and one star must be constructed.
+    m.execute_source("@=167,1 @=98,0 @=74,4 @=130,3 @=19,300 @=11,101 @=163,4 @=65,3 @=192,1")
+        .unwrap();
+    call(&mut m, 1);
+    assert_eq!(
+        m.output(),
+        b"*WARP*\n FACTOR ? COURSE: * ION ENGINE START\n44-14\n*WARP ENGINE START\n34-84\n34-74\n34-64\n34-54\n34-44\n34-34\n34-24\n34-14\n24-84\n## SPACE STORM ##\n*PHASER*DAMAGED!\n1\n YEARS ESTIMATED FOR REPAIR.\nNOW: QUADRANT(24) SECTOR(74)\n"
+    );
+    assert_eq!(
+        (
+            m.storage(165),
+            m.storage(166),
+            m.storage(167),
+            m.storage(168)
+        ),
+        (2, 4, 7, 4)
+    );
+    assert_eq!(
+        (m.storage(160), m.storage(161), m.storage(170)),
+        (18, 3950, 0)
+    );
+    assert_eq!((m.storage(65), m.storage(67), m.storage(70)), (2, 1, 42));
+    // seed 1: storm, j's two draws, then q's enemy and star draws.
+    assert_eq!(m.storage(192), 3882);
+    assert_eq!(
+        (
+            m.storage(169),
+            m.storage(135),
+            m.storage(141),
+            m.storage(147)
+        ),
+        (1, 300, 2, 6)
+    );
+    assert_eq!((71..135).filter(|&i| m.storage(i) == 4).count(), 1);
+    assert_eq!((71..135).filter(|&i| m.storage(i) == 1).count(), 1);
+    assert_eq!((71..135).filter(|&i| m.storage(i) == 3).count(), 1);
+    assert_eq!(
+        (
+            m.storage(162),
+            m.storage(163),
+            m.storage(164),
+            m.storage(11),
+            m.storage(19)
+        ),
+        (7, 4, 0, 101, 300)
+    );
+}
+
+#[test]
 fn cancellation_and_eof_never_commit() {
     for (input, status, out) in [
         ("0\n", 0, "*WARP*\n FACTOR ? "),
