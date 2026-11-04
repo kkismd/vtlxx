@@ -41,6 +41,11 @@
 .COURSE_EOF := -1
 .HIT_SCALE := 30
 .ENEMY_UNIT := 100
+.BASE_KIND := 2
+.ENERGY_MAX := 4000
+.TORPEDO_MAX := 10
+.DEVICE_LIMIT := 70
+.SECTOR_LIMIT := 8
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -104,6 +109,34 @@
       @=.QUADRANT_ENEMIES,@(.QUADRANT_ENEMIES)-1
     ] [
       @=.ENEMY_HP_BASE+A-1,C
+    ]
+  ]
+
+; Dock and resupply ( -- ). Reads adjacent in-range sectors; writes
+; DOCKED and, when docked, energy, torpedoes and devices 64..69.
+; Scratch A, B, I, J; no callees or PRNG draws.
+  &=d [
+    A=@(.SHIP_X) B=@(.SHIP_Y)
+    @=.DOCKED,0
+    I=A-1
+    *=I<=(A+1) [
+      J=B-1
+      *=J<=(B+1) [
+        %=(I>=1)*(I<=.SECTOR_LIMIT)*(J>=1)*(J<=.SECTOR_LIMIT) [
+          %=(I!=A)+(J!=B) [
+            %=@(.SECTOR_BASE+((I-1)*.SECTOR_LIMIT)+J-1)==.BASE_KIND [
+              @=.DOCKED,1
+            ]
+          ]
+        ]
+        J=J+1
+      ]
+      I=I+1
+    ]
+    %=@(.DOCKED)==1 [
+      @=.SHIP_ENERGY,.ENERGY_MAX @=.SHIP_TORPEDOES,.TORPEDO_MAX
+      I=.DEVICE_BASE *=I<.DEVICE_LIMIT [ @=I,0 I=I+1 ]
+      ?="DOCKED IN" ?=()
     ]
   ]
 
