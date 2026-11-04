@@ -64,6 +64,9 @@
 .COMMAND_EOF := -1
 .PHASER_OVERLOAD := 500
 .OVERLOAD_POWER := 9
+.TORPEDO_DAMAGE := 500
+.BASE_UNIT := 10
+.STAR_KIND := 3
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -477,6 +480,50 @@
     K=.DEVICE_BASE
     *=K<.DEVICE_LIMIT [ %=@(K)>0 [ @=K,@(K)-1 ] K=K+1 ]
     ~=I ~=C ~=B x=()
+    ~=.COMMAND_COMMIT
+  ^=3
+  ]
+
+; Torpedo ( -- command-status ). I/J are candidate coordinates, P/G are
+; fixed-point coordinates, S/T are direction and K/L are kind/enemy slot.
+; Direct scratch A/G/I/J/K/L/P/S/T; c clobbers A..H, k clobbers A..D.
+  &=o [
+    t=6
+    %=(@(.DEVICE_BASE+5)>0)+(@(.SHIP_TORPEDOES)==0) [ ~=.COMMAND_CANCEL #=3 ]
+    c=() A=~ T=~ S=~
+    %=A==.COURSE_EOF [ ~=.COMMAND_EOF #=3 ]
+    @=.SHIP_TORPEDOES,@(.SHIP_TORPEDOES)-1
+    ?="ENTERPRISE FIRING TORPEDOES." ?=() ?="TRACK-"
+    P=(@(.SHIP_X)*.COURSE_SCALE)+.WARP_HALF
+    G=(@(.SHIP_Y)*.COURSE_SCALE)+.WARP_HALF
+  ^=1
+    P=P+S G=G+T I=P/.COURSE_SCALE J=G/.COURSE_SCALE
+    %=(I<1)+(I>.SECTOR_LIMIT)+(J<1)+(J>.SECTOR_LIMIT) [
+      ?="MISS" ?=() #=2
+    ]
+    ?=I ?=J ?="-"
+    K=@(.SECTOR_BASE+((I-1)*.SECTOR_LIMIT)+J-1)
+    %=K==0 [ #=1 ]
+    ?="HIT" ?=()
+    %=K==1 [
+      L=1
+      *=L<=.ENEMY_SLOTS [
+        %=(@(.ENEMY_HP_BASE+L-1)>0)*(@(.ENEMY_X_BASE+L-1)==I)*(@(.ENEMY_Y_BASE+L-1)==J) [
+          ~=L k=.TORPEDO_DAMAGE
+          %=@(.ENEMY_HP_BASE+L-1)==0 [ ?="### DESTROYED ###" ?=() ] [ ?="# DAMAGED #" ?=() ]
+          #=2
+        ]
+        L=L+1
+      ]
+    ]
+    %=(K==.BASE_KIND)+(K==.STAR_KIND) [
+      A=(@(.QUADRANT_X)*8)+@(.QUADRANT_Y)-9
+      %=K==.BASE_KIND [
+        @=A,@(A)-.BASE_UNIT @=.GALAXY_BASES,@(.GALAXY_BASES)-1 @=.DOCKED,0
+      ] [ @=A,@(A)-1 ]
+      @=.SECTOR_BASE+((I-1)*.SECTOR_LIMIT)+J-1,0
+    ]
+  ^=2
     ~=.COMMAND_COMMIT
   ^=3
   ]
