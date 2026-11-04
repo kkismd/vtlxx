@@ -62,6 +62,25 @@ fn invalid_and_insufficient_input_retry_then_miss() {
 }
 
 #[test]
+fn retry_then_eof_preserves_game_state() {
+    for (input, energy, expected) in [
+        (
+            "1\n",
+            0,
+            "*PHASER*\nENERGY ? SORRY ! WE HAVE ONLY 0 UNITS\nENERGY ? ",
+        ),
+        ("bad\n", 4000, "*PHASER*\nENERGY ? ENERGY ? "),
+    ] {
+        let mut m = machine(input);
+        m.execute_source(&format!("@=161,{energy}")).unwrap();
+        let before: Vec<_> = (0..240).map(|i| m.storage(i)).collect();
+        call(&mut m, -1);
+        assert_eq!(m.output(), expected.as_bytes());
+        assert_eq!((0..240).map(|i| m.storage(i)).collect::<Vec<_>>(), before);
+    }
+}
+
+#[test]
 fn fixed_initial_count_and_holes_preserve_distribution() {
     let mut m = machine("4\n");
     m.execute_source("@=135,2 @=137,300").unwrap();
