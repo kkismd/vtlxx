@@ -57,6 +57,11 @@
 .WARP_STOP := -23
 .STORM_BOUND := 7
 .STORM_VALUE := 3
+.WARP_MAX := 89
+.DAMAGED_WARP_MAX := 2
+.COMMAND_CANCEL := 0
+.COMMAND_COMMIT := 1
+.COMMAND_EOF := -1
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -406,6 +411,35 @@
     %=C==3 [ E=0-D F=0-.COURSE_SCALE ]
     ~=E ~=F ~=.COURSE_VALID
   ^=2
+  ]
+
+; Warp departure ( -- command-status ). I retains factor across n/c;
+; J retains cost. x owns the trajectory after the departure commit.
+  &=w [
+    t=5
+  ^=1
+    ?=" FACTOR ? " n=()
+    B=~ A=~
+    %=B==.PARSE_EOF [ ~=.COMMAND_EOF #=3 ]
+    %=(B!=.PARSE_VALID)+(A<0)+(A>.WARP_MAX) [ #=1 ]
+    %=A==0 [ ~=.COMMAND_CANCEL #=3 ]
+    %=(@(.DEVICE_BASE+4)>0)*(A>.DAMAGED_WARP_MAX) [
+      ?="TRY 2 AT MOST !" ?=() #=1
+    ]
+    I=A J=((I*I)+1)/2
+    %=@(.SHIP_ENERGY)<J [ ?="WE HAVE NO ENERGY !" ?=() #=1 ]
+    c=() A=~ B=~ C=~
+    %=A==.COURSE_EOF [ ~=.COMMAND_EOF #=3 ]
+    ?="* ION ENGINE START" ?=()
+    @=.MISSION_DAYS,@(.MISSION_DAYS)-1
+    @=.SHIP_ENERGY,@(.SHIP_ENERGY)-J
+    @=.DOCKED,0
+    @=.SECTOR_BASE+((@(.SHIP_X)-1)*.SECTOR_LIMIT)+@(.SHIP_Y)-1,0
+    K=.DEVICE_BASE
+    *=K<.DEVICE_LIMIT [ %=@(K)>0 [ @=K,@(K)-1 ] K=K+1 ]
+    ~=I ~=C ~=B x=()
+    ~=.COMMAND_COMMIT
+  ^=3
   ]
 
 ; EC08_TEST_DEFINITIONS_END
