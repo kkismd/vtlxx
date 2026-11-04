@@ -258,6 +258,37 @@ fn dotted_constants_compile_and_execute_in_source_order() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn constant_table_accepts_128_entries_and_rejects_129() {
+    let temp = TestDir::new();
+    let definitions: String = (0..128).map(|i| format!(".N{i}:={i}\n")).collect();
+    let path = temp.0.join("constants.vtl");
+    // Keep generated code within the current 2 KiB arena while exercising every entry.
+    for start in (0..128).step_by(16) {
+        let references: String = (start..start + 16)
+            .map(|i| format!("?=.N{i} ?=()\n"))
+            .collect();
+        fs::write(&path, format!("{definitions}{references}")).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+            .arg(&path)
+            .args(["--cycle-limit", "200000000"])
+            .output()
+            .unwrap();
+        let expected: String = (start..start + 16).map(|i| format!("{i}\n")).collect();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(output.stdout, expected.as_bytes());
+    }
+    fs::write(&path, format!("?=42\n{definitions}.EXTRA:=1\n")).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+        .arg(&path)
+        .args(["--cycle-limit", "200000000"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(130), "{output:?}");
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn dotted_constant_errors_do_not_start_runtime() {
     let temp = TestDir::new();
     let cases = [
@@ -300,7 +331,6 @@ fn dotted_constant_errors_do_not_start_runtime() {
         ".TWO:=2 A=.TWO.TWO",
         ".NEG:=-1 A=1.NEG",
         ".TWO:=2 A=.TWO3",
-        ".A0:=0 .A1:=1 .A2:=2 .A3:=3 .A4:=4 .A5:=5 .A6:=6 .A7:=7 .A8:=8 .A9:=9 .B0:=0 .B1:=1 .B2:=2 .B3:=3 .B4:=4 .B5:=5 .B6:=6",
         ".GAINA:=2 &=t{} [ {}={}*.GAIN{} ] t{A}=() A=.MISSING",
     ];
     for (index, source) in cases.iter().enumerate() {

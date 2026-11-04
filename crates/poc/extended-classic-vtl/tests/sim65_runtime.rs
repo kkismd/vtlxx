@@ -163,6 +163,12 @@ fn runtime_state_and_ring_aliases() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn storage_all_cells_aliases_and_reinitialization() {
+    expect("runtime_storage", 0, b"");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn arithmetic_matches_signed_cell_edges() {
     expect(
         "runtime_arithmetic",

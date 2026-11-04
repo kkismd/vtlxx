@@ -115,7 +115,7 @@ fn build_and_run_custom(input: &[u8], frontend_fixture: &str, basic: Option<&str
         "sim65",
         &[
             OsStr::new("-x"),
-            OsStr::new("4000000"),
+            OsStr::new("200000000"),
             executable.as_os_str(),
         ],
         input,
@@ -174,6 +174,65 @@ fn invalid_constant_does_not_publish_a_partial_entry() {
         );
         assert!(result.stdout.is_empty(), "{source}: {result:?}");
     }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn full_constant_table_survives_failed_declarations_and_references() {
+    let original =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("6502/frontend/basic.s"))
+            .unwrap();
+    for (count, invalid) in [
+        (127, ".BAD:=32768"),
+        (128, ".N0:=7"),
+        (128, "A=.MISSING"),
+        (128, ".ABCDEFGHIJKLMNOPQ:=1"),
+        (128, ".EXTRA:=1"),
+    ] {
+        let check = format!(
+            "@failed:\n    lda constant_count\n    cmp #{count}\n    bne @table_corrupt\n    ldx #0\n@check_entry:\n    stx constant_slot\n    jsr constant_address\n    ldy #0\n@find_end:\n    lda (constant_ptr),y\n    beq @check_value\n    iny\n    cpy #17\n    bcc @find_end\n    bcs @table_corrupt\n@check_value:\n    iny\n    txa\n    cmp (constant_ptr),y\n    bne @table_corrupt\n    iny\n    lda (constant_ptr),y\n    bne @table_corrupt\n    inx\n    cpx #{count}\n    bne @check_entry\n    jmp @table_intact\n@table_corrupt:\n    lda #99\n    jmp halt\n@table_intact:\n    ; Abort only an active temporary source save."
+        );
+        let basic = original.replacen(
+            "@failed:\n    ; Abort only an active temporary source save.",
+            &check,
+            1,
+        );
+        let definitions: String = (0..count).map(|i| format!(".N{i}:={i}\n")).collect();
+        let source = format!("?=42\n{definitions}{invalid}\n");
+        let mut input = (source.len() as u16).to_le_bytes().to_vec();
+        input.extend_from_slice(source.as_bytes());
+        let result = build_and_run_custom(
+            &input,
+            "tests/fixtures/sim65/frontend_basic.s",
+            Some(&basic),
+        );
+        assert!(
+            matches!(result.status.code(), Some(2 | 3)),
+            "{invalid}: {result:?}"
+        );
+        assert!(result.stdout.is_empty(), "{invalid}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn micro_trek_passes_the_old_constant_limit() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let basic = fs::read_to_string(root.join("6502/frontend/basic.s")).unwrap().replacen(
+        "@failed:\n    ; Abort only an active temporary source save.",
+        "@failed:\n    lda constant_count\n    cmp #17\n    bcs :+\n    lda #99\n    jmp halt\n:\n    ; Abort only an active temporary source save.",
+        1,
+    );
+    let source = fs::read(root.join("examples/micro_trek.vtl")).unwrap();
+    let mut input = (source.len() as u16).to_le_bytes().to_vec();
+    input.extend_from_slice(&source);
+    let result = build_and_run_custom(
+        &input,
+        "tests/fixtures/sim65/frontend_basic.s",
+        Some(&basic),
+    );
+    assert_eq!(result.status.code(), Some(4), "{result:?}");
+    assert!(result.stdout.is_empty());
 }
 
 #[test]
@@ -329,7 +388,6 @@ fn malformed_source_never_starts_runtime() {
         ".HIGH:=32768",
         ".EXPR:=1+2",
         ".REF:=OTHER",
-        ".C0:=0 .C1:=1 .C2:=2 .C3:=3 .C4:=4 .C5:=5 .C6:=6 .C7:=7 .C8:=8 .C9:=9 .C10:=10 .C11:=11 .C12:=12 .C13:=13 .C14:=14 .C15:=15 .C16:=16",
         "A=UNKNOWN",
         "&=",
         "&=P [ ]",
