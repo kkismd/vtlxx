@@ -126,6 +126,26 @@
     ]
   ]
 
+; Galaxy map ( -- ). Scratch I, J, K; reads galaxy without changing storage.
+  &=m [
+    ?=() ?="########## GARAXY MAP ##########" ?=()
+    I=0
+    *=I<.SECTOR_LIMIT [
+      J=0
+      *=J<.SECTOR_LIMIT [
+        K=@((I*.SECTOR_LIMIT)+J)
+        ?=" "
+        %=K<.OBSERVED_FLAG [ ?="***" ] [
+          K=K-.OBSERVED_FLAG
+          ?=K/100 ?=(K/10)%10 ?=K%10
+        ]
+        J=J+1
+      ]
+      ?=() I=I+1
+    ]
+    ?=() ?=" ..1...2...3...4...5...6...7...8" ?=()
+  ]
+
 ; Short-range scan ( -- ). Direct scratch I, J, K; t clobbers A, B.
 ; Reads the sector and device state without changing storage or drawing random numbers.
   &=s [
