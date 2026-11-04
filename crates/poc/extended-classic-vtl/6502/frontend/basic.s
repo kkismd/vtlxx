@@ -89,7 +89,7 @@ operator_high:  .byte >rt_add,>rt_sub,>rt_mul,>rt_div,>rt_rem,>rt_lt,>rt_gt
 
 .segment "BSS"
 constant_name: .res 16
-constant_table: .res 16*19 ; 16-byte NUL-terminated name + signed i16
+constant_table: .res 128*19 ; 16-byte NUL-terminated name + signed i16
 while_loop_targets: .res 16*2
 while_exit_patches: .res 16*2
 top_level_chunk_targets: .res 53*2
@@ -1370,7 +1370,7 @@ fe_definition:
     jmp syntax_error             ; duplicate
 :
     lda constant_count
-    cmp #16
+    cmp #128
     bcc :+
     jmp syntax_error
 :

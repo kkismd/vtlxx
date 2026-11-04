@@ -45,18 +45,18 @@ _main:
     PUSH 127
     PUSH 4660
     jsr rt_store_storage
-    PUSH -1
+    PUSH 127
     jsr rt_load_storage
     jsr rt_print_number
     SEP
     PUSH 128
     PUSH 22136
     jsr rt_store_storage
-    PUSH 0
+    PUSH 128
     jsr rt_load_storage
     jsr rt_print_number
     SEP
-    PUSH -32768
+    PUSH 384
     jsr rt_load_storage
     jsr rt_print_number
     SEP

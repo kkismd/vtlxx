@@ -23,7 +23,7 @@ rt_index:   .res 1
 rt_input_eof: .res 1
 
 .segment "BSS"
-rt_storage: .res 256
+rt_storage: .res 512
 
 .segment "CODE"
 rt_init:
@@ -38,6 +38,7 @@ rt_init:
     tax
 @clear_storage:
     sta rt_storage,x
+    sta rt_storage+256,x
     inx
     bne @clear_storage
     rts
@@ -149,7 +150,7 @@ rt_store_reg:
     dec rt_depth
     rts
 
-; The low seven address bits select one of 128 Cells.
+; The low eight address bits select one of 256 Cells.
 rt_load_storage:
     jsr rt_need_one
     lda rt_depth
@@ -158,25 +159,38 @@ rt_load_storage:
     asl a
     tay
     lda rt_stack,y
-    and #$7f
     asl a
     tax
+    bcs @load_upper
     lda rt_storage,x
     sta rt_stack,y
     lda rt_storage+1,x
+    sta rt_stack+1,y
+    rts
+@load_upper:
+    lda rt_storage+256,x
+    sta rt_stack,y
+    lda rt_storage+257,x
     sta rt_stack+1,y
     rts
 
 rt_store_storage:
     jsr rt_need_two
     lda rt_lhs
-    and #$7f
     asl a
     tax
+    bcs @store_upper
     lda rt_rhs
     sta rt_storage,x
     lda rt_rhs+1
     sta rt_storage+1,x
+    jmp @stored
+@store_upper:
+    lda rt_rhs
+    sta rt_storage+256,x
+    lda rt_rhs+1
+    sta rt_storage+257,x
+@stored:
     dec rt_depth
     dec rt_depth
     rts
