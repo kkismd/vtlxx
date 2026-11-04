@@ -72,6 +72,8 @@
 .MAP_BASE := 66
 .MAP_STAR := 42
 .MAP_SHIP := 69
+.STARDATE_BASE := 3230
+.LOW_ENERGY := 1000
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -170,6 +172,25 @@
       ]
       ?="  1 2 3 4 5 6 7 8" ?=()
     ]
+  ]
+
+; Status report ( -- ). Reads game storage; no register or storage writes.
+  &=v [
+    ?="*STATUS REPORT*" ?=() ?=()
+    ?="*STARDATE : " ?=.STARDATE_BASE-@(.MISSION_DAYS) ?=() ?=()
+    ?="*CONDITION: "
+    %=@(.DOCKED)!=0 [ ?="DOCKED" ] [
+      %=@(.QUADRANT_ENEMIES)>0 [ ?="RED" ] [
+        %=@(.SHIP_ENERGY)<.LOW_ENERGY [ ?="YELLOW" ] [ ?="GREEN" ]
+      ]
+    ]
+    ?=()
+    ?="*QUADRANT : (" ?=@(.QUADRANT_X) ?=@(.QUADRANT_Y) ?=")" ?=()
+    ?="*SECTOR...: (" ?=@(.SHIP_X) ?=@(.SHIP_Y) ?=")" ?=()
+    ?="*ENERGY...: " ?=@(.SHIP_ENERGY) ?=() ?=()
+    ?="*TORPEDOES: " ?=@(.SHIP_TORPEDOES) ?=()
+    ?="*KLINGON..: " ?=@(.GALAXY_ENEMIES) ?=()
+    ?="*BASE.....: " ?=@(.GALAXY_BASES) ?=()
   ]
 
 ; Random damage event ( -- ). Writes the selected device and PRNG state;
