@@ -51,6 +51,12 @@
 .MISSION_CONTINUE := 0
 .MISSION_WIN := 1
 .MISSION_LOSE := 2
+.WARP_HALF := 22
+.WARP_WRAP := 360
+.WARP_DENOM := 110
+.WARP_STOP := -23
+.STORM_BOUND := 7
+.STORM_VALUE := 3
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -252,6 +258,64 @@
       C=C+1
       %=C==2 [ H=P ]
       %=C==3 [ H=R ]
+    ]
+  ]
+
+; Committed warp trajectory ( distance dx dy -- ). S/T retain direction,
+; U/V fixed-point coordinates, W remaining distance, X crossing flag,
+; Y step length and Z termination state across r/j. q runs only at the end.
+; Direct scratch A..D, S..Z; transitive also q's C,H,I,J,L,M,P,R.
+  &=x [
+    T=~ S=~ W=~
+    W=W*.COURSE_SCALE
+    U=(@(.SHIP_X)*.COURSE_SCALE)+.WARP_HALF
+    V=(@(.SHIP_Y)*.COURSE_SCALE)+.WARP_HALF
+    A=S %=A<0 [ A=0-A ]
+    B=T %=B<0 [ B=0-B ]
+    %=B<A [ A=B ]
+    Y=((A*A)+.COURSE_SCALE)/.WARP_DENOM+.COURSE_SCALE
+    X=0 Z=0
+    *=Z==0 [
+      W=W-Y
+      %=W<=.WARP_STOP [ Z=1 ] [
+        ?=@(.QUADRANT_X) ?=@(.QUADRANT_Y) ?="-"
+        ?=@(.SHIP_X) ?=@(.SHIP_Y) ?=()
+        U=U+S V=V+T
+        C=U/.COURSE_SCALE D=V/.COURSE_SCALE
+        %=(C>=1)*(C<=.SECTOR_LIMIT)*(D>=1)*(D<=.SECTOR_LIMIT) [
+          %=X==0 [
+            %=@(.SECTOR_BASE+((C-1)*.SECTOR_LIMIT)+D-1)!=0 [
+              ?="*** EMERGENCY STOP ***" ?=()
+              ?="SPOCK : TO ERR IS HUMAN !" ?=()
+              j=() Z=1
+            ] [ @=.SHIP_X,C @=.SHIP_Y,D ]
+          ] [ @=.SHIP_X,C @=.SHIP_Y,D ]
+        ] [
+          @=.QUADRANT_X,@(.QUADRANT_X)+(C==9)-(C==0)
+          @=.QUADRANT_Y,@(.QUADRANT_Y)+(D==9)-(D==0)
+          U=U+(.WARP_WRAP*(C==0))-(.WARP_WRAP*(C==9))
+          V=V+(.WARP_WRAP*(D==0))-(.WARP_WRAP*(D==9))
+          @=.SHIP_X,U/.COURSE_SCALE @=.SHIP_Y,V/.COURSE_SCALE
+          %=X==0 [ ?="*WARP ENGINE START" ?=() X=1 ]
+          %=(@(.QUADRANT_X)<1)+(@(.QUADRANT_X)>.SECTOR_LIMIT)+(@(.QUADRANT_Y)<1)+(@(.QUADRANT_Y)>.SECTOR_LIMIT) [
+            ?=" OUTSIDE THE GARAXY !!" ?=()
+            ?="ON BOARD COMPUTER TAKES OVER," ?=()
+            j=()
+            r=8 A=~ @=.QUADRANT_X,A
+            r=8 A=~ @=.QUADRANT_Y,A
+            @=.SHIP_X,@(.QUADRANT_Y) @=.SHIP_Y,@(.QUADRANT_X)
+            q=() Z=2
+          ]
+        ]
+      ]
+    ]
+    %=Z==1 [
+      %=X==0 [ @=.SECTOR_BASE+((@(.SHIP_X)-1)*.SECTOR_LIMIT)+@(.SHIP_Y)-1,4 ]
+      r=.STORM_BOUND A=~
+      %=A==.STORM_VALUE [ ?="## SPACE STORM ##" ?=() j=() ]
+      %=X==1 [ q=() ]
+      ?="NOW: QUADRANT(" ?=@(.QUADRANT_X) ?=@(.QUADRANT_Y)
+      ?=") SECTOR(" ?=@(.SHIP_X) ?=@(.SHIP_Y) ?=")" ?=()
     ]
   ]
 
