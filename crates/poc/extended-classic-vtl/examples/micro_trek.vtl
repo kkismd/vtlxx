@@ -134,9 +134,9 @@
       I=I+1
     ]
     %=@(.DOCKED)==1 [
-      ?="DOCKED IN" ?=()
       @=.SHIP_ENERGY,.ENERGY_MAX @=.SHIP_TORPEDOES,.TORPEDO_MAX
       I=.DEVICE_BASE *=I<.DEVICE_LIMIT [ @=I,0 I=I+1 ]
+      ?="DOCKED IN" ?=()
     ]
   ]
 

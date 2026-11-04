@@ -29,6 +29,10 @@ fn snapshot(m: &Machine) -> Vec<i16> {
 
 fn assert_result(m: &Machine, before: &[i16], docked: bool) {
     assert_eq!(m.stack(), PREFIX);
+    assert_storage(m, before, docked);
+}
+
+fn assert_storage(m: &Machine, before: &[i16], docked: bool) {
     for (i, &value) in before.iter().enumerate() {
         let expected = match (i, docked) {
             (170, _) => i16::from(docked),
@@ -114,12 +118,15 @@ impl Write for Broken {
 }
 
 #[test]
-fn output_error_propagates() {
+fn output_error_propagates_after_resupply_completes() {
     let mut m = machine(4, 4);
     put_base(&mut m, 3, 4);
+    let before = snapshot(&m);
     m.set_output(Broken);
     assert_eq!(
         m.execute_source("d=()"),
         Err(SourceError::Runtime(RuntimeError::OutputError))
     );
+    assert!(m.stack().starts_with(PREFIX));
+    assert_storage(&m, &before, true);
 }
