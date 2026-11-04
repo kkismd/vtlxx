@@ -94,6 +94,33 @@
     ?=()
   ]
 
+; Long-range scan ( -- ). Direct scratch I, J, K, L; t clobbers A, B.
+; Marks only in-range galaxy cells as observed; no PRNG draws.
+  &=l [
+    ?="NOW: QUADRANT(" ?=@(.QUADRANT_X) ?=@(.QUADRANT_Y)
+    ?=") SECTOR(" ?=@(.SHIP_X) ?=@(.SHIP_Y) ?=")" ?=()
+    t=3
+    %=@(.DEVICE_BASE+2)==0 [
+      I=@(.QUADRANT_X)-1
+      *=I<=(@(.QUADRANT_X)+1) [
+        ?=I J=@(.QUADRANT_Y)-1
+        *=J<=(@(.QUADRANT_Y)+1) [
+          ?=" "
+          %=((I>=1)*(I<=.SECTOR_LIMIT))*((J>=1)*(J<=.SECTOR_LIMIT)) [
+            L=((I-1)*.SECTOR_LIMIT)+J-1 K=@(L)
+            %=K<.OBSERVED_FLAG [ @=L,K+.OBSERVED_FLAG ]
+            K=K%.OBSERVED_FLAG
+            ?=K/100 ?=(K/10)%10 ?=K%10
+          ] [ ?="***" ]
+          J=J+1
+        ]
+        ?=() I=I+1
+      ]
+      ?=" ..." ?=@(.QUADRANT_Y)-1 ?="..." ?=@(.QUADRANT_Y)
+      ?="..." ?=@(.QUADRANT_Y)+1 ?=()
+    ]
+  ]
+
 ; Random damage event ( -- ). Writes the selected device and PRNG state;
 ; r and t clobber A and B. The first draw is protected on the value stack.
   &=j [
