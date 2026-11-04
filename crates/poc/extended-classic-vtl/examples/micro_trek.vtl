@@ -39,6 +39,8 @@
 .COURSE_SCALE := 45
 .COURSE_VALID := 1
 .COURSE_EOF := -1
+.HIT_SCALE := 30
+.ENEMY_UNIT := 100
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -74,6 +76,35 @@
     B=~ A=~
     @=.DEVICE_BASE+A-1,@(.DEVICE_BASE+A-1)+B
     t=A
+  ]
+
+; Hit calculation ( power enemy-slot -- damage ). Reads positions;
+; writes scratch A..F, without changing storage or drawing random numbers.
+  &=h [
+    A=~ B=~
+    C=@(.ENEMY_X_BASE+A-1)-@(.SHIP_X)
+    D=@(.ENEMY_Y_BASE+A-1)-@(.SHIP_Y)
+    E=(C*C)+(D*D)+.HIT_SCALE
+    F=B/E
+    ~=((.HIT_SCALE*F)+((.HIT_SCALE*(B%E))/E))+1
+  ]
+
+; Apply a hit ( enemy-slot damage -- ). Writes scratch A..D and, on
+; destruction, the selected HP, sector, galaxy cell and enemy totals.
+  &=k [
+    B=~ A=~
+    C=@(.ENEMY_HP_BASE+A-1)-B
+    %=C<=1 [
+      @=.ENEMY_HP_BASE+A-1,0
+      C=@(.ENEMY_X_BASE+A-1) D=@(.ENEMY_Y_BASE+A-1)
+      @=.SECTOR_BASE+((C-1)*8)+D-1,0
+      C=(@(.QUADRANT_X)*8)+@(.QUADRANT_Y)-9
+      @=C,@(C)-.ENEMY_UNIT
+      @=.GALAXY_ENEMIES,@(.GALAXY_ENEMIES)-1
+      @=.QUADRANT_ENEMIES,@(.QUADRANT_ENEMIES)-1
+    ] [
+      @=.ENEMY_HP_BASE+A-1,C
+    ]
   ]
 
 ; Generate a complete galaxy ( -- ). Writes galaxy[0..63],
