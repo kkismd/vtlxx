@@ -48,6 +48,9 @@
 .SECTOR_LIMIT := 8
 .DAMAGE_TRIGGER := 200
 .ENEMY_SLOTS := 6
+.MISSION_CONTINUE := 0
+.MISSION_WIN := 1
+.MISSION_LOSE := 2
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
@@ -169,6 +172,21 @@
       @=.SHIP_ENERGY,.ENERGY_MAX @=.SHIP_TORPEDOES,.TORPEDO_MAX
       I=.DEVICE_BASE *=I<.DEVICE_LIMIT [ @=I,0 I=I+1 ]
       ?="DOCKED IN" ?=()
+    ]
+  ]
+
+; End a committed turn ( -- mission-result ). d/a own all state writes;
+; no direct scratch writes, transitive scratch A..F, H, I, J, S, T, U.
+  &=u [
+    %=@(.GALAXY_ENEMIES)==0 [
+      ~=.MISSION_WIN
+    ] [
+      d=() a=()
+      %=@(.GALAXY_ENEMIES)==0 [ ~=.MISSION_WIN ] [
+        %=(@(.SHIP_ENERGY)<=0)+(@(.MISSION_DAYS)<=0) [
+          ~=.MISSION_LOSE
+        ] [ ~=.MISSION_CONTINUE ]
+      ]
     ]
   ]
 
