@@ -58,8 +58,6 @@ fn build_probe(temp: &TestDir) -> PathBuf {
     let sources = [
         "tests/fixtures/sim65/negative_compile_probe.s",
         "6502/frontend/basic.s",
-        "6502/frontend/template.s",
-        "6502/frontend/template_reader.s",
         "6502/frontend/source.s",
         "6502/compiler/arena.s",
         "6502/compiler/emitter.s",

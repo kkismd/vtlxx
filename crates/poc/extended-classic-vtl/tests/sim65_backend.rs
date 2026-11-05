@@ -175,9 +175,8 @@ fn binding_availability_query_is_non_destructive() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn shared_arena_source_storage_and_owner_guards() {
-    expect(21, b"QK");
-    for case in 22..=28 {
-        expect(case, b"K");
-    }
+fn code_arena_u16_wrap_and_full_range_bitsets() {
+    expect(21, b"K");
+    expect(22, b"K");
+    expect(28, b"K");
 }

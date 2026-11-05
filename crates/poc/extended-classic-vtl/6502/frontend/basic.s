@@ -5,12 +5,6 @@
 
 .export fe_compile_run
 .exportzp fe_compile_status
-; Private frontend ABI: identity in A; publish/lookup use cc_arg for start and
-; cc_data_length for length. template_is_bound and lookup leave cc_status alone.
-.import template_reset, template_is_bound, template_publish, template_lookup
-.import template_reader_init, template_reader_next, template_reader_stop
-.importzp template_reader_error
-.import cc_source_begin, cc_source_append, cc_source_finish, cc_source_abort, cc_source_is_active
 .import fe_init, fe_next, cc_init, cc_begin_owner, cc_complete_owner
 .import cc_define_label, cc_label_jump
 .import cc_mark, cc_jz_placeholder, cc_jump_placeholder, cc_patch_here
@@ -25,7 +19,6 @@
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
 .import rt_print_number, rt_print_char, rt_read_char
 .importzp fe_status, cc_status, cc_arg
-.importzp cc_data_length
 .import halt
 
 ; Compile-private CPU stack guard (#417/#424). The audited unguarded
@@ -47,13 +40,6 @@
 fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
 look_state = zp_phase + 0        ; 0 empty, 1 byte, 2 frame end, 3 transport error
 look_byte = zp_phase + 1
-virtual_active = zp_phase + 2
-original_look_state = zp_phase + 3
-original_look_byte = zp_phase + 4
-template_identity = zp_phase + 5
-template_replacement = zp_phase + 6
-template_start = zp_phase + 7
-template_length = zp_phase + 9
 target_index = zp_phase + 11
 nesting = zp_phase + 12
 structured_depth = zp_phase + 13
@@ -71,7 +57,6 @@ entry:             .res 2
 chunk_count = zp_phase + 26
 chunk_index = zp_phase + 27
 chunk_target = zp_phase + 28
-definition_identity = zp_phase + 30
 call_target = zp_phase + 31
 constant_count = zp_phase + 33
 constant_length = zp_phase + 34
@@ -79,11 +64,6 @@ constant_slot = zp_phase + 35
 constant_index = zp_phase + 36
 constant_char = zp_phase + 37
 constant_ptr = zp_phase + 38
-template_char = zp_phase + 40
-template_first = zp_phase + 41
-template_has_hole = zp_phase + 42
-template_has_statement = zp_phase + 43
-template_saved_start = zp_phase + 44
 
 .segment "RODATA"
 operator_chars: .byte '+','-','*','/','%','<','>'
@@ -107,7 +87,6 @@ fe_compile_run:
     lda #0
     sta fe_compile_status
     sta look_state
-    sta virtual_active
     sta nesting
     sta structured_depth
     sta while_depth
@@ -116,7 +95,6 @@ fe_compile_run:
     jsr fe_init
     jcs source_error
     jsr cc_init
-    jsr template_reset
     jsr fe_start_chunk
     lda fe_compile_status
     bne @failed
@@ -164,12 +142,6 @@ fe_compile_run:
     clc
     rts
 @failed:
-    ; Abort only an active temporary source save. Keep the original frontend
-    ; error and backend status as the primary failure report.
-    jsr cc_source_is_active
-    beq :+
-    jsr cc_source_abort
-:
     sec
     rts
 
@@ -258,7 +230,7 @@ fe_build_driver:
     clc
     rts
 
-; Only CPU stack exhaustion bypasses ordinary return/temporary-source abort.
+; Only CPU stack exhaustion bypasses ordinary return.
 ; The sim6502 process is discarded; no generated runtime has started.
 compile_stack_exhausted:
     lda #4
@@ -286,14 +258,6 @@ set_error:
 peek:
     lda look_state
     bne @ready
-    lda virtual_active
-    beq @source
-    jsr template_reader_next
-    bcc @byte
-    lda template_reader_error
-    beq @end
-    jmp syntax_error
-@source:
     jsr fe_next
     bcc @byte
     lda fe_status
@@ -441,12 +405,6 @@ statement:
     jsr scan_write_name_tail
     lda fe_compile_status
     jne @done
-    lda cc_name_len
-    cmp #1
-    bne @require_equals
-    lda look_byte
-    cmp #'{'
-    jeq template_call
 @require_equals:
     lda look_byte
     cmp #'='
@@ -522,9 +480,6 @@ statement:
     lda call_target
     ldx call_target+1
     jmp cc_call
-@template_rhs_entry:
-    cpx #0
-    jeq @compile_operand
 @call_group:
     ; The opening parenthesis was consumed to distinguish `()` from a normal
     ; grouped operand. Compile the group contents, then continue the ordinary
@@ -638,8 +593,6 @@ statement:
     lda fe_compile_status
     jne @done
     lda target_index
-    cmp #'{'
-    jeq template_call
     cmp #'~'
     jeq @done
     cmp #'a'
@@ -882,7 +835,6 @@ statement:
     jcc @write_definition_syntax
     cmp #'z'+1
     jcs @write_definition_syntax
-    sta definition_identity
     sta cc_name
     lda #1
     sta cc_name_len
@@ -891,23 +843,9 @@ statement:
     jsr scan_write_name_tail
     lda fe_compile_status
     jne @write_definition_done
-    lda cc_name_len
-    cmp #1
-    bne @normal_definition
-    lda look_byte
-    cmp #'{'
-    jeq @template_definition
-@normal_definition:
     jsr require_form_boundary
     lda fe_compile_status
     bne @write_definition_done
-    lda cc_name_len
-    cmp #1
-    bne @check_write_binding
-    lda definition_identity
-    jsr template_is_bound
-    bne @write_definition_syntax
-@check_write_binding:
     jsr cc_is_bound
     bcs @write_definition_syntax
     lda cc_status
@@ -958,440 +896,7 @@ statement:
 @write_definition_done:
     rts
 
-; Parse and save a source template without compiling any body RHS.
-@template_definition:
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @write_definition_syntax
-    lda look_byte
-    cmp #'}'
-    jne @write_definition_syntax
-    jsr take
-    jsr require_form_boundary
-    lda fe_compile_status
-    bne @write_definition_done
-
-    lda definition_identity
-    jsr template_is_bound
-    bne @write_definition_syntax
-    jsr cc_is_bound
-    bcs @write_definition_syntax
-    lda cc_status
-    jne @write_definition_backend
-
-    jsr skip_separators
-    lda look_state
-    cmp #3
-    jeq source_error
-    cmp #1
-    jne @write_definition_syntax
-    lda look_byte
-    cmp #'['
-    jne @write_definition_syntax
-    jsr take
-    jsr require_form_boundary
-    lda fe_compile_status
-    bne @write_definition_done
-    lda look_state
-    cmp #2
-    jeq @write_definition_syntax
-
-    ; Only after every header check and both namespaces are known to be free.
-    jsr fe_finish_chunk
-    lda fe_compile_status
-    bne @write_definition_done
-    jsr cc_source_begin
-    lda cc_status
-    jne @write_definition_backend
-    lda #1
-    sta template_first
-    lda #0
-    sta template_has_hole
-    sta template_has_statement
-@template_body_next:
-    jsr template_skip_separators
-    lda fe_compile_status
-    jne @write_definition_done
-    lda look_state
-    cmp #3
-    jeq source_error
-    cmp #2
-    jeq @write_definition_syntax
-    lda look_byte
-    cmp #']'
-    jeq @template_body_close
-    jsr template_body_statement
-    lda fe_compile_status
-    jne @write_definition_done
-    lda cc_status
-    jne @write_definition_backend
-    jmp @template_body_next
-@template_body_close:
-    lda template_has_statement
-    jeq @write_definition_syntax
-    lda template_has_hole
-    jeq @write_definition_syntax
-    jsr take
-    jsr require_form_boundary
-    lda fe_compile_status
-    jne @write_definition_done
-    jsr cc_source_finish
-    sta template_saved_start
-    stx template_saved_start+1
-    lda cc_status
-    jne @write_definition_backend
-    lda template_saved_start
-    sta cc_arg
-    lda template_saved_start+1
-    sta cc_arg+1
-    lda definition_identity
-    jsr template_publish
-    lda cc_status
-    jne @write_definition_backend
-    jsr fe_start_chunk
-    rts
-
-; Skip source separators and comments inside the template body. Comments
-; never enter the saved source and all physical newlines become canonical LF.
-; Expose one entry into the shared RHS path without adding a JSR frame.
-template_rhs_entry = @template_rhs_entry
-template_skip_separators:
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @done
-    lda look_byte
-    cmp #';'
-    beq @comment
-    cmp #' '
-    beq @skip
-    cmp #9
-    beq @skip
-    cmp #10
-    beq @skip
-    cmp #13
-    bne @done
-@skip:
-    jsr take
-    jmp template_skip_separators
-@comment:
-    jsr take
-@comment_next:
-    jsr peek
-    lda look_state
-    cmp #1
-    bne @done
-    lda look_byte
-    cmp #10
-    beq @skip
-    jsr take
-    jmp @comment_next
-@done:
-    rts
-
-; Validate the assignment prefix before saving anything from this statement.
-template_body_statement:
-    lda look_byte
-    cmp #'A'
-    bcc @hole_prefix
-    cmp #'Z'+1
-    bcc @register_prefix
-@hole_prefix:
-    cmp #'{'
-    jne @bad
-    ; Verify the complete {}= prefix before writing any of it.
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @bad
-    lda look_byte
-    cmp #'}'
-    jne @bad
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @bad
-    lda look_byte
-    cmp #'='
-    jne @bad
-    jsr template_begin_statement
-    lda fe_compile_status
-    bne @done
-    lda #'{'
-    jsr template_append
-    lda #'}'
-    jsr template_append
-    lda #1
-    sta template_has_hole
-    jsr template_save_equals
-    rts
-@register_prefix:
-    sta template_char
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @bad
-    lda look_byte
-    cmp #'='
-    jne @bad
-    jsr template_begin_statement
-    lda fe_compile_status
-    bne @done
-    lda template_char
-    jsr template_append
-    jsr template_save_equals
-    rts
-@bad:
-    jmp syntax_error
-@done:
-    rts
-
-template_begin_statement:
-    lda template_first
-    bne @first
-    lda #10
-    jsr cc_source_append
-    lda cc_status
-    bne @backend
-@first:
-    lda #0
-    sta template_first
-    lda #1
-    sta template_has_statement
-    clc
-    rts
-@backend:
-    jmp backend_error
-
-template_save_equals:
-    jsr template_take_save
-    lda fe_compile_status
-    bne @done
-@rhs:
-    jsr peek
-    lda look_state
-    cmp #3
-    jeq source_error
-    cmp #2
-    beq @end
-    lda look_byte
-    cmp #' '
-    beq @end
-    cmp #9
-    beq @end
-    cmp #10
-    beq @end
-    cmp #13
-    beq @end
-    cmp #';'
-    beq @end
-    cmp #']'
-    beq @bad
-    cmp #'['
-    beq @bad
-    cmp #'}'
-    beq @bad
-    cmp #'{'
-    bne @save_rhs
-    jsr template_take_save
-    lda fe_compile_status
-    bne @done
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @bad
-    lda look_byte
-    cmp #'}'
-    jne @bad
-    jsr template_take_save
-    lda fe_compile_status
-    bne @done
-    lda #1
-    sta template_has_hole
-    jmp @rhs
-@save_rhs:
-    jsr template_take_save
-    lda fe_compile_status
-    bne @done
-    jmp @rhs
-@end:
-    rts
-@bad:
-    jmp syntax_error
-@backend:
-    jmp backend_error
-@done:
-    rts
-
-; Consume current lookahead and append it verbatim to the arena. A backend
-; capacity failure is promoted to frontend resource status 4 by the caller.
-template_take_save:
-    lda look_byte
-    sta template_char
-    jsr take
-    lda template_char
-    jmp template_append
-@done:
-    rts
-
-template_append:
-    jsr cc_source_append
-    lda cc_status
-    beq @done
-    jmp backend_error
-@done:
-    rts
-
-; Numeric label operands reuse the compile-run constant table, then delegate
-; all owner-local definition/fixup behavior to the backend.
-; Parse a{X}=RHS, preserve the original one-byte lookahead, then feed the
-; saved template through the same statement compiler under a virtual reader.
-template_call:
-    lda target_index
-    cmp #'{'
-    jeq @rhs_complete
-    sta template_identity
-    jsr take                         ; {
-    jsr peek
-    lda look_state
-    cmp #1
-    jne syntax_error
-    lda look_byte
-    cmp #'A'
-    jcc syntax_error
-    cmp #'Z'+1
-    jcs syntax_error
-    sta template_replacement
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne syntax_error
-    lda look_byte
-    cmp #'}'
-    jne syntax_error
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne syntax_error
-    lda look_byte
-    cmp #'='
-    jne syntax_error
-    jsr take
-    ; A brace cannot be an ordinary target. It selects expansion after the
-    ; shared RHS path instead of the ordinary Write dispatch.
-    lda #'{'
-    sta target_index
-    jsr peek
-    lda look_state
-    cmp #1
-    jne @normal_rhs
-    lda look_byte
-    cmp #'('
-    jne @normal_rhs
-    jsr take
-    jsr peek
-    lda look_state
-    cmp #1
-    jne syntax_error
-    lda look_byte
-    cmp #')'
-    jne @group_rhs
-    jsr take
-    jsr peek
-    jsr statement_end
-    lda fe_compile_status
-    jne @done
-@rhs_complete:
-    ; statement_end validates without consuming the delimiter lookahead.
-    lda look_state
-    sta original_look_state
-    lda look_byte
-    sta original_look_byte
-    lda template_identity
-    jsr template_lookup
-    jcs @undefined
-    lda cc_arg
-    sta template_start
-    lda cc_arg+1
-    sta template_start+1
-    lda cc_data_length
-    sta template_length
-    lda cc_data_length+1
-    sta template_length+1
-    lda template_start
-    sta cc_arg
-    ldx template_start+1
-    stx cc_arg+1
-    lda template_length
-    sta cc_data_length
-    lda template_length+1
-    sta cc_data_length+1
-    lda template_start
-    ldx template_start+1
-    ldy template_replacement
-    jsr template_reader_init
-    lda #1
-    sta virtual_active
-    lda #0
-    sta look_state
-@expand_next:
-    jsr skip_separators
-    lda fe_compile_status
-    bne @expand_fail
-    lda look_state
-    cmp #2
-    beq @expand_done
-    cmp #1
-    jne @expand_fail
-    lda look_byte
-    cmp #'A'
-    jcc @expand_fail
-    cmp #'Z'+1
-    jcs @expand_fail
-    jsr statement
-    lda fe_compile_status
-    bne @expand_fail
-    lda cc_status
-    bne @expand_backend
-    jmp @expand_next
-@expand_done:
-    jsr template_reader_stop
-    lda #0
-    sta virtual_active
-    lda original_look_state
-    sta look_state
-    lda original_look_byte
-    sta look_byte
-    rts
-@expand_backend:
-    jsr template_reader_stop
-    lda #0
-    sta virtual_active
-    jmp backend_error
-@expand_fail:
-    jsr template_reader_stop
-    lda #0
-    sta virtual_active
-    rts
-@undefined:
-    jmp syntax_error
-@done:
-    rts
-@normal_rhs:
-    ldx #0
-    jmp template_rhs_entry
-@group_rhs:
-    ldx #1
-    jmp template_rhs_entry
-
-
+; Numeric label operands use the compile-run constant table.
 fe_label:
     jsr resolve_label_operand
     lda fe_compile_status

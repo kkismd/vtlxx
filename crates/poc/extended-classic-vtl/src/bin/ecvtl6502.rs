@@ -243,8 +243,6 @@ fn build_and_run(
     let sources = [
         "6502/target/sim65_cli.s",
         "6502/frontend/basic.s",
-        "6502/frontend/template.s",
-        "6502/frontend/template_reader.s",
         "6502/frontend/source.s",
         "6502/compiler/arena.s",
         "6502/compiler/emitter.s",
