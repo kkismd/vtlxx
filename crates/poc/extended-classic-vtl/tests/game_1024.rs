@@ -45,14 +45,14 @@ fn initial_draws_and_initialization_are_independent_expectations() {
         (15, 1, 21180),
         (10, 4, -22907),
     ] {
-        m.execute_source(&format!("r={bound}")).unwrap();
+        m.execute_source(&format!("random={bound}")).unwrap();
         assert_eq!(m.pop().unwrap(), value);
         assert_eq!(m.stack(), PREFIX);
         assert_eq!(m.storage(20), state);
     }
     set(&mut m, 20, 12345);
     set(&mut m, 26, 1);
-    call(&mut m, "i=()");
+    call(&mut m, "newgame=()");
     assert_eq!(board(&m), [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     assert_eq!(
         (
@@ -64,7 +64,7 @@ fn initial_draws_and_initialization_are_independent_expectations() {
         ),
         (-22907, 0, 0, 0, 1)
     );
-    call(&mut m, "i=()");
+    call(&mut m, "newgame=()");
     assert_ne!(m.storage(20), -22907);
     assert_eq!(m.storage(26), 1);
 }
@@ -88,7 +88,7 @@ fn movement_merges_once_in_each_direction_and_scores() {
             for (idx, value) in indices.into_iter().zip(input) {
                 set(&mut m, idx, value);
             }
-            call(&mut m, &format!("m={direction}"));
+            call(&mut m, &format!("movegrid={direction}"));
             let actual: Vec<_> = indices
                 .into_iter()
                 .map(|idx| m.storage(idx as u16))
@@ -110,7 +110,7 @@ fn score_carry_and_saturation() {
         set(&mut m, 1, 1);
         set(&mut m, 21, high);
         set(&mut m, 22, low);
-        call(&mut m, "m=0");
+        call(&mut m, "movegrid=0");
         assert_eq!((m.storage(21), m.storage(22)), expected);
     }
 }
@@ -126,7 +126,7 @@ fn availability_checks_empty_and_equal_neighbors() {
         for (i, value) in cells.into_iter().enumerate() {
             set(&mut m, i, value);
         }
-        m.execute_source("e=()").unwrap();
+        m.execute_source("canmove=()").unwrap();
         assert_eq!(m.pop().unwrap(), expected);
         assert_eq!(m.stack(), PREFIX);
         assert_eq!(board(&m), cells);
@@ -145,7 +145,7 @@ fn input_lines_handle_crlf_cr_empty_and_incomplete_eof() {
         let mut m = machine();
         m.set_input(Cursor::new(input.to_vec()));
         for value in expected {
-            m.execute_source("c=()").unwrap();
+            m.execute_source("readcmd=()").unwrap();
             assert_eq!(m.pop().unwrap(), value, "input {input:?}");
             assert_eq!(m.stack(), PREFIX);
         }
@@ -156,13 +156,13 @@ fn input_lines_handle_crlf_cr_empty_and_incomplete_eof() {
 fn cell_centering_and_score_rendering() {
     let mut m = machine();
     for value in [0, 1, 12, 1024] {
-        call(&mut m, &format!("p={value}"));
+        call(&mut m, &format!("tileout={value}"));
     }
     assert_eq!(m.output(), b"   .      1      12    1024 ");
     m.clear_output();
     set(&mut m, 21, 1);
     set(&mut m, 22, 1);
-    call(&mut m, "f=()");
+    call(&mut m, "drawgame=()");
     assert!(m.output().starts_with(b"1024\nSCORE: 10001  MOVES: 0\n\n"));
 }
 
@@ -194,7 +194,7 @@ fn run_game(input: &[u8]) -> Machine {
     m.set_input(Cursor::new(input.to_vec()));
     set(&mut m, 20, 12345);
     set(&mut m, 26, 0);
-    call(&mut m, "g=()");
+    call(&mut m, "gameloop=()");
     m
 }
 
@@ -274,15 +274,15 @@ fn repeated_no_op_does_not_redraw_or_change_state() {
 #[test]
 fn procedures_preserve_registers_outside_transitive_clobbers() {
     for (source, clobbers, returns) in [
-        ("r=7", "AB", true),
-        ("n=()", "ABCDEF", false),
-        ("m=0", "GHIJKLMN", false),
-        ("p=12", "VW", false),
-        ("f=()", "IJVW", false),
-        ("c=()", "XY", true),
-        ("e=()", "IJ", true),
-        ("i=()", "ABCDEF", false),
-        ("g=()", "ABCDEFGHIJKLMNOPVWXY", false),
+        ("random=7", "AB", true),
+        ("newtile=()", "ABCDEF", false),
+        ("movegrid=0", "GHIJKLMN", false),
+        ("tileout=12", "VW", false),
+        ("drawgame=()", "IJVW", false),
+        ("readcmd=()", "XY", true),
+        ("canmove=()", "IJ", true),
+        ("newgame=()", "ABCDEF", false),
+        ("gameloop=()", "ABCDEFGHIJKLMNOPVWXY", false),
     ] {
         let mut m = machine();
         m.set_input(Cursor::new(b"Q\n".to_vec()));
@@ -321,8 +321,11 @@ fn game_with_position(cells: [i16; 16], moves: i16, input: &[u8]) -> Machine {
         setup.push_str(&format!(" @={index},{value}"));
     }
     setup.push_str(&format!(" @=23,{moves}"));
-    let definitions =
-        SOURCE[..end].replacen("&=g [\n    i=()", &format!("&=g [\n    i=() {setup}"), 1);
+    let definitions = SOURCE[..end].replacen(
+        "&=gameloop [\n    newgame=()",
+        &format!("&=gameloop [\n    newgame=() {setup}"),
+        1,
+    );
     assert_ne!(definitions, SOURCE[..end]);
     let mut m = Machine::new();
     m.execute_source(&definitions).unwrap();
@@ -331,7 +334,7 @@ fn game_with_position(cells: [i16; 16], moves: i16, input: &[u8]) -> Machine {
     }
     m.set_input(Cursor::new(input.to_vec()));
     set(&mut m, 20, 12345);
-    call(&mut m, "g=()");
+    call(&mut m, "gameloop=()");
     m
 }
 

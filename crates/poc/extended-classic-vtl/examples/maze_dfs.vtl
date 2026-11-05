@@ -11,15 +11,15 @@
 .PATH_BASE := 32
 .DIRECTION_BASE := 48
 
-  ; m: ( cell -- open ). Reads maze[0..15]; writes/clobbers T; storage unchanged.
-  &=m [
+  ; isopen: ( cell -- open ). Reads maze[0..15]; writes/clobbers T; storage unchanged.
+  &=isopen [
     T=~
     %=T<0 [ ~=0 ] [ ~=@(T)==1 ]
   ]
 
-  ; v: ( cell -- newly visited ). Reads/writes visited[16..31].
+  ; visit: ( cell -- newly visited ). Reads/writes visited[16..31].
   ; Writes/clobbers T; no other A-Z or storage changes.
-  &=v [
+  &=visit [
     T=~
     %=@(.VISITED_BASE+T)==0 [
       @=.VISITED_BASE+T,1
@@ -27,9 +27,9 @@
     ] [ ~=0 ]
   ]
 
-  ; p: ( cell -- ). Reads/writes D and C, path[32..47], directions[48..63].
+  ; pushpath: ( cell -- ). Reads/writes D and C, path[32..47], directions[48..63].
   ; Writes/clobbers T. The new frame starts with the right direction.
-  &=p [
+  &=pushpath [
     T=~
     D=D+1
     @=.PATH_BASE+D,T
@@ -37,10 +37,10 @@
     C=T
   ]
 
-  ; n: ( -- candidate ). Reads C, D, directions[48..63]; advances that
+  ; nextcell: ( -- candidate ). Reads C, D, directions[48..63]; advances that
   ; depth's direction and returns the neighbor or -1 when outside the grid.
   ; Writes/clobbers R and N; writes directions[48..63].
-  &=n [
+  &=nextcell [
     R=@(.DIRECTION_BASE+D)
     @=.DIRECTION_BASE+D,R+1
     N=-1
@@ -63,34 +63,34 @@
     ~=N
   ]
 
-  ; b: ( -- ). Reads path[32..47] and D; writes C and D.
+  ; popframe: ( -- ). Reads path[32..47] and D; writes C and D.
   ; Does not clear visited or path: visited is global, while D bounds live path.
   ; No scratch is clobbered and storage is unchanged.
-  &=b [
+  &=popframe [
     D=D-1
     %=D>=0 [ C=@(.PATH_BASE+D) ]
   ]
 
-  ; s: ( -- ). Reads/writes C, D, N, R, T, visited, path, directions;
-  ; reads maze; calls n, m, v, p, b and clobbers their scratch.
+  ; search: ( -- ). Reads/writes C, D, N, R, T, visited, path, directions;
+  ; reads maze; calls nextcell, isopen, visit, pushpath, popframe and clobbers their scratch.
   ; Each attempted direction advances exactly once, even for a wall or revisit.
-  &=s [
+  &=search [
     *=(D>=0)*(C!=15) [
       %=@(.DIRECTION_BASE+D)<4 [
-        n=()
+        nextcell=()
         N=~
-        m=N
+        isopen=N
         %=~ [
-          v=N
-          %=~ [ p=N ]
+          visit=N
+          %=~ [ pushpath=N ]
         ]
-      ] [ b=() ]
+      ] [ popframe=() ]
     ]
   ]
 
-  ; o: ( -- ). Reads D; writes output; clobbers no A-Z or storage.
+  ; showlen: ( -- ). Reads D; writes output; clobbers no A-Z or storage.
   ; D is zero-based, so the number of cells on the path is D+1.
-  &=o [
+  &=showlen [
     ?=D+1
     ?=()
   ]
@@ -111,8 +111,8 @@
   @=15,1
 
   D=-1
-  v=0
+  visit=0
   T=~
-  p=0
-  s=()
-  o=()
+  pushpath=0
+  search=()
+  showlen=()

@@ -2,8 +2,8 @@
 ; line buffer 16..19, PRNG 20, score high/low 21..22, moves 23,
 ; changed 24, win 25, and CR continuation 26.
 
-; r: ( n -- value ); reads/writes storage[20]; clobbers A,B.
-  &=r [
+; random: ( n -- value ); reads/writes storage[20]; clobbers A,B.
+  &=random [
     A=~
     B=(@(20)*25173)+13849
     @=20,B
@@ -12,15 +12,15 @@
     ~=B+1
   ]
 
-; n: ( -- ); reads board and storage[20], writes one empty cell and
-; storage[20]; calls r; clobbers A..F. Caller guarantees an empty cell.
-  &=n [
+; newtile: ( -- ); reads board and storage[20], writes one empty cell and
+; storage[20]; calls random; clobbers A..F. Caller guarantees an empty cell.
+  &=newtile [
     C=0 D=0
     *=C<16 [
       %=@(C)==0 [ D=D+1 ]
       C=C+1
     ]
-    r=D
+    random=D
     E=~
     C=0
     *=E>0 [
@@ -28,14 +28,14 @@
       C=C+1
     ]
     F=C-1
-    r=10
+    random=10
     E=~
     %=E==10 [ @=F,2 ] [ @=F,1 ]
   ]
 
-; m: ( direction -- ); reads/writes board, buffer, score and changed;
+; movegrid: ( direction -- ); reads/writes board, buffer, score and changed;
 ; clobbers G..N. Each pair is merged once, then removed from the buffer.
-  &=m [
+  &=movegrid [
     G=~
     @=24,0
     H=0
@@ -86,8 +86,8 @@
     ]
   ]
 
-; p: ( value -- ); writes output only, clobbers V,W.
-  &=p [
+; tileout: ( value -- ); writes output only, clobbers V,W.
+  &=tileout [
     V=~ W=1
     %=V>=10 [ W=2 ]
     %=V>=100 [ W=3 ]
@@ -103,8 +103,8 @@
     *=W>0 [ $=32 W=W-1 ]
   ]
 
-; f: ( -- ); reads board, score and moves; writes output; clobbers I,J,V,W.
-  &=f [
+; drawgame: ( -- ); reads board, score and moves; writes output; clobbers I,J,V,W.
+  &=drawgame [
     ?="1024" ?=()
     ?="SCORE: "
     %=@(21)>0 [
@@ -119,7 +119,7 @@
       ?="+-------+-------+-------+-------+" ?=()
       ?="|       |       |       |       |" ?=()
       J=0
-      *=J<4 [ $=124 p=@((I*4)+J) J=J+1 ]
+      *=J<4 [ $=124 tileout=@((I*4)+J) J=J+1 ]
       $=124 ?=()
       ?="|       |       |       |       |" ?=()
       I=I+1
@@ -127,8 +127,8 @@
     ?="+-------+-------+-------+-------+" ?=() ?=()
   ]
 
-; c: ( -- command ); reads input, reads/writes storage[26], clobbers X,Y.
-  &=c [
+; readcmd: ( -- command ); reads input, reads/writes storage[26], clobbers X,Y.
+  &=readcmd [
     X=$
     %=@(26) [
       @=26,0
@@ -152,8 +152,8 @@
     ~=Y
   ]
 
-; e: ( -- available ); reads board, clobbers I,J, leaves 0 or 1.
-  &=e [
+; canmove: ( -- available ); reads board, clobbers I,J, leaves 0 or 1.
+  &=canmove [
     I=0 J=0
     *=I<16 [
       %=@(I)==0 [ J=1 ]
@@ -164,31 +164,31 @@
     ~=J
   ]
 
-; i: ( -- ); resets board, buffer, score, moves and flags, calls n twice;
+; newgame: ( -- ); resets board, buffer, score, moves and flags, calls newtile twice;
 ; reads/writes [20], preserves stream and [26], clobbers A..F.
-  &=i [
+  &=newgame [
     C=0
     *=C<20 [ @=C,0 C=C+1 ]
     @=21,0 @=22,0 @=23,0 @=24,0 @=25,0
-    n=() n=()
+    newtile=() newtile=()
   ]
 
-; g: ( -- ); owns game control and output, calls i,f,c,m,n,e;
+; gameloop: ( -- ); owns game control and output, calls newgame,drawgame,readcmd,movegrid,newtile,canmove;
 ; reads/writes storage[0..26], clobbers A..P,V..Y.
-  &=g [
-    i=()
-    f=()
+  &=gameloop [
+    newgame=()
+    drawgame=()
     ?="WASD MOVE  R RESTART  Q QUIT" ?=()
     O=1
     *=O [
       ?="> "
-      c=() N=~
+      readcmd=() N=~
       %=(N==-1)+(N==81) [ O=0 ] [
         %=N==82 [
-          i=() f=()
+          newgame=() drawgame=()
           ?="WASD MOVE  R RESTART  Q QUIT" ?=()
         ] [
-          e=() P=~
+          canmove=() P=~
           P=(P==0)+@(25)
           %=P [ ?="R OR Q ONLY" ?=() ] [
             %=N==0 [ ?="INVALID COMMAND" ?=() ] [
@@ -196,16 +196,16 @@
               %=N==68 [ N=1 ]
               %=N==87 [ N=2 ]
               %=N==83 [ N=3 ]
-              m=N
+              movegrid=N
               %=@(24)==0 [ ?="NO MOVE" ?=() ] [
                 %=@(23)<32767 [ @=23,@(23)+1 ]
-                n=()
+                newtile=()
                 N=0
                 *=N<16 [ %=@(N)==1024 [ @=25,1 ] N=N+1 ]
-                f=()
+                drawgame=()
                 P=0
                 %=@(25) [ P=1 ?="YOU WIN!" ?=() ] [
-                  e=() N=~
+                  canmove=() N=~
                   %=N==0 [ P=1 ?="GAME OVER" ?=() ]
                 ]
                 %=P [ ?="R RESTART  Q QUIT" ?=() ] [
@@ -222,4 +222,4 @@
 ; GAME1024_TEST_DEFINITIONS_END
   @=20,12345
   @=26,0
-  g=()
+  gameloop=()
