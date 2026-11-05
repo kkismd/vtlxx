@@ -78,10 +78,12 @@ fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
         .join("tests/fixtures/sim65")
         .join(format!("{fixture}.s"));
     let frontend = crate_root.join("6502/frontend/source.s");
+    let layout = crate_root.join("6502/target/zp_layout.s");
     let temp = TempDir::new()?;
     let adapter_object = temp.0.join("adapter.o");
     let fixture_object = temp.0.join("fixture.o");
     let frontend_object = temp.0.join("frontend.o");
+    let layout_object = temp.0.join("layout.o");
     let executable = temp.0.join("smoke.prg");
 
     for (source, object) in [(&adapter, &adapter_object), (&fixture, &fixture_object)] {
@@ -102,6 +104,20 @@ fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
 
     let mut objects = vec![fixture_object.as_os_str(), adapter_object.as_os_str()];
     if fixture.file_stem().and_then(|name| name.to_str()) == Some("frontend_framing") {
+        let output = run_tool(
+            "ca65",
+            "assemble layout",
+            &[
+                OsStr::new("-t"),
+                OsStr::new("sim6502"),
+                layout.as_os_str(),
+                OsStr::new("-o"),
+                layout_object.as_os_str(),
+            ],
+            &[],
+        )?;
+        require_success("assemble layout", "ca65", &output)?;
+        objects.push(layout_object.as_os_str());
         let output = run_tool(
             "ca65",
             "assemble frontend",

@@ -7,9 +7,9 @@
 .exportzp fe_remaining, fe_status
 .import serial_in
 
-.segment "ZEROPAGE"
-fe_remaining: .res 2
-fe_status:    .res 1
+.importzp zp_phase
+fe_remaining = zp_phase + 46
+fe_status = zp_phase + 48
 
 .segment "CODE"
 ; Read the frame length. Carry is clear on success, set on truncated header.

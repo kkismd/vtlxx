@@ -41,46 +41,48 @@
 :
 .endmacro
 
+.importzp zp_phase
 .segment "ZEROPAGE"
 fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
-look_state:        .res 1       ; 0 empty, 1 byte, 2 frame end, 3 transport error
-look_byte:         .res 1
-virtual_active:    .res 1
-original_look_state: .res 1
-original_look_byte: .res 1
-template_identity: .res 1
-template_replacement: .res 1
-template_start:    .res 2
-template_length:   .res 2
-target_index:      .res 1
-nesting:           .res 1
-structured_depth:  .res 1
-while_depth:       .res 1
-while_slot:        .res 1
-while_offset:      .res 1
-patch_scratch:     .res 2
-while_word:        .res 2
-negative:          .res 1
-literal:           .res 2
-digit:             .res 1
-operator_index:    .res 1
+look_state = zp_phase + 0        ; 0 empty, 1 byte, 2 frame end, 3 transport error
+look_byte = zp_phase + 1
+virtual_active = zp_phase + 2
+original_look_state = zp_phase + 3
+original_look_byte = zp_phase + 4
+template_identity = zp_phase + 5
+template_replacement = zp_phase + 6
+template_start = zp_phase + 7
+template_length = zp_phase + 9
+target_index = zp_phase + 11
+nesting = zp_phase + 12
+structured_depth = zp_phase + 13
+while_depth = zp_phase + 14
+while_slot = zp_phase + 15
+while_offset = zp_phase + 16
+patch_scratch = zp_phase + 17
+while_word = zp_phase + 19
+negative = zp_phase + 21
+literal = zp_phase + 22
+digit = zp_phase + 24
+operator_index = zp_phase + 25
+.segment "ZEROPAGE"
 entry:             .res 2
-chunk_count:       .res 1
-chunk_index:       .res 1
-chunk_target:      .res 2
-definition_identity: .res 1
-call_target:       .res 2
-constant_count:    .res 1
-constant_length:   .res 1
-constant_slot:     .res 1
-constant_index:    .res 1
-constant_char:     .res 1
-constant_ptr:      .res 2
-template_char:     .res 1
-template_first:    .res 1
-template_has_hole: .res 1
-template_has_statement: .res 1
-template_saved_start: .res 2
+chunk_count = zp_phase + 26
+chunk_index = zp_phase + 27
+chunk_target = zp_phase + 28
+definition_identity = zp_phase + 30
+call_target = zp_phase + 31
+constant_count = zp_phase + 33
+constant_length = zp_phase + 34
+constant_slot = zp_phase + 35
+constant_index = zp_phase + 36
+constant_char = zp_phase + 37
+constant_ptr = zp_phase + 38
+template_char = zp_phase + 40
+template_first = zp_phase + 41
+template_has_hole = zp_phase + 42
+template_has_statement = zp_phase + 43
+template_saved_start = zp_phase + 44
 
 .segment "RODATA"
 operator_chars: .byte '+','-','*','/','%','<','>'

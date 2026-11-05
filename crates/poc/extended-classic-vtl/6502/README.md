@@ -14,6 +14,8 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 -- --ignored
 
 `runtime/state.s`、`runtime/arithmetic.s`、`runtime/primitives.s` は第一6502 proof profile の実行状態と primitive を実装する。後続の native emitter は `rt_init` を一度呼び、その後に以下の entry point を JSR で呼ぶ。いずれも target 内の link contract であり、portable ECVTL API ではない。
 
+sim65 では、全 source の compile と driver 完成の後に `rt_init` へ移るため、compile 専用 Zero Page scratch と runtime 状態を `target/zp_layout.s` の同じ 111 B に配置する。driver entry、frontend/backend の結果 status、および両フェーズで使う cc65 library の領域は共有しない。compile failure は runtime 開始前に戻る。runtime から新たな source compile へ戻る経路はない。
+
 | entry | 入力 | value stack effect |
 | --- | --- | --- |
 | `rt_push` | A = Cell low byte、X = high byte | `( -- value )` |

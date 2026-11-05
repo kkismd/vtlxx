@@ -5,13 +5,13 @@
 .import rt_need_one, rt_overflow, rt_push, serial_in, serial_out
 .importzp rt_depth, rt_stack, rt_input_eof
 
-.segment "ZEROPAGE"
-number_low:     .res 1
-number_high:    .res 1
-number_digit:   .res 1
-number_place:   .res 1
-number_started: .res 1
-bytes_pointer:  .res 2
+.importzp zp_phase
+number_low = zp_phase + 93
+number_high = zp_phase + 94
+number_digit = zp_phase + 95
+number_place = zp_phase + 96
+number_started = zp_phase + 97
+bytes_pointer = zp_phase + 98
 
 .segment "BSS"
 bytes_remaining: .res 1
