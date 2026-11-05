@@ -12,7 +12,7 @@
 .import cc_work_push, cc_work_pop, cc_work_swap, cc_work_reset
 .import rt_init, rt_print_number, rt_print_char, rt_push
 .import serial_out, halt
-.importzp cc_status, cc_arg, cc_cursor, cc_data_length, rt_depth
+.importzp cc_status, cc_arg, cc_cursor, cc_data_length, cc_pending_count, rt_depth
 
 .macro WORD value
     lda #<(value)
@@ -191,7 +191,7 @@ _main:
     jsr cc_patch
     ERROR
 .elseif TEST_CASE = 5
-    ; Exactly 2048 bytes fit. The next byte fails without moving the cursor.
+    ; Exactly 24576 bytes fit. The next byte fails without moving the cursor.
 @fill:
     lda #$ea
     jsr cc_emit_byte
@@ -201,7 +201,7 @@ _main:
     inc counter+1
 :
     lda counter+1
-    cmp #8
+    cmp #$60
     bne @fill
     lda counter
     bne @fill
@@ -230,10 +230,10 @@ _main:
     inc counter+1
 :
     lda counter+1
-    cmp #7
+    cmp #$5f
     bne @fill
     lda counter
-    cmp #$fa                 ; 0x07fa = 2042
+    cmp #$fa                 ; 0x5ffa = 24570
     bne @fill
     OK
     jsr cc_mark
@@ -601,10 +601,10 @@ _main:
     inc counter+1
 :
     lda counter+1
-    cmp #7
+    cmp #$5f
     bne @fill
     lda counter
-    cmp #$fc                 ; 0x07fc = 2044
+    cmp #$fc                 ; 0x5ffc = 24572
     bne @fill
     OK
     jsr cc_mark
@@ -1054,9 +1054,9 @@ _main:
 :
     lda counter
     ora counter+1
-    ; The loop uses wraparound to stop after exactly 2048 appends.
+    ; Stop after exactly 24576 appends.
     lda counter+1
-    cmp #8
+    cmp #$60
     bne @full_source
     lda counter
     bne @full_source
@@ -1079,7 +1079,7 @@ _main:
     jmp bad
 :
     lda cc_data_length+1
-    cmp #8
+    cmp #$60
     beq :+
     jmp bad
 :
@@ -1090,7 +1090,7 @@ _main:
     jmp bad
 :
 .elseif TEST_CASE = 25
-    ; A=1 and L=1024 cause an overlapping relocation; backward copy preserves bytes.
+    ; A=1 and L=12288 cause an overlapping relocation; backward copy preserves bytes.
     jsr cc_begin_owner
     jsr cc_complete_owner
     jsr cc_source_begin
@@ -1106,7 +1106,7 @@ _main:
     inc counter+1
 :
     lda counter+1
-    cmp #4
+    cmp #$30
     bne @overlap_source
     lda counter
     bne @overlap_source
@@ -1119,7 +1119,7 @@ _main:
     jmp bad
 :
     lda cc_data_length+1
-    cmp #4
+    cmp #$30
     beq :+
     jmp bad
 :
@@ -1134,7 +1134,7 @@ _main:
     adc #$ff
     sta cc_arg
     lda probe_ptr+1
-    adc #3
+    adc #$2f
     sta cc_arg+1
     ldy #0
     lda (cc_arg),y
@@ -1230,7 +1230,7 @@ _main:
     inc counter+1
 :
     lda counter+1
-    cmp #7
+    cmp #$5f
     bcc @fill_code
     bne @code_limit
     lda counter
@@ -1262,6 +1262,135 @@ _main:
     beq :+
     jmp bad
 :
+.elseif TEST_CASE = 28
+    ; Two placeholders at identical offsets in different 2 KiB pages.
+    jsr cc_jump_placeholder
+    sta patch
+    stx patch+1
+    lda #<(cc_arena+$800)
+    sta cc_cursor
+    lda #>(cc_arena+$800)
+    sta cc_cursor+1
+    jsr cc_jump_placeholder
+    sta patch_two
+    stx patch_two+1
+    lda cc_pending_count
+    cmp #2
+    beq :+
+    jmp bad
+:
+    lda cc_pending_count+1
+    beq :+
+    jmp bad
+:
+    lda patch
+    ldx patch+1
+    jsr cc_patch_here
+    OK
+    lda cc_pending_count
+    cmp #1
+    beq :+
+    jmp bad
+:
+    lda cc_pending_count+1
+    beq :+
+    jmp bad
+:
+    lda patch_two
+    ldx patch_two+1
+    jsr cc_patch_here
+    OK
+    lda cc_pending_count
+    ora cc_pending_count+1
+    beq :+
+    jmp bad
+:
+    ; The last legal u16 operand starts at $5ffe.
+    lda #<(cc_arena+$5ffd)
+    sta cc_cursor
+    lda #>(cc_arena+$5ffd)
+    sta cc_cursor+1
+    jsr cc_jump_placeholder
+    sta patch
+    stx patch+1
+    OK
+    lda cc_pending_count
+    cmp #1
+    beq :+
+    jmp bad
+:
+    lda patch
+    ldx patch+1
+    jsr cc_patch_here
+    OK
+    lda cc_pending_count
+    ora cc_pending_count+1
+    beq :+
+    jmp bad
+:
+    ; Completion bits at matching positions also remain distinct.
+    jsr cc_init
+    jsr cc_begin_owner
+    sta patch
+    stx patch+1
+    jsr cc_complete_owner
+    OK
+    ; A different page with the same low index is still unpublished.
+    WORD cc_arena+$800
+    jsr cc_is_completed
+    lda cc_status
+    cmp #8
+    beq :+
+    jmp bad
+:
+    ; Repeat from a clean state to complete both owners below.
+    jsr cc_init
+    jsr cc_begin_owner
+    sta patch
+    stx patch+1
+    jsr cc_complete_owner
+    OK
+    lda #<(cc_arena+$800)
+    sta cc_cursor
+    lda #>(cc_arena+$800)
+    sta cc_cursor+1
+    jsr cc_begin_owner
+    sta patch_two
+    stx patch_two+1
+    jsr cc_complete_owner
+    OK
+    lda patch
+    ldx patch+1
+    jsr cc_is_completed
+    OK
+    lda patch_two
+    ldx patch_two+1
+    jsr cc_is_completed
+    OK
+    ; Final arena byte is a legal owner entry; next byte is not.
+    lda #<(cc_arena+$5fff)
+    sta cc_cursor
+    lda #>(cc_arena+$5fff)
+    sta cc_cursor+1
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    OK
+    WORD cc_arena+$5fff
+    jsr cc_is_completed
+    OK
+    WORD cc_arena+$6000
+    jsr cc_is_completed
+    ERROR
+    ; Reset clears bits in every page, including the final byte.
+    jsr cc_init
+    WORD cc_arena+$5fff
+    jsr cc_is_completed
+    ERROR
+    jsr cc_init
+    lda patch_two
+    ldx patch_two+1
+    jsr cc_is_completed
+    ERROR
 .else
     .error "unknown backend probe case"
 .endif

@@ -50,6 +50,7 @@ fn run_program_with_input(temp: &TestDir, name: &str, source: &[u8], input: &[u8
         .arg(&source_path)
         .arg("--runtime-input")
         .arg(&input_path)
+        .args(["--cycle-limit", "200000000"])
         .output()
         .unwrap()
 }
@@ -262,7 +263,7 @@ fn constant_table_accepts_128_entries_and_rejects_129() {
     let temp = TestDir::new();
     let definitions: String = (0..128).map(|i| format!(".N{i}:={i}\n")).collect();
     let path = temp.0.join("constants.vtl");
-    // Keep generated code within the current 2 KiB arena while exercising every entry.
+    // Exercise every constant entry within the shared arena.
     for start in (0..128).step_by(16) {
         let references: String = (start..start + 16)
             .map(|i| format!("?=.N{i} ?=()\n"))
@@ -574,8 +575,8 @@ fn invalid_or_oversized_literals_do_not_start_runtime() {
 
     let source = format!(
         "&=a{{}} [ {{}}=1 ] &=p [ ?=\"{}\" ] ?=\"{}\" p=()",
-        "A".repeat(1100),
-        "B".repeat(1100)
+        "A".repeat(13000),
+        "B".repeat(13000)
     );
     let result = run_program_with_input(&temp, "arena-full", source.as_bytes(), b"");
     assert!(!result.status.success(), "{result:?}");

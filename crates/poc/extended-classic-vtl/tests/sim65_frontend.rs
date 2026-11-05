@@ -279,21 +279,12 @@ fn full_constant_table_survives_failed_declarations_and_references() {
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn micro_trek_passes_the_old_constant_limit() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let basic = fs::read_to_string(root.join("6502/frontend/basic.s")).unwrap().replacen(
-        "@failed:\n    ; Abort only an active temporary source save.",
-        "@failed:\n    lda constant_count\n    cmp #17\n    bcs :+\n    lda #99\n    jmp halt\n:\n    ; Abort only an active temporary source save.",
-        1,
-    );
     let source = fs::read(root.join("examples/micro_trek.vtl")).unwrap();
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(&source);
-    let result = build_and_run_custom(
-        &input,
-        "tests/fixtures/sim65/frontend_basic.s",
-        Some(&basic),
-    );
-    assert_eq!(result.status.code(), Some(4), "{result:?}");
-    assert!(result.stdout.is_empty());
+    let result = build_and_run_input(&input);
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+    assert!(result.stdout.starts_with(b"IT IS STARDATE"), "{result:?}");
 }
 
 #[test]
@@ -552,12 +543,12 @@ fn malformed_source_never_starts_runtime() {
         too_many_fixups.push_str(&format!("#={label} "));
     }
     expect(&too_many_fixups, 4, b"");
-    let source = format!("?=7 {}", "A=1 ".repeat(300));
+    let source = format!("?=7 {}", "A=1 ".repeat(3000));
     expect(&source, 4, b"");
-    let mut driver_arena_full = "A=1 ".repeat(169);
+    let mut driver_arena_full = "A=1 ".repeat(2047);
     driver_arena_full.push_str("?=7 #=1 ^=1 #=2 ^=2");
     expect(&driver_arena_full, 4, b"");
-    let source = format!("{}A=~ A=~", "A=1 ".repeat(170));
+    let source = format!("{}A=~ A=~", "A=1 ".repeat(2048));
     expect(&source, 4, b"");
     let truncated = build_and_run_input(&[4, 0, b'?', b'=', b'1']);
     assert_eq!(truncated.status.code(), Some(1), "{truncated:?}");
@@ -647,7 +638,7 @@ fn template_definitions_are_saved_and_published_without_runtime_code() {
     }
 
     let mut too_large = String::from("&=a{} [ A={}");
-    too_large.push_str(&"X".repeat(2100));
+    too_large.push_str(&"X".repeat(25000));
     too_large.push_str(" ]");
     expect(&too_large, 4, b"");
 
@@ -743,7 +734,7 @@ fn template_calls_expand_into_the_current_caller() {
     expect(&all_identities, 0, b"Z");
 
     let mut capacity_failure = String::from("&=a{} [ ");
-    capacity_failure.push_str(&"A={} ".repeat(300));
+    capacity_failure.push_str(&"A={} ".repeat(3000));
     capacity_failure.push_str("] a{A}=()");
     expect(&capacity_failure, 4, b"");
 }
@@ -950,6 +941,9 @@ fn p0a_probe_status(source: &str, body: Option<&str>, failure: Option<(bool, u8)
     } else {
         checks.push_str("    jcs failed\n    lda rt_depth\n    jne failed\n");
     }
+    if matches!(failure, Some((_, 4))) {
+        checks.push_str("    lda cc_status\n    cmp #1\n    jne failed\n");
+    }
     for identity in b'a'..=b'z' {
         checks.push_str(&format!("    lda #{identity}\n    jsr template_lookup\n"));
         if let Some(body) = body.filter(|_| identity == b'a') {
@@ -964,7 +958,7 @@ fn p0a_probe_status(source: &str, body: Option<&str>, failure: Option<(bool, u8)
         }
     }
     let adapter = format!(
-        ".setcpu \"6502\"\n.macpack longbranch\n.export _main\n.import fe_compile_run, template_lookup, halt\n.importzp fe_compile_status, cc_arg, cc_data_length, rt_depth\n.segment \"CODE\"\n_main:\n    jsr fe_compile_run\n{checks}    lda #0\n    jmp halt\nfailed:\n    lda #98\n    jmp halt\n"
+        ".setcpu \"6502\"\n.macpack longbranch\n.export _main\n.import fe_compile_run, template_lookup, halt\n.importzp fe_compile_status, cc_status, cc_arg, cc_data_length, rt_depth\n.segment \"CODE\"\n_main:\n    jsr fe_compile_run\n{checks}    lda #0\n    jmp halt\nfailed:\n    lda #98\n    jmp halt\n"
     );
     let temp = TempDir::new();
     let path = temp.0.join("p0a_probe.s");
@@ -1126,7 +1120,7 @@ fn p0b_failures_keep_published_template_and_do_not_start_runtime() {
         );
         p0a_result(&p0a_probe(&source, Some(body), Some(virtual_rhs)), 0, b"");
     }
-    let source = format!("&=a{{}} [ {{}}=~ ] a{{A}}={}", vec!["1"; 500].join(","));
+    let source = format!("&=a{{}} [ {{}}=~ ] a{{A}}={}", vec!["1"; 3000].join("+"));
     p0a_result(
         &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
         132,
@@ -1137,4 +1131,23 @@ fn p0b_failures_keep_published_template_and_do_not_start_runtime() {
         0,
         b"",
     );
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn shared_arena_exhaustion_preserves_published_template_in_both_directions() {
+    let source_append = format!("&=a{{}} [ {{}}=~ ] &=b{{}} [ A={{}}{} ]", "X".repeat(25000));
+    let code_reserve = format!("&=a{{}} [ {{}}=~ ] ?=7 {}", "A=1 ".repeat(3000));
+    for source in [source_append, code_reserve] {
+        p0a_result(
+            &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
+            132,
+            b"",
+        );
+        p0a_result(
+            &p0a_probe_status(&source, Some("{}=~"), Some((false, 4))),
+            0,
+            b"",
+        );
+    }
 }

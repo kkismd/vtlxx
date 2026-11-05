@@ -28,7 +28,7 @@ label_targets: .res 64
 fixup_values: .res 64
 fixup_patches: .res 64
 fixup_active: .res 32
-completed_bits: .res 256       ; one bit per possible arena entry byte
+completed_bits: .res 3072      ; one bit per possible arena entry byte
 
 .segment "RODATA"
 bit_masks: .byte 1,2,4,8,16,32,64,128
@@ -45,10 +45,19 @@ cc_init:
     jsr cc_binding_reset
     jsr cc_work_reset
     lda #0
-    tax
+    lda #<completed_bits
+    sta owner_offset
+    lda #>completed_bits
+    sta owner_offset+1
+    ldx #12
+    ldy #0
+    lda #0
 @clear:
-    sta completed_bits,x
-    inx
+    sta (owner_offset),y
+    iny
+    bne @clear
+    inc owner_offset+1
+    dex
     bne @clear
     rts
 
@@ -147,10 +156,10 @@ cc_complete_owner:
     lda owner_entry
     ldx owner_entry+1
     jsr owner_bit_address
-    ldy owner_offset
-    lda completed_bits,y
+    ldy #0
+    lda (owner_offset),y
     ora owner_mask
-    sta completed_bits,y
+    sta (owner_offset),y
     lda #0
     sta owner_state
 @done:
@@ -177,13 +186,13 @@ cc_is_completed:
     sta owner_offset+1
     bcc @bad
     lda owner_offset+1
-    cmp #8
+    cmp #$60
     bcs @bad
     lda owner_target
     ldx owner_target+1
     jsr owner_bit_address
-    ldy owner_offset
-    lda completed_bits,y
+    ldy #0
+    lda (owner_offset),y
     and owner_mask
     bne @done
 @bad:
@@ -211,6 +220,13 @@ owner_bit_address:
     ror owner_offset
     dex
     bne @divide
+    clc
+    lda owner_offset
+    adc #<completed_bits
+    sta owner_offset
+    lda owner_offset+1
+    adc #>completed_bits
+    sta owner_offset+1
     rts
 
 ; A/X = resolved numeric label value.
