@@ -34,7 +34,8 @@ fn hit_calculation_uses_safe_arithmetic_and_preserves_state() {
                 ))
                 .unwrap();
                 let before = snapshot(&m);
-                m.execute_source(&format!("~={power} h={slot}")).unwrap();
+                m.execute_source(&format!("~={power} hitcalc={slot}"))
+                    .unwrap();
                 let d = (ex - sx) * (ex - sx) + (ey - sy) * (ey - sy) + 30;
                 assert_eq!(
                     m.stack(),
@@ -74,7 +75,8 @@ fn apply_hit_updates_only_owned_state_and_leaves_slot_holes() {
                     } else {
                         expected[(134 + slot) as usize] = remaining as i16;
                     }
-                    m.execute_source(&format!("~={slot} k={damage}")).unwrap();
+                    m.execute_source(&format!("~={slot} applyhit={damage}"))
+                        .unwrap();
                     assert_eq!(m.stack(), PREFIX);
                     assert_eq!(
                         snapshot(&m),
@@ -96,7 +98,7 @@ fn last_enemy_kill_reaches_zero_counts() {
     let mut m = machine();
     m.execute_source("@=165,1 @=166,1 @=0,1102 @=163,1 @=169,1 @=135,2 @=141,1 @=147,2 @=72,1")
         .unwrap();
-    m.execute_source("~=1 k=1").unwrap();
+    m.execute_source("~=1 applyhit=1").unwrap();
     assert_eq!(m.stack(), PREFIX);
     for address in [135, 72, 163, 169] {
         assert_eq!(m.storage(address), 0);

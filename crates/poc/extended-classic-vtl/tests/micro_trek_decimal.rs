@@ -22,7 +22,7 @@ fn machine(input: impl Read + 'static) -> Machine {
 fn check(input: &[u8], expected: &[(i16, i16)]) {
     let mut m = machine(Cursor::new(input.to_vec()));
     for &(value, status) in expected {
-        m.execute_source("n=()").unwrap();
+        m.execute_source("readnum=()").unwrap();
         let mut stack = PREFIX.to_vec();
         stack.extend([value, status]);
         assert_eq!(m.stack(), stack, "input {input:?}");
@@ -84,7 +84,7 @@ fn fatal_input_error_propagates() {
     }
     let mut m = machine(Broken);
     assert_eq!(
-        m.execute_source("n=()"),
+        m.execute_source("readnum=()"),
         Err(SourceError::Runtime(RuntimeError::InputError))
     );
 }

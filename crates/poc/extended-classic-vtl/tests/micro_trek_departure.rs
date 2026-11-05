@@ -19,7 +19,7 @@ fn machine(input: &str) -> Machine {
 }
 
 fn call(m: &mut Machine, status: i16) {
-    m.execute_source("w=()").unwrap();
+    m.execute_source("warp=()").unwrap();
     let mut expected = PREFIX.to_vec();
     expected.push(status);
     assert_eq!(m.stack(), expected);
@@ -208,7 +208,7 @@ fn output_failure_before_and_after_commit() {
             marker,
         });
         assert_eq!(
-            m.execute_source("w=()"),
+            m.execute_source("warp=()"),
             Err(SourceError::Runtime(RuntimeError::OutputError))
         );
         if committed {

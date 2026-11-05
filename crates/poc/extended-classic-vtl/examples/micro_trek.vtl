@@ -95,7 +95,7 @@
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
 ; Writes A, B and storage[192].
-  &=r [
+  &=random [
     A=~
     B=(@(.PRNG_STATE)*.PRNG_MULTIPLIER)+.PRNG_INCREMENT
     @=.PRNG_STATE,B
@@ -105,7 +105,7 @@
   ]
 
 ; Device display ( device-id -- ). Reads the device; writes A and B.
-  &=t [
+  &=devinfo [
     A=~ B=@(.DEVICE_BASE+A-1)
     %=A==1 [ ?="*SHORT RANGE SENSOR*" ]
     %=A==2 [ ?="*COMPUTER*" ]
@@ -119,12 +119,12 @@
     ?=()
   ]
 
-; Long-range scan ( -- ). Direct scratch I, J, K, L; t clobbers A, B.
+; Long-range scan ( -- ). Direct scratch I, J, K, L; devinfo clobbers A, B.
 ; Marks only in-range galaxy cells as observed; no PRNG draws.
-  &=l [
+  &=longscan [
     ?="NOW: QUADRANT(" ?=@(.QUADRANT_X) ?=@(.QUADRANT_Y)
     ?=") SECTOR(" ?=@(.SHIP_X) ?=@(.SHIP_Y) ?=")" ?=()
-    t=3
+    devinfo=3
     %=@(.DEVICE_BASE+2)==0 [
       I=@(.QUADRANT_X)-1
       *=I<=(@(.QUADRANT_X)+1) [
@@ -147,7 +147,7 @@
   ]
 
 ; Galaxy map ( -- ). Scratch I, J, K; reads galaxy without changing storage.
-  &=m [
+  &=galmap [
     ?=() ?="########## GARAXY MAP ##########" ?=()
     I=0
     *=I<.SECTOR_LIMIT [
@@ -166,12 +166,12 @@
     ?=() ?=" ..1...2...3...4...5...6...7...8" ?=()
   ]
 
-; Short-range scan ( -- ). Direct scratch I, J, K; t clobbers A, B.
+; Short-range scan ( -- ). Direct scratch I, J, K; devinfo clobbers A, B.
 ; Reads the sector and device state without changing storage or drawing random numbers.
-  &=s [
+  &=shortmap [
     ?="NOW: QUADRANT(" ?=@(.QUADRANT_X) ?=@(.QUADRANT_Y)
     ?=") SECTOR(" ?=@(.SHIP_X) ?=@(.SHIP_Y) ?=")" ?=()
-    t=1
+    devinfo=1
     %=@(.DEVICE_BASE)==0 [
       I=1
       *=I<=.SECTOR_LIMIT [
@@ -193,7 +193,7 @@
   ]
 
 ; Status report ( -- ). Reads game storage; no register or storage writes.
-  &=v [
+  &=status [
     ?="*STATUS REPORT*" ?=() ?=()
     ?="*STARDATE : " ?=.STARDATE_BASE-@(.MISSION_DAYS) ?=() ?=()
     ?="*CONDITION: "
@@ -212,18 +212,18 @@
   ]
 
 ; Random damage event ( -- ). Writes the selected device and PRNG state;
-; r and t clobber A and B. The first draw is protected on the value stack.
-  &=j [
-    r=6
-    r=3
+; random and devinfo clobber A and B. The first draw is protected on the value stack.
+  &=devdmg [
+    random=6
+    random=3
     B=~ A=~
     @=.DEVICE_BASE+A-1,@(.DEVICE_BASE+A-1)+B
-    t=A
+    devinfo=A
   ]
 
 ; Hit calculation ( power enemy-slot -- damage ). Reads positions;
 ; writes scratch A..F, without changing storage or drawing random numbers.
-  &=h [
+  &=hitcalc [
     A=~ B=~
     C=@(.ENEMY_X_BASE+A-1)-@(.SHIP_X)
     D=@(.ENEMY_Y_BASE+A-1)-@(.SHIP_Y)
@@ -232,10 +232,10 @@
     ~=((.HIT_SCALE*F)+((.HIT_SCALE*(B%E))/E))+1
   ]
 
-; Counterattack ( -- ). I and T hold the slot and total across r/h;
+; Counterattack ( -- ). I and T hold the slot and total across random/hitcalc;
 ; direct scratch H, I, S, T, U, and transitive scratch A..F.
 ; Writes live enemy HP, ship energy, PRNG, and optionally one device.
-  &=a [
+  &=enemyatk [
     %=@(.QUADRANT_ENEMIES)>0 [
       ?="*KLINGON ATTACK" ?=()
       %=@(.DOCKED)!=0 [
@@ -245,9 +245,9 @@
         *=I<=.ENEMY_SLOTS [
           H=@(.ENEMY_HP_BASE+I-1)
           %=H>0 [
-            r=H U=~ U=(U-1)/2
+            random=H U=~ U=(U-1)/2
             @=.ENEMY_HP_BASE+I-1,H-U
-            ~=U h=I S=~ T=T+S
+            ~=U hitcalc=I S=~ T=T+S
             ?=S ?=" UNITS HIT FROM KLINGON ("
             ?=@(.ENEMY_X_BASE+I-1) ?=@(.ENEMY_Y_BASE+I-1) ?=")" ?=()
           ]
@@ -256,7 +256,7 @@
         @=.SHIP_ENERGY,@(.SHIP_ENERGY)-T
         %=T>=.DAMAGE_TRIGGER [
           ?="## SHIELD SCREEN FELL DOWN ##" ?=()
-          j=()
+          devdmg=()
         ]
       ]
     ]
@@ -264,7 +264,7 @@
 
 ; Apply a hit ( enemy-slot damage -- ). Writes scratch A..D and, on
 ; destruction, the selected HP, sector, galaxy cell and enemy totals.
-  &=k [
+  &=applyhit [
     B=~ A=~
     C=@(.ENEMY_HP_BASE+A-1)-B
     %=C<=1 [
@@ -283,7 +283,7 @@
 ; Dock and resupply ( -- ). Reads adjacent in-range sectors; writes
 ; DOCKED and, when docked, energy, torpedoes and devices 64..69.
 ; Scratch A, B, I, J; no callees or PRNG draws.
-  &=d [
+  &=dock [
     A=@(.SHIP_X) B=@(.SHIP_Y)
     @=.DOCKED,0
     I=A-1
@@ -308,13 +308,13 @@
     ]
   ]
 
-; End a committed turn ( -- mission-result ). d/a own all state writes;
+; End a committed turn ( -- mission-result ). dock/enemyatk own all state writes;
 ; no direct scratch writes, transitive scratch A..F, H, I, J, S, T, U.
-  &=u [
+  &=endturn [
     %=@(.GALAXY_ENEMIES)==0 [
       ~=.MISSION_WIN
     ] [
-      d=() a=()
+      dock=() enemyatk=()
       %=@(.GALAXY_ENEMIES)==0 [ ~=.MISSION_WIN ] [
         %=(@(.SHIP_ENERGY)<=0)+(@(.MISSION_DAYS)<=0) [
           ~=.MISSION_LOSE
@@ -327,21 +327,21 @@
 ; GALAXY_ENEMIES, GALAXY_BASES, PRNG state and scratch A, B, C,
 ; H, I, J, L, M, T. T is the current attempt's enemy total.
 ; H holds the enemy distribution parameter across calls and retries.
-  &=g [
-    r=400
+  &=gengal [
+    random=400
     H=~+599
   ^=1
     I=0 C=0 T=0
     *=I<64 [
-      r=100
+      random=100
       J=~-1
       J=J<5
       C=C+J
-      r=H
+      random=H
       L=~-1
       M=(L<209)+(L<49)+(L<24)+(L<9)+(L<2)
       T=T+M
-      r=8
+      random=8
       L=~-1
       @=I,(M*100)+(J*10)+L
       I=I+1
@@ -353,8 +353,8 @@
 ; Expand the current quadrant ( -- ). Reads quadrant/ship coordinates
 ; and galaxy from storage; writes QUADRANT_ENEMIES, sector[71..134],
 ; enemy[135..152] and PRNG state.
-; Scratch C, H, I, J, L, M, P, R; r clobbers A and B.
-  &=q [
+; Scratch C, H, I, J, L, M, P, R; random clobbers A and B.
+  &=genquad [
     I=.SECTOR_BASE
     *=I<.ENEMY_END [ @=I,0 I=I+1 ]
     @=.SECTOR_BASE+((@(.SHIP_X)-1)*8)+(@(.SHIP_Y)-1),4
@@ -367,7 +367,7 @@
     *=C<=3 [
       *=H>0 [
       ^=1
-        r=64
+        random=64
         J=~-1
         M=.SECTOR_BASE+J
         %=@(M)!=0 [ #=1 ]
@@ -390,9 +390,9 @@
 
 ; Committed warp trajectory ( distance dx dy -- ). S/T retain direction,
 ; U/V fixed-point coordinates, W remaining distance, X crossing flag,
-; Y step length and Z termination state across r/j. q runs only at the end.
-; Direct scratch A..D, S..Z; transitive also q's C,H,I,J,L,M,P,R.
-  &=x [
+; Y step length and Z termination state across random/devdmg. genquad runs only at the end.
+; Direct scratch A..D, S..Z; transitive also genquad's C,H,I,J,L,M,P,R.
+  &=warppath [
     T=~ S=~ W=~
     W=W*.COURSE_SCALE
     U=(@(.SHIP_X)*.COURSE_SCALE)+.WARP_HALF
@@ -414,7 +414,7 @@
             %=@(.SECTOR_BASE+((C-1)*.SECTOR_LIMIT)+D-1)!=0 [
               ?="*** EMERGENCY STOP ***" ?=()
               ?="SPOCK : TO ERR IS HUMAN !" ?=()
-              j=() Z=1
+              devdmg=() Z=1
             ] [ @=.SHIP_X,C @=.SHIP_Y,D ]
           ] [ @=.SHIP_X,C @=.SHIP_Y,D ]
         ] [
@@ -427,42 +427,42 @@
           %=(@(.QUADRANT_X)<1)+(@(.QUADRANT_X)>.SECTOR_LIMIT)+(@(.QUADRANT_Y)<1)+(@(.QUADRANT_Y)>.SECTOR_LIMIT) [
             ?=" OUTSIDE THE GARAXY !!" ?=()
             ?="ON BOARD COMPUTER TAKES OVER," ?=()
-            j=()
-            r=8 A=~ @=.QUADRANT_X,A
-            r=8 A=~ @=.QUADRANT_Y,A
+            devdmg=()
+            random=8 A=~ @=.QUADRANT_X,A
+            random=8 A=~ @=.QUADRANT_Y,A
             @=.SHIP_X,@(.QUADRANT_Y) @=.SHIP_Y,@(.QUADRANT_X)
-            q=() Z=2
+            genquad=() Z=2
           ]
         ]
       ]
     ]
     %=Z==1 [
       %=X==0 [ @=.SECTOR_BASE+((@(.SHIP_X)-1)*.SECTOR_LIMIT)+@(.SHIP_Y)-1,4 ]
-      r=.STORM_BOUND A=~
-      %=A==.STORM_VALUE [ ?="## SPACE STORM ##" ?=() j=() ]
-      %=X==1 [ q=() ]
+      random=.STORM_BOUND A=~
+      %=A==.STORM_VALUE [ ?="## SPACE STORM ##" ?=() devdmg=() ]
+      %=X==1 [ genquad=() ]
       ?="NOW: QUADRANT(" ?=@(.QUADRANT_X) ?=@(.QUADRANT_Y)
       ?=") SECTOR(" ?=@(.SHIP_X) ?=@(.SHIP_Y) ?=")" ?=()
     ]
   ]
 
 ; Initialize a mission ( -- ). The caller seeds PRNG once at startup.
-; Writes the game state, PRNG via g/q/r, and scratch A, B, C,
+; Writes the game state, PRNG via gengal/genquad/random, and scratch A, B, C,
 ; H, I, J, L, M, P, R, T.
-  &=i [
+  &=initgame [
     @=.MISSION_DAYS,30 @=.SHIP_ENERGY,4000 @=.SHIP_TORPEDOES,10 @=.DOCKED,0
     I=.DEVICE_BASE *=I<.DEVICE_END [ @=I,0 I=I+1 ]
-    g=()
-    r=8 A=~ @=.QUADRANT_X,A
-    r=8 A=~ @=.QUADRANT_Y,A
+    gengal=()
+    random=8 A=~ @=.QUADRANT_X,A
+    random=8 A=~ @=.QUADRANT_Y,A
     @=.SHIP_X,@(.QUADRANT_Y) @=.SHIP_Y,@(.QUADRANT_X)
-    q=()
+    genquad=()
   ]
 
 ; Decimal line parser ( -- value status ). No storage writes or callees;
 ; scratch A..H are caller-saved. B is leading/sign/digits/trailing/CR/invalid
 ; (0..5), C is negative, D accumulates negatively, E records any input.
-  &=n [
+  &=readnum [
     B=0 C=0 D=0 E=0 F=1
     *=F [
       A=$
@@ -516,12 +516,12 @@
     ]
   ]
 
-; Course input ( -- dx dy status ). Direct scratch A..F; n adds G, H.
+; Course input ( -- dx dy status ). Direct scratch A..F; readnum adds G, H.
 ; No storage writes; input and COURSE prompt are the only effects.
-  &=c [
+  &=course [
   ^=1
     ?="COURSE: "
-    n=()
+    readnum=()
     B=~ A=~
     %=B==.PARSE_EOF [ ~=0 ~=0 ~=.COURSE_EOF #=2 ]
     %=(B!=.PARSE_VALID)+(A<0)+(A>.COURSE_MAX) [ #=1 ]
@@ -536,12 +536,12 @@
   ]
 
 ; Phaser ( -- command-status ). I is the slot and J is the fixed power;
-; h/k/t clobber A..F, while n clobbers A..H. No PRNG draws.
-  &=f [
-    t=4
+; hitcalc/applyhit/devinfo clobber A..F, while readnum clobbers A..H. No PRNG draws.
+  &=phaser [
+    devinfo=4
     %=@(.DEVICE_BASE+3)>0 [ ~=.COMMAND_CANCEL #=3 ]
   ^=1
-    ?="ENERGY ? " n=()
+    ?="ENERGY ? " readnum=()
     B=~ A=~
     %=B==.PARSE_EOF [ ~=.COMMAND_EOF #=3 ]
     %=(B!=.PARSE_VALID)+(A<0) [ #=1 ]
@@ -557,12 +557,12 @@
         %=@(.ENEMY_HP_BASE+I-1)>0 [
           %=J>=.PHASER_OVERLOAD [
             ?="PHASER'S OVER LOAD !" ?=()
-            @=.DEVICE_BASE+3,1 t=4 J=.OVERLOAD_POWER
+            @=.DEVICE_BASE+3,1 devinfo=4 J=.OVERLOAD_POWER
           ]
-          ~=J h=I K=~
+          ~=J hitcalc=I K=~
           ?=K ?=" UNITS HIT  KLINGON("
           ?=@(.ENEMY_X_BASE+I-1) ?=@(.ENEMY_Y_BASE+I-1) ?=")" ?=()
-          ~=I k=K
+          ~=I applyhit=K
           %=@(.ENEMY_HP_BASE+I-1)==0 [ ?="### DESTROYED ###" ?=() ] [ ?="# DAMAGED #" ?=() ]
         ]
         I=I+1
@@ -572,12 +572,12 @@
   ^=3
   ]
 
-; Warp departure ( -- command-status ). I retains factor across n/c;
-; J retains cost. x owns the trajectory after the departure commit.
-  &=w [
-    t=5
+; Warp departure ( -- command-status ). I retains factor across readnum/course;
+; J retains cost. warppath owns the trajectory after the departure commit.
+  &=warp [
+    devinfo=5
   ^=1
-    ?=" FACTOR ? " n=()
+    ?=" FACTOR ? " readnum=()
     B=~ A=~
     %=B==.PARSE_EOF [ ~=.COMMAND_EOF #=3 ]
     %=(B!=.PARSE_VALID)+(A<0)+(A>.WARP_MAX) [ #=1 ]
@@ -587,7 +587,7 @@
     ]
     I=A J=((I*I)+1)/2
     %=@(.SHIP_ENERGY)<J [ ?="WE HAVE NO ENERGY !" ?=() #=1 ]
-    c=() A=~ B=~ C=~
+    course=() A=~ B=~ C=~
     %=A==.COURSE_EOF [ ~=.COMMAND_EOF #=3 ]
     ?="* ION ENGINE START" ?=()
     @=.MISSION_DAYS,@(.MISSION_DAYS)-1
@@ -596,18 +596,18 @@
     @=.SECTOR_BASE+((@(.SHIP_X)-1)*.SECTOR_LIMIT)+@(.SHIP_Y)-1,0
     K=.DEVICE_BASE
     *=K<.DEVICE_LIMIT [ %=@(K)>0 [ @=K,@(K)-1 ] K=K+1 ]
-    ~=I ~=C ~=B x=()
+    ~=I ~=C ~=B warppath=()
     ~=.COMMAND_COMMIT
   ^=3
   ]
 
 ; Torpedo ( -- command-status ). I/J are candidate coordinates, P/G are
 ; fixed-point coordinates, S/T are direction and K/L are kind/enemy slot.
-; Direct scratch A/G/I/J/K/L/P/S/T; c clobbers A..H, k clobbers A..D.
-  &=o [
-    t=6
+; Direct scratch A/G/I/J/K/L/P/S/T; course clobbers A..H, applyhit clobbers A..D.
+  &=torpedo [
+    devinfo=6
     %=(@(.DEVICE_BASE+5)>0)+(@(.SHIP_TORPEDOES)==0) [ ~=.COMMAND_CANCEL #=3 ]
-    c=() A=~ T=~ S=~
+    course=() A=~ T=~ S=~
     %=A==.COURSE_EOF [ ~=.COMMAND_EOF #=3 ]
     @=.SHIP_TORPEDOES,@(.SHIP_TORPEDOES)-1
     ?="ENTERPRISE FIRING TORPEDOES." ?=() ?="TRACK-"
@@ -626,7 +626,7 @@
       L=1
       *=L<=.ENEMY_SLOTS [
         %=(@(.ENEMY_HP_BASE+L-1)>0)*(@(.ENEMY_X_BASE+L-1)==I)*(@(.ENEMY_Y_BASE+L-1)==J) [
-          ~=L k=.TORPEDO_DAMAGE
+          ~=L applyhit=.TORPEDO_DAMAGE
           %=@(.ENEMY_HP_BASE+L-1)==0 [ ?="### DESTROYED ###" ?=() ] [ ?="# DAMAGED #" ?=() ]
           #=2
         ]
@@ -647,7 +647,7 @@
 
 ; Read and dispatch one complete COMMAND line ( -- command-status ).
 ; Direct scratch A, B, C, D; callees own all persistent writes.
-  &=b [
+  &=command [
     ?="COMMAND :"
     B=0 C=0 D=1
     *=D [
@@ -670,13 +670,13 @@
     ]
     %=(C>=.ASCII_LOWER_A)*(C<=.ASCII_LOWER_Z) [ C=C-.ASCII_CASE ]
     %=C==.CMD_X [ ~=.COMMAND_EOF #=1 ]
-    %=C==.CMD_G [ m=() ~=.COMMAND_CANCEL #=1 ]
-    %=C==.CMD_L [ l=() ~=.COMMAND_CANCEL #=1 ]
-    %=C==.CMD_S [ s=() ~=.COMMAND_CANCEL #=1 ]
-    %=C==.CMD_R [ v=() ~=.COMMAND_CANCEL #=1 ]
-    %=C==.CMD_P [ f=() #=1 ]
-    %=C==.CMD_W [ w=() #=1 ]
-    %=C==.CMD_T [ o=() #=1 ]
+    %=C==.CMD_G [ galmap=() ~=.COMMAND_CANCEL #=1 ]
+    %=C==.CMD_L [ longscan=() ~=.COMMAND_CANCEL #=1 ]
+    %=C==.CMD_S [ shortmap=() ~=.COMMAND_CANCEL #=1 ]
+    %=C==.CMD_R [ status=() ~=.COMMAND_CANCEL #=1 ]
+    %=C==.CMD_P [ phaser=() #=1 ]
+    %=C==.CMD_W [ warp=() #=1 ]
+    %=C==.CMD_T [ torpedo=() #=1 ]
     %=C==.CMD_HELP [
       ?="*HELP*" ?=() ?="S : SHORT RANGE SENSOR" ?=()
       ?="G : GALAXY MAP" ?=() ?="L : LONG RANGE SENSOR" ?=()
@@ -691,7 +691,7 @@
 
 ; Display the mission result and read a complete RETRY line
 ; ( mission-result -- retry-result ). Direct scratch A, B, C, D.
-  &=e [
+  &=gameend [
     A=~
     ?="IT IS STARDATE : " ?=.STARDATE_BASE-@(.MISSION_DAYS) ?=()
     %=A==.MISSION_WIN [
@@ -730,17 +730,17 @@
 ; A fixed seed is set only at startup; replay continues the PRNG stream.
 @=.PRNG_STATE,.GAME_SEED
 ^=1
-i=()
+initgame=()
 ?="IT IS STARDATE : 3200" ?=() ?="OBJECTIVE :" ?=()
 ?="DESTROY " ?=@(.GALAXY_ENEMIES) ?=" KLINGON CRUISERS" ?=()
 ?="IN 30 YEARS!" ?=() ?="THE NUMBER OF BASE IS " ?=@(.GALAXY_BASES) ?=()
 ^=2
-b=() A=~
+command=() A=~
 %=A==.COMMAND_EOF [ #=4 ]
 %=A==.COMMAND_COMMIT [
-  u=() A=~
+  endturn=() A=~
   %=A!=.MISSION_CONTINUE [
-    e=A A=~
+    gameend=A A=~
     %=A==.RETRY_YES [ #=1 ]
     #=4
   ]

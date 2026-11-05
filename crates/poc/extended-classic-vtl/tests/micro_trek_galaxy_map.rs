@@ -29,7 +29,7 @@ fn check_map(cells: &[i16; 64], expected_rows: &[&str; 8]) {
         expected_rows.join("\n")
     );
     for count in 1..=2 {
-        machine.execute_source("m=()").unwrap();
+        machine.execute_source("galmap=()").unwrap();
         assert_eq!(machine.stack(), PREFIX);
         assert_eq!(machine.output(), expected.repeat(count).as_bytes());
         for register in b'A'..=b'Z' {

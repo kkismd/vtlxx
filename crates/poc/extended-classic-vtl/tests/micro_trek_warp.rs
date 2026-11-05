@@ -19,7 +19,7 @@ fn machine(u: i16, v: i16, x: i16, y: i16, seed: i16) -> Machine {
 }
 
 fn call(m: &mut Machine, distance: i16, dx: i16, dy: i16) {
-    m.execute_source(&format!("~={distance} ~={dx} ~={dy} x=()"))
+    m.execute_source(&format!("~={distance} ~={dx} ~={dy} warppath=()"))
         .unwrap();
     assert_eq!(m.stack(), PREFIX);
     assert_eq!(
@@ -183,7 +183,7 @@ fn output_failure_propagates() {
     let mut m = machine(4, 4, 4, 4, 0);
     m.set_output(Broken);
     assert_eq!(
-        m.execute_source("~=1 ~=-45 ~=0 x=()"),
+        m.execute_source("~=1 ~=-45 ~=0 warppath=()"),
         Err(SourceError::Runtime(RuntimeError::OutputError))
     );
     assert!(m.stack().starts_with(PREFIX));

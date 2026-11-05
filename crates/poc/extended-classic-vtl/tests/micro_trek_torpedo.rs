@@ -17,7 +17,7 @@ fn machine(input: &str) -> Machine {
 }
 
 fn call(m: &mut Machine, status: i16) {
-    m.execute_source("o=()").unwrap();
+    m.execute_source("torpedo=()").unwrap();
     let mut expected = PREFIX.to_vec();
     expected.push(status);
     assert_eq!(m.stack(), expected);
@@ -36,7 +36,7 @@ fn unavailable_and_eof_do_not_fire() {
         assert_eq!((0..240).map(|i| m.storage(i)).collect::<Vec<_>>(), before);
         assert!(!String::from_utf8_lossy(m.output()).contains("TRACK-"));
         if status == 0 && !input.is_empty() {
-            m.execute_source("A=~ n=()").unwrap();
+            m.execute_source("A=~ readnum=()").unwrap();
             let mut expected = PREFIX.to_vec();
             expected.extend([45, 1]);
             assert_eq!(m.stack(), expected);

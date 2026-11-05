@@ -69,7 +69,7 @@ fn device_display_all_names_and_states() {
             let mut devices = [0; 6];
             devices[id - 1] = years;
             for count in 1..=2 {
-                m.execute_source(&format!("t={id}")).unwrap();
+                m.execute_source(&format!("devinfo={id}")).unwrap();
                 check_unchanged(&m, 42, &devices);
                 assert_eq!(
                     m.output(),
@@ -99,7 +99,7 @@ fn damage_draw_order_and_accumulation() {
                 let amount = draw(&mut state, 3);
                 devices[device - 1] += amount;
                 output.push_str(&expected_output(device, devices[device - 1]));
-                m.execute_source("j=()").unwrap();
+                m.execute_source("devdmg=()").unwrap();
                 check_unchanged(&m, state, &devices);
                 assert_eq!(m.output(), output.as_bytes());
             }
@@ -126,7 +126,7 @@ fn output_error_preserves_committed_damage_and_draws() {
     let mut m = machine(seed);
     m.set_output(Broken);
     assert_eq!(
-        m.execute_source("j=()"),
+        m.execute_source("devdmg=()"),
         Err(SourceError::Runtime(RuntimeError::OutputError))
     );
     assert_eq!(m.storage(192), state);
@@ -142,6 +142,6 @@ fn output_error_preserves_committed_damage_and_draws() {
 #[test]
 fn negative_device_state_is_not_displayed_as_healthy() {
     let mut m = machine(42);
-    m.execute_source("@=64,-1 t=1").unwrap();
+    m.execute_source("@=64,-1 devinfo=1").unwrap();
     assert_ne!(m.output(), expected_output(1, 0).as_bytes());
 }

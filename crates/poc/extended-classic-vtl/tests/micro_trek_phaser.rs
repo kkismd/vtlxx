@@ -17,7 +17,7 @@ fn machine(input: &str) -> Machine {
 }
 
 fn call(m: &mut Machine, status: i16) {
-    m.execute_source("f=()").unwrap();
+    m.execute_source("phaser=()").unwrap();
     let mut expected = PREFIX.to_vec();
     expected.push(status);
     assert_eq!(m.stack(), expected);
@@ -44,7 +44,7 @@ fn cancel_eof_and_damaged_device_leave_state_unchanged() {
                 m.output(),
                 format!("*PHASER*DAMAGED!\n{damaged}\n YEARS ESTIMATED FOR REPAIR.\n").as_bytes()
             );
-            m.execute_source("A=~ n=()").unwrap();
+            m.execute_source("A=~ readnum=()").unwrap();
             let mut expected = PREFIX.to_vec();
             expected.extend([5, 1]);
             assert_eq!(m.stack(), expected);
@@ -138,7 +138,7 @@ fn output_error_propagates() {
     let mut m = machine("1\n");
     m.set_output(Fail);
     assert_eq!(
-        m.execute_source("f=()"),
+        m.execute_source("phaser=()"),
         Err(SourceError::Runtime(RuntimeError::OutputError))
     );
     assert_eq!(m.storage(161), 4000);

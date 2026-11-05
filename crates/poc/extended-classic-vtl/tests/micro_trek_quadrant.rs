@@ -89,7 +89,7 @@ fn run(seed: i16, cell: i16, u: i16, v: i16, x: i16, y: i16) -> Expected {
     let before: Vec<_> = (0..=u16::MAX).map(|i| m.storage(i)).collect();
     let registers: Vec<_> = (0..26).map(|i| m.register(i)).collect();
     let exp = expected(seed, cell % 1000, x, y);
-    m.execute_source("q=()").unwrap();
+    m.execute_source("genquad=()").unwrap();
     assert_eq!(m.stack(), PREFIX);
     assert_eq!(m.storage(169), cell % 1000 / 100);
     assert!(m.output().is_empty());
@@ -122,7 +122,7 @@ fn run(seed: i16, cell: i16, u: i16, v: i16, x: i16, y: i16) -> Expected {
 #[test]
 fn generated_galaxy_and_quadrant_use_only_storage_for_game_state() {
     let mut m = machine(0);
-    m.execute_source("g=()").unwrap();
+    m.execute_source("gengal=()").unwrap();
     assert_eq!(
         (m.storage(163), m.storage(164), m.storage(192)),
         (26, 3, -16807)
@@ -132,7 +132,7 @@ fn generated_galaxy_and_quadrant_use_only_storage_for_game_state() {
     m.execute_source("@=165,3 @=166,7 @=167,4 @=168,2 K=-9 B=-9 U=-9 V=-9 X=-9 Y=-9 N=-9")
         .unwrap();
     let exp = expected(-16807, 112, 4, 2);
-    m.execute_source("q=()").unwrap();
+    m.execute_source("genquad=()").unwrap();
     assert_eq!(m.stack(), PREFIX);
     assert_eq!(m.storage(22), 112);
     assert_eq!((m.storage(163), m.storage(164), m.storage(169)), (26, 3, 1));
@@ -193,7 +193,7 @@ fn canonical_rng_covers_all_sectors_and_endpoints() {
         let mut seen = HashSet::new();
         for _ in 0..64 {
             let index = draw(&mut state);
-            m.execute_source("r=64").unwrap();
+            m.execute_source("random=64").unwrap();
             assert_eq!(m.pop().unwrap(), index as i16 + 1);
             assert_eq!(m.storage(192), state);
             assert_eq!(m.stack(), PREFIX);
