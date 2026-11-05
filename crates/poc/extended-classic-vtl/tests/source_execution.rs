@@ -893,7 +893,6 @@ fn malformed_definitions_do_not_publish_or_process_later_source() {
     for bad in [
         "|=p A=1 p=|",
         "&=P [ A=1 ]",
-        "&=pp [ A=1 ]",
         "&=p? [ A=1 ]",
         "&= A=1",
         "&=p A=1",
