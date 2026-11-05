@@ -9,10 +9,10 @@
 .import rt_push, rt_pop_condition, rt_load_reg, rt_store_reg, rt_print_bytes
 .importzp cc_status, cc_arg, cc_cursor
 
-.segment "ZEROPAGE"
-em_word:  .res 2
-em_patch: .res 2
-em_index: .res 1
+.importzp zp_phase
+em_word = zp_phase + 89
+em_patch = zp_phase + 91
+em_index = zp_phase + 93
 
 .segment "BSS"
 literal_patch: .res 2

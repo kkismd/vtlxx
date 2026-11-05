@@ -5,8 +5,8 @@
 .import cc_is_completed
 .importzp cc_status, cc_arg
 
-.segment "ZEROPAGE"
-binding_slot: .res 1
+.importzp zp_phase
+binding_slot = zp_phase + 107
 
 .segment "BSS"
 binding_valid: .res 52

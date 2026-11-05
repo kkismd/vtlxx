@@ -56,6 +56,7 @@ fn build_and_run_custom(input: &[u8], frontend_fixture: &str, basic: Option<&str
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         frontend_fixture,
+        "6502/target/zp_layout.s",
         "6502/frontend/basic.s",
         "6502/frontend/template.s",
         "6502/frontend/template_reader.s",
@@ -140,6 +141,66 @@ fn expect(source: &str, status: i32, output: &[u8]) {
     let result = build_and_run(source.as_bytes(), b"Z");
     assert_eq!(result.status.code(), Some(status), "{source}: {result:?}");
     assert_eq!(result.stdout, output, "{source}: {result:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn phase_transition_initializes_runtime_and_preserves_return_state() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let basic = fs::read_to_string(root.join("6502/frontend/basic.s")).unwrap();
+    let marker = "    jsr rt_init";
+    assert_eq!(basic.matches(marker).count(), 1);
+    // All compilation and publication have completed here. Fill the entire
+    // shared range with a nonzero pattern before runtime initialization.
+    let basic = basic.replace(marker, "    lda entry\n    sta phase_expected_entry\n    lda entry+1\n    sta phase_expected_entry+1\n    ldx #110\n    lda #$a5\n@poison_phase:\n    sta zp_phase,x\n    dex\n    bpl @poison_phase\n    jsr rt_init");
+    let basic = format!(
+        "{basic}\n.importzp zp_phase\n.export phase_expected_entry\n.segment \"BSS\"\nphase_expected_entry: .res 2\n"
+    );
+    let fixture = r#"
+.setcpu "6502"
+.export _main
+.import fe_compile_run, serial_in, halt, phase_expected_entry
+.importzp fe_compile_status, cc_status, rt_depth
+.segment "CODE"
+_main:
+    jsr fe_compile_run
+    bcs failed
+    cmp phase_expected_entry
+    bne failed
+    cpx phase_expected_entry+1
+    bne failed
+    lda fe_compile_status
+    ora cc_status
+    ora rt_depth
+    bne failed
+    jsr serial_in
+    bcc failed
+    lda fe_compile_status
+    ora cc_status
+    bne failed
+    lda #0
+    jmp halt
+failed:
+    lda #99
+    jmp halt
+"#;
+    let temp = TempDir::new();
+    let fixture_path = temp.0.join("phase_transition.s");
+    fs::write(&fixture_path, fixture).unwrap();
+    let source = format!(
+        "{}?=$ ?=$ ?=-32768 ?=32767",
+        (b'A'..=b'Z')
+            .map(|reg| format!("?={} ", char::from(reg)))
+            .collect::<String>()
+    );
+    let mut input = (source.len() as u16).to_le_bytes().to_vec();
+    input.extend_from_slice(source.as_bytes());
+    let result = build_and_run_custom(&input, fixture_path.to_str().unwrap(), Some(&basic));
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+    assert_eq!(
+        result.stdout, b"00000000000000000000000000-1-1-3276832767",
+        "{result:?}"
+    );
 }
 
 #[test]
@@ -854,7 +915,9 @@ fn p0a_result(result: &Output, status: i32, stdout: &[u8]) {
 }
 
 // This private adapter checks the live registry before process exit, never by
-// compiling another source after failure. Only 'a' may be published in these
+// compiling another source after failure. On success the runtime state is
+// checked first; template_lookup then reuses compiler scratch after execution.
+// Only 'a' may be published in these
 // fixtures; compare its entire canonical body, and reject every other slot.
 fn p0a_probe(source: &str, body: Option<&str>, failure: Option<bool>) -> Output {
     p0a_probe_status(source, body, failure.map(|reader| (reader, 2)))

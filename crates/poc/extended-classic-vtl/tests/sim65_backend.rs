@@ -67,6 +67,7 @@ fn build_and_run(case: u8) -> Result<Output, String> {
         root.join("6502/compiler/owner.s"),
         root.join("6502/compiler/binding.s"),
         root.join("6502/compiler/work_stack.s"),
+        root.join("6502/target/zp_layout.s"),
         root.join("6502/runtime/state.s"),
         root.join("6502/runtime/primitives.s"),
         root.join("6502/runtime/arithmetic.s"),

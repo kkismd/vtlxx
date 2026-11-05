@@ -80,6 +80,7 @@ fn build_and_run_with_input(
     let sources = [
         root.join("tests/fixtures/sim65")
             .join(format!("{fixture}.s")),
+        root.join("6502/target/zp_layout.s"),
         root.join("6502/runtime/state.s"),
         root.join("6502/runtime/primitives.s"),
         root.join("6502/runtime/arithmetic.s"),
@@ -97,7 +98,7 @@ fn build_and_run_with_input(
             OsStr::new("-I"),
             fixture_include.as_os_str(),
         ];
-        if probe_case.is_some() && index == 1 {
+        if probe_case.is_some() && source.ends_with("6502/runtime/state.s") {
             args.extend([OsStr::new("-D"), OsStr::new("RT_TEST_PROBE")]);
         }
         if let Some(case_define) = &case_define

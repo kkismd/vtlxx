@@ -10,12 +10,12 @@
 .exportzp template_reader_error
 .importzp cc_arg, cc_data_length
 
-.segment "ZEROPAGE"
-template_reader_ptr:       .res 2
-template_reader_remaining: .res 2
-template_reader_replacement: .res 1
-template_reader_error:     .res 1
-template_reader_char:      .res 1
+.importzp zp_phase
+template_reader_ptr = zp_phase + 50
+template_reader_remaining = zp_phase + 52
+template_reader_replacement = zp_phase + 54
+template_reader_error = zp_phase + 55
+template_reader_char = zp_phase + 56
 
 .segment "CODE"
 ; Start is cc_arg, length is cc_data_length, and Y is the replacement byte.

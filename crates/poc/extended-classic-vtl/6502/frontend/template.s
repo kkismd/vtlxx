@@ -4,8 +4,8 @@
 .export template_reset, template_is_bound, template_publish, template_lookup
 .importzp cc_status, cc_arg, cc_data_length
 
-.segment "ZEROPAGE"
-template_slot: .res 1
+.importzp zp_phase
+template_slot = zp_phase + 49
 
 .segment "BSS"
 template_valid: .res 26

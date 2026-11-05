@@ -9,26 +9,27 @@
 .export cc_arena
 .exportzp cc_status, cc_arg, cc_cursor, cc_pending_count, cc_data_length
 
+.importzp zp_phase
 .segment "ZEROPAGE"
 cc_status: .res 1
-cc_arg:    .res 2
-cc_cursor: .res 2
-cc_frozen_end: .res 2
-cc_ptr:    .res 2
-cc_limit:  .res 2
-cc_value:  .res 2
-cc_pending_count: .res 2
-cc_source_begin: .res 2
-cc_data_begin_ptr: .res 2
-cc_data_active: .res 1
-cc_data_length: .res 2
-cc_reserve_count: .res 1
-cc_data_value: .res 1
-cc_copy_src: .res 2
-cc_copy_dst: .res 2
-cc_copy_count: .res 2
-cc_bit_index: .res 2
-cc_bit_mask: .res 1
+cc_arg = zp_phase + 57
+cc_cursor = zp_phase + 59
+cc_frozen_end = zp_phase + 61
+cc_ptr = zp_phase + 63
+cc_limit = zp_phase + 65
+cc_value = zp_phase + 67
+cc_pending_count = zp_phase + 69
+cc_source_begin = zp_phase + 71
+cc_data_begin_ptr = zp_phase + 73
+cc_data_active = zp_phase + 75
+cc_data_length = zp_phase + 76
+cc_reserve_count = zp_phase + 78
+cc_data_value = zp_phase + 79
+cc_copy_src = zp_phase + 80
+cc_copy_dst = zp_phase + 82
+cc_copy_count = zp_phase + 84
+cc_bit_index = zp_phase + 86
+cc_bit_mask = zp_phase + 88
 
 .segment "RODATA"
 patch_masks: .byte 1,2,4,8,16,32,64,128

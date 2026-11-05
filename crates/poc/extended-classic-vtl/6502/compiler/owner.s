@@ -11,16 +11,16 @@
 .import cc_arena
 .importzp cc_status, cc_arg, cc_pending_count, cc_data_length
 
-.segment "ZEROPAGE"
-owner_state: .res 1             ; 0 idle, 1 emitting
-owner_entry: .res 2
-label_count: .res 1
-fixup_count: .res 1
-owner_word: .res 2
-owner_target: .res 2
-owner_index: .res 1
-owner_offset: .res 2
-owner_mask: .res 1
+.importzp zp_phase
+owner_state = zp_phase + 94              ; 0 idle, 1 emitting
+owner_entry = zp_phase + 95
+label_count = zp_phase + 97
+fixup_count = zp_phase + 98
+owner_word = zp_phase + 99
+owner_target = zp_phase + 101
+owner_index = zp_phase + 103
+owner_offset = zp_phase + 104
+owner_mask = zp_phase + 106
 
 .segment "BSS"
 label_values: .res 64

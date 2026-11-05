@@ -12,15 +12,15 @@
 .import rt_test_probe
 .endif
 
-.segment "ZEROPAGE"
-rt_depth:   .res 1
-rt_stack:   .res 32
-rt_regs:    .res 52
-rt_lhs:     .res 2
-rt_rhs:     .res 2
-rt_result:  .res 2
-rt_index:   .res 1
-rt_input_eof: .res 1
+.importzp zp_phase
+rt_depth = zp_phase + 0
+rt_stack = zp_phase + 1
+rt_regs = zp_phase + 33
+rt_lhs = zp_phase + 85
+rt_rhs = zp_phase + 87
+rt_result = zp_phase + 89
+rt_index = zp_phase + 91
+rt_input_eof = zp_phase + 92
 
 .segment "BSS"
 rt_storage: .res 512
