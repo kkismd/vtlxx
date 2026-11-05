@@ -40,16 +40,11 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
             continue;
         }
         let (target, rhs) = split_statement(token.text).map_err(SourceError::Compile)?;
-        if target == '&' {
+        if target == "&" {
             let template_identity = parse_template_header(rhs);
-            let write_identity = if rhs.len() == 1 && rhs.as_bytes()[0].is_ascii_lowercase() {
-                Some(rhs.as_bytes()[0] as char)
-            } else {
-                None
-            };
-            let identity = template_identity
-                .or(write_identity)
-                .ok_or(SourceError::Compile(CompileError::Syntax))?;
+            if template_identity.is_none() && !valid_write_name(rhs) {
+                return Err(SourceError::Compile(CompileError::Syntax));
+            }
             flush_top_level(
                 machine,
                 std::mem::replace(&mut builder, CodeBuilder::new()),
@@ -66,7 +61,7 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
                     .publish_template(identity, completed)
                     .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
             } else {
-                if machine.resolve(identity, SourceRole::Write).is_some() {
+                if machine.resolve_write(rhs).is_some() {
                     return Err(SourceError::Compile(CompileError::Syntax));
                 }
                 let mut definition_builder = CodeBuilder::new();
@@ -76,7 +71,7 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
                     .finish()
                     .map_err(|_| SourceError::Compile(CompileError::Builder))?;
                 machine
-                    .publish_initial(identity, SourceRole::Write, completed)
+                    .publish_write(rhs, completed)
                     .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
             }
         } else {
@@ -357,7 +352,7 @@ fn compile_source_statement(
         return compile_template_invocation(invocation, machine, constants, builder);
     }
     let (target, rhs) = split_statement(token.text)?;
-    if target == '*' {
+    if target == "*" {
         if rhs.is_empty() || rhs == "()" {
             return Err(CompileError::Syntax);
         }
@@ -383,7 +378,7 @@ fn compile_source_statement(
         *builder = staged;
         return Ok(());
     }
-    if target == '%' {
+    if target == "%" {
         // The complete form belongs to the surrounding code and label owner.
         let mut staged = builder.clone();
         compile_resolved_rhs(rhs, machine, constants, &mut staged)?;
@@ -459,13 +454,16 @@ fn flush_top_level(
         .map_err(SourceError::Runtime)
 }
 
-fn split_statement(statement: &str) -> Result<(char, &str), CompileError> {
-    let mut chars = statement.chars();
-    let target = chars.next().ok_or(CompileError::Syntax)?;
-    if chars.next() != Some('=') {
+fn valid_write_name(name: &str) -> bool {
+    (1..=8).contains(&name.len()) && name.bytes().all(|byte| byte.is_ascii_lowercase())
+}
+
+fn split_statement(statement: &str) -> Result<(&str, &str), CompileError> {
+    let (target, rhs) = statement.split_once('=').ok_or(CompileError::Syntax)?;
+    if target.chars().count() != 1 && !valid_write_name(target) {
         return Err(CompileError::Syntax);
     }
-    Ok((target, chars.as_str()))
+    Ok((target, rhs))
 }
 
 fn next_statement<'a>(line: &'a str, offset: &mut usize) -> Result<Option<&'a str>, CompileError> {
@@ -512,24 +510,24 @@ fn compile_statement(
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     let (target, rhs) = split_statement(statement)?;
-    if matches!(target, '&' | '[' | '=') {
+    if matches!(target, "&" | "[" | "=") {
         return Err(CompileError::Syntax);
     }
     match target {
-        '^' | '#' => {
+        "^" | "#" => {
             let label: i32 = if rhs.bytes().all(|byte| byte.is_ascii_digit()) && !rhs.is_empty() {
                 rhs.parse().map_err(|_| CompileError::Syntax)?
             } else {
                 i32::from(constants.resolve(rhs.strip_prefix('.').ok_or(CompileError::Syntax)?)?)
             };
-            let result = if target == '^' {
+            let result = if target == "^" {
                 builder.define_numeric_label(label)
             } else {
                 builder.emit_numeric_jump(label)
             };
             result.map_err(|_| CompileError::Builder)?;
         }
-        '?' if rhs.starts_with('"') => {
+        "?" if rhs.starts_with('"') => {
             let bytes = rhs.as_bytes();
             if bytes.len() < 2 || bytes.last() != Some(&b'"') {
                 return Err(CompileError::Syntax);
@@ -548,7 +546,7 @@ fn compile_statement(
                 builder.emit_call(output);
             }
         }
-        '?' if rhs == "()" => {
+        "?" if rhs == "()" => {
             let output = machine
                 .resolve('$', SourceRole::Write)
                 .ok_or(CompileError::UndefinedBinding)?;
@@ -557,13 +555,13 @@ fn compile_statement(
                 .map_err(|_| CompileError::Builder)?;
             builder.emit_call(output);
         }
-        '~' => compile_resolved_rhs(rhs, machine, constants, builder)?,
+        "~" => compile_resolved_rhs(rhs, machine, constants, builder)?,
         _ => {
             if rhs != "()" {
                 compile_resolved_rhs(rhs, machine, constants, builder)?;
             }
             let id = machine
-                .resolve(target, SourceRole::Write)
+                .resolve_write(target)
                 .ok_or(CompileError::UndefinedBinding)?;
             builder.emit_call(id);
         }

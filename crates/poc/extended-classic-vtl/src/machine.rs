@@ -29,6 +29,7 @@ pub struct Machine {
     executables: Vec<Executable>,
     bindings: Bindings,
     templates: HashMap<char, CompletedTemplate>,
+    long_writes: HashMap<String, ExecutableId>,
     builtins: Vec<(Primitive, ExecutableId)>,
     pub(crate) output: Vec<u8>,
     input: Box<dyn Read>,
@@ -55,6 +56,7 @@ impl Machine {
             executables: Vec::new(),
             bindings: Bindings::default(),
             templates: HashMap::new(),
+            long_writes: HashMap::new(),
             builtins: Vec::new(),
             output: Vec::new(),
             input: Box::new(io::empty()),
@@ -168,6 +170,30 @@ impl Machine {
 
     pub(crate) fn resolve(&self, identity: char, role: SourceRole) -> Option<ExecutableId> {
         self.bindings.resolve(identity, role)
+    }
+
+    pub(crate) fn resolve_write(&self, name: &str) -> Option<ExecutableId> {
+        if name.chars().count() == 1 {
+            self.resolve(name.chars().next().unwrap(), SourceRole::Write)
+        } else {
+            self.long_writes.get(name).copied()
+        }
+    }
+
+    pub(crate) fn publish_write(
+        &mut self,
+        name: &str,
+        body: CompletedBody,
+    ) -> Result<ExecutableId, BindingError> {
+        if name.len() == 1 {
+            return self.publish_initial(name.as_bytes()[0] as char, SourceRole::Write, body);
+        }
+        if self.long_writes.contains_key(name) {
+            return Err(BindingError::AlreadyBound);
+        }
+        let id = self.install_completed(body);
+        self.long_writes.insert(name.to_owned(), id);
+        Ok(id)
     }
 
     pub(crate) fn builtin_id(&self, primitive: Primitive) -> Option<ExecutableId> {
