@@ -6,6 +6,7 @@ use std::process::{Command, Output, Stdio};
 
 const EXAMPLES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug)]
 enum Disposition {
     Portable {
@@ -68,9 +69,10 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "micro_trek.vtl",
-        disposition: Disposition::Deferred {
-            reason: "fixed-seed scenario coverage is tracked separately",
-            followup_issue: "#513",
+        disposition: Disposition::Portable {
+            expected_stdout: None,
+            cycle_limit: Some(4_000_000_000),
+            runtime_input: None,
         },
     },
     ExampleCase {

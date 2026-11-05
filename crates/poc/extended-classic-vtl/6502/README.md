@@ -109,3 +109,21 @@ source本体は `compiler/arena.s` が所有し、template registryには開始�
 `target/sim65_cli.s` は CLI 専用entryで、`_main` から `fe_compile_run` を一度呼ぶ。compile成功時は既にfrontendが実行したruntimeの後で `halt(0)` し、compile error時は `fe_compile_status` を `$80` と OR したtarget statusで終了する。test probe用entryとは分離し、追加serial readやsentinel出力を行わない。
 
 crate root の `ecvtl6502` host binaryが source/runtime inputをraw bytesで読み、source lengthをu16 LEで検証・framingする。`ca65` / `ld65` は argvで起動し、対象source、既存runtime/frontend/compiler、CLI entry、`sim65_adapter.s` を組み立てて `sim6502.lib` と linkする。生成programは4,000,000 cycle limit付きでsim65へ渡す。一時directoryは各実行で新規作成し、終了時に削除する。
+
+## Micro TREK の sim65 E2E と資源 (#513)
+
+基準 main `07350a863c450529d098fbd5f2bf896deb9d00cf`、Ubuntu cc65 package 2.19-1 の ca65/ld65/sim65 V2.18 で測定。正本 `examples/micro_trek.vtl` を変更せず固定 seed 0 で使う。以下は repository root から実行する。
+
+```sh
+cargo test -p vtlxx-poc-extended-classic-vtl --test micro_trek_e2e
+cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_micro_trek_e2e -- --ignored
+python3 crates/poc/extended-classic-vtl/tests/fixtures/micro_trek/measure_sim65.py
+```
+
+E2E は Rust 側の 5 テストに対応する 7 入力系列を raw stdout/stderr と正常終了で比較し、別に Unix の対話モードで `COMMAND :` を入力前に受信してから X を送る。一括実行は 4,000,000,000 cycles、各子プロセスは 120 秒を上限とする。Rust 側の独立した出力期待値も維持する。CLI は内部 storage や PRNG の最終値を公開しないため、その一致は主張しない。Rust の `micro_trek_lifecycle::replay_initialization_continues_the_random_stream` は storage[192] の継続を、`micro_trek_turn_end::win_precedes_dock_and_attack_even_when_energy_and_days_are_exhausted` は勝利優先を直接検査する。実 CLI の勝利は未到達。6502 の `sim65_runtime::storage_all_cells_aliases_and_reinitialization` は 256 Cell と ring の非 alias を検査する。EOF と敗北・RETRY は上記 E2E で観測する。
+
+正式 module の `ld65 -m/-Ln` 静的配置は ZP `$0000..$008c` (141 B)、CODE `$0229..$2069`、RODATA `$206a..$209a`、DATA `$209b..$20e1`、BSS `$20e2..$a78a`。arena `$2b9e..$8b9d` は 24,576 B、patch/completed bitset は各 3,072 B、定数表は 128×19 = 2,432 B、storage は 256×2 = 512 B。CPU stack は `$0100..$01ff`、cc65 software stack は `$f7f0..$ffef`、BSS 末尾から後者までの空きは 20,581 B。終端 wrap と静的重複はない。compile/runtime ZP overlay は 111 B、entry と両 status は独立した 4 B、cc65 共通 ZP は 26 B。アドレスは ABI ではない。
+
+上記 script は production と同じ module の link map/labels を生成し、sim65 `-c` で総 cycles を別実行で取得する。EOF 30,211,835、表示後 X 31,352,775、2 回敗北・RETRY 47,418,752 cycles。compile/runtime 相別は未計測。script は別途 frontend の一時コピーに成功した `fe_build_driver` の直後、runtime 開始前の `cc_cursor` を出力して停止する診断を挿入する。診断 binary の arena は `$2bad`、cursor は `$687f`、生成量 15,570 B、残り 9,006 B。ゲームは P0a を使わない。この値は診断 binary の測定であり production CLI の直接観測ではない。
+
+動的 CPU S、value/work stack、cc65 software SP の最大使用量は本測定では未計測で、全経路の動的安全性は未証明。静的非重複はその証明ではない。compile guard は S < 25 を検出するが runtime や IRQ/NMI に適用しない。既存の `sim65_backend::patch_range_and_arena_boundaries` / `shared_arena_source_storage_and_owner_guards`、`sim65_frontend::shared_arena_exhaustion_preserves_published_template_in_both_directions`、`sim65_cli::constant_table_accepts_128_entries_and_rejects_129`、容量不足 fixture は owner/source 保持、失敗時非公開、exit 130/132 と runtime 非開始を確認する。EC09 #463 の完了判定には、未測定の stack と相別 cycles、および実 CLI 勝利未到達を含めて評価が必要。
