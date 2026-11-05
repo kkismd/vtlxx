@@ -12,7 +12,7 @@
 .import cc_work_push, cc_work_pop, cc_work_swap, cc_work_reset
 .import rt_init, rt_print_number, rt_print_char, rt_push
 .import serial_out, halt
-.importzp cc_status, cc_arg, cc_cursor, cc_data_length, rt_depth
+.importzp cc_status, cc_arg, cc_cursor, cc_data_length, cc_pending_count, rt_depth
 
 .macro WORD value
     lda #<(value)
@@ -1274,15 +1274,76 @@ _main:
     jsr cc_jump_placeholder
     sta patch_two
     stx patch_two+1
+    lda cc_pending_count
+    cmp #2
+    beq :+
+    jmp bad
+:
+    lda cc_pending_count+1
+    beq :+
+    jmp bad
+:
     lda patch
     ldx patch+1
     jsr cc_patch_here
     OK
+    lda cc_pending_count
+    cmp #1
+    beq :+
+    jmp bad
+:
+    lda cc_pending_count+1
+    beq :+
+    jmp bad
+:
     lda patch_two
     ldx patch_two+1
     jsr cc_patch_here
     OK
+    lda cc_pending_count
+    ora cc_pending_count+1
+    beq :+
+    jmp bad
+:
+    ; The last legal u16 operand starts at $5ffe.
+    lda #<(cc_arena+$5ffd)
+    sta cc_cursor
+    lda #>(cc_arena+$5ffd)
+    sta cc_cursor+1
+    jsr cc_jump_placeholder
+    sta patch
+    stx patch+1
+    OK
+    lda cc_pending_count
+    cmp #1
+    beq :+
+    jmp bad
+:
+    lda patch
+    ldx patch+1
+    jsr cc_patch_here
+    OK
+    lda cc_pending_count
+    ora cc_pending_count+1
+    beq :+
+    jmp bad
+:
     ; Completion bits at matching positions also remain distinct.
+    jsr cc_init
+    jsr cc_begin_owner
+    sta patch
+    stx patch+1
+    jsr cc_complete_owner
+    OK
+    ; A different page with the same low index is still unpublished.
+    WORD cc_arena+$800
+    jsr cc_is_completed
+    lda cc_status
+    cmp #8
+    beq :+
+    jmp bad
+:
+    ; Repeat from a clean state to complete both owners below.
     jsr cc_init
     jsr cc_begin_owner
     sta patch
