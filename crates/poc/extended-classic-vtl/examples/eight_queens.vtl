@@ -5,28 +5,28 @@
 ; J scans earlier columns or prints the board; P, D, and F check collisions.
 ; The procedures share registers and storage. Each contract below names its effects.
 
-  ; p: ( address value -- ). All board writes pass through this procedure.
+  ; putcell: ( address value -- ). All board writes pass through this procedure.
   ; reads: value stack
   ; writes/clobbers: I, V, indexed storage at address
-  &=p [
+  &=putcell [
     V=~
     I=~
     @=I,V
   ]
 
-  ; a: ( difference -- absolute difference ).
+  ; absdiff: ( difference -- absolute difference ).
   ; reads: value stack
   ; writes/clobbers: D
-  &=a [
+  &=absdiff [
     D=~
     %=D<0 [ D=0-D ]
     ~=D
   ]
 
-  ; c: ( -- ). Set F when the current candidate collides with an earlier queen.
-  ; reads: C, R, indexed storage; calls a
+  ; collide: ( -- ). Set F when the current candidate collides with an earlier queen.
+  ; reads: C, R, indexed storage; calls absdiff
   ; writes/clobbers: F, J, P, D
-  &=c [
+  &=collide [
     F=0
     J=0
     *=J<C [
@@ -35,7 +35,7 @@
         F=1
         J=C
       ] [
-        a=P-R
+        absdiff=P-R
         D=~
         %=D==(C-J) [
           F=1
@@ -46,10 +46,10 @@
     ]
   ]
 
-  ; o: ( -- ). Print the placed rows in column order, followed by LF.
+  ; printsol: ( -- ). Print the placed rows in column order, followed by LF.
   ; reads: indexed storage
   ; writes/clobbers: J, output
-  &=o [
+  &=printsol [
     J=0
     *=J<8 [
       ?=@(J)
@@ -58,38 +58,38 @@
     ?=()
   ]
 
-  ; d: ( -- ). Descend to an empty next column.
-  ; reads: C; calls p
+  ; descend: ( -- ). Descend to an empty next column.
+  ; reads: C; calls putcell
   ; writes/clobbers: C, I, V, indexed storage at the new C
-  &=d [
+  &=descend [
     C=C+1
-    p=C,0
+    putcell=C,0
   ]
 
-  ; b: ( -- ). Clear an exhausted column and backtrack.
-  ; reads: C; calls p
+  ; backstep: ( -- ). Clear an exhausted column and backtrack.
+  ; reads: C; calls putcell
   ; writes/clobbers: C, I, V, indexed storage at the old C
-  &=b [
-    p=C,0
+  &=backstep [
+    putcell=C,0
     C=C-1
   ]
 
-  ; s: ( -- ). Advance candidates until backtracking passes column zero.
-  ; reads: C, S, indexed storage; calls b, c, d, o, p
+  ; search: ( -- ). Advance candidates until backtracking passes column zero.
+  ; reads: C, S, indexed storage; calls backstep, collide, descend, printsol, putcell
   ; writes/clobbers: C, R, S, F, J, P, D, I, V, board, output
-  &=s [
+  &=search [
     *=C>=0 [
       ; Advance this column's row candidate. Exhaustion backtracks.
       R=@(C)+1
-      %=R>8 [ b=() ] [
-        p=C,R
-        c=()
+      %=R>8 [ backstep=() ] [
+        putcell=C,R
+        collide=()
         ; A clear candidate completes a solution or descends.
         %=F==0 [
           %=C==7 [
             S=S+1
-            o=()
-          ] [ d=() ]
+            printsol=()
+          ] [ descend=() ]
         ]
       ]
     ]
@@ -97,7 +97,7 @@
 
   C=0
   S=0
-  p=C,0
-  s=()
+  putcell=C,0
+  search=()
   ?=S
   ?=()
