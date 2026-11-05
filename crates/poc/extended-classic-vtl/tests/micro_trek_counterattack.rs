@@ -53,7 +53,7 @@ fn empty_and_docked_do_not_attack() {
         ),
     ] {
         let mut m = machine(42, hp, docked);
-        m.execute_source("a=()").unwrap();
+        m.execute_source("enemyatk=()").unwrap();
         assert_eq!(m.output(), output.as_bytes());
         assert_eq!(m.storage(192), 42);
         assert_eq!(m.storage(161), 4000);
@@ -102,7 +102,7 @@ fn attack_slots_and_threshold_preserve_state_and_draw_order() {
             ));
         }
         expected[192] = state;
-        m.execute_source("a=()").unwrap();
+        m.execute_source("enemyatk=()").unwrap();
         assert_eq!(m.output(), output.as_bytes());
         assert_eq!(m.stack(), PREFIX);
         for (i, value) in expected.iter().enumerate() {
@@ -126,7 +126,7 @@ fn output_error_is_fatal() {
     let mut m = machine(42, [300, 0, 0, 0, 0, 0], 0);
     m.set_output(Broken);
     assert!(matches!(
-        m.execute_source("a=()"),
+        m.execute_source("enemyatk=()"),
         Err(SourceError::Runtime(RuntimeError::OutputError))
     ));
     assert_eq!(m.storage(192), 42);
@@ -149,7 +149,7 @@ fn random_endpoints_and_distance_are_applied_per_enemy() {
             m.execute_source("@=146,8 @=152,8").unwrap();
             let power = u / 2;
             let hit = (30 * i32::from(power) / 128 + 1) as i16;
-            m.execute_source("a=()").unwrap();
+            m.execute_source("enemyatk=()").unwrap();
             assert_eq!(m.storage(140), h - power);
             assert!(m.storage(140) > 0);
             assert_eq!(m.storage(161), 4000 - hit);

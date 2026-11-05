@@ -32,7 +32,7 @@ fn retry_reads_complete_lines_and_preserves_state() {
     ] {
         let mut m = machine(input);
         let before: Vec<_> = (0..240).map(|i| m.storage(i)).collect();
-        m.execute_source("e=1").unwrap();
+        m.execute_source("gameend=1").unwrap();
         let mut stack = PREFIX.to_vec();
         stack.push(expected);
         assert_eq!(m.stack(), stack, "{input:?}");
@@ -46,13 +46,13 @@ fn retry_reads_complete_lines_and_preserves_state() {
         assert_eq!(output.matches("RETRY?(Y/N)").count(), prompts);
     }
     let mut m = machine(b"N\nX\n");
-    m.execute_source("e=2").unwrap();
+    m.execute_source("gameend=2").unwrap();
     assert_eq!(m.pop(), Some(0));
     assert!(
         String::from_utf8_lossy(m.output())
             .starts_with("IT IS STARDATE : 3200\nPLANETS UNION WAS CONQUERED \n")
     );
-    m.execute_source("b=()").unwrap();
+    m.execute_source("command=()").unwrap();
     assert_eq!(m.pop(), Some(-1));
     assert_eq!(m.stack(), PREFIX);
 }
@@ -61,13 +61,13 @@ fn retry_reads_complete_lines_and_preserves_state() {
 fn replay_initialization_continues_the_random_stream() {
     fn run() -> (Vec<i16>, i16, Vec<i16>, i16) {
         let mut m = machine(b"Y\n");
-        m.execute_source("@=192,0 i=()").unwrap();
+        m.execute_source("@=192,0 initgame=()").unwrap();
         let first = (0..171).map(|i| m.storage(i)).collect();
         let first_seed = m.storage(192);
-        m.execute_source("e=1").unwrap();
+        m.execute_source("gameend=1").unwrap();
         assert_eq!(m.pop(), Some(1));
         assert_eq!(m.storage(192), first_seed);
-        m.execute_source("i=()").unwrap();
+        m.execute_source("initgame=()").unwrap();
         let second = (0..171).map(|i| m.storage(i)).collect();
         assert_eq!(m.stack(), PREFIX);
         (first, first_seed, second, m.storage(192))
@@ -89,7 +89,7 @@ fn retry_input_failure_is_not_eof() {
     let mut m = machine(b"");
     m.set_input(FailedInput);
     assert_eq!(
-        m.execute_source("e=1"),
+        m.execute_source("gameend=1"),
         Err(SourceError::Runtime(RuntimeError::InputError))
     );
 }

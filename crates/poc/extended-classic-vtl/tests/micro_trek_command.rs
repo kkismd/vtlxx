@@ -18,7 +18,7 @@ fn machine(input: &[u8]) -> Machine {
 }
 
 fn call(m: &mut Machine, status: i16) {
-    m.execute_source("b=()").unwrap();
+    m.execute_source("command=()").unwrap();
     let mut expected = PREFIX.to_vec();
     expected.push(status);
     assert_eq!(m.stack(), expected);
@@ -116,7 +116,7 @@ fn fatal_input_error_is_not_eof() {
     let mut m = machine(b"");
     m.set_input(FailedInput);
     assert_eq!(
-        m.execute_source("b=()"),
+        m.execute_source("command=()"),
         Err(SourceError::Runtime(RuntimeError::InputError))
     );
 }

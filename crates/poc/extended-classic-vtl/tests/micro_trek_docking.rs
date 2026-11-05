@@ -55,7 +55,7 @@ fn all_eight_directions_and_multiple_bases_resupply_once() {
             let mut m = machine(4, 4);
             put_base(&mut m, 4 + dx, 4 + dy);
             let before = snapshot(&m);
-            m.execute_source("d=()").unwrap();
+            m.execute_source("dock=()").unwrap();
             assert_result(&m, &before, true);
             assert_eq!(m.output(), b"DOCKED IN\n");
         }
@@ -64,7 +64,7 @@ fn all_eight_directions_and_multiple_bases_resupply_once() {
     put_base(&mut m, 3, 3);
     put_base(&mut m, 5, 5);
     let before = snapshot(&m);
-    m.execute_source("d=()").unwrap();
+    m.execute_source("dock=()").unwrap();
     assert_result(&m, &before, true);
     assert_eq!(m.output(), b"DOCKED IN\n");
 }
@@ -75,7 +75,7 @@ fn corners_edges_and_row_wrap_do_not_match_outside_cells() {
         let mut m = machine(x, y);
         put_base(&mut m, bx, by);
         let before = snapshot(&m);
-        m.execute_source("d=()").unwrap();
+        m.execute_source("dock=()").unwrap();
         assert_result(&m, &before, true);
         assert_eq!(m.output(), b"DOCKED IN\n");
     }
@@ -83,7 +83,7 @@ fn corners_edges_and_row_wrap_do_not_match_outside_cells() {
         let mut m = machine(x, y);
         put_base(&mut m, bx, by);
         let before = snapshot(&m);
-        m.execute_source("d=()").unwrap();
+        m.execute_source("dock=()").unwrap();
         assert_result(&m, &before, false);
         assert!(m.output().is_empty());
     }
@@ -96,13 +96,13 @@ fn repeated_docking_and_departure() {
     for count in 1..=2 {
         m.execute_source("@=161,42 @=162,3 @=64,9").unwrap();
         let before = snapshot(&m);
-        m.execute_source("d=()").unwrap();
+        m.execute_source("dock=()").unwrap();
         assert_result(&m, &before, true);
         assert_eq!(m.output(), b"DOCKED IN\n".repeat(count));
     }
     m.execute_source("@=90,0 @=161,12 @=162,2 @=64,7").unwrap();
     let before = snapshot(&m);
-    m.execute_source("d=()").unwrap();
+    m.execute_source("dock=()").unwrap();
     assert_result(&m, &before, false);
     assert_eq!(m.output(), b"DOCKED IN\nDOCKED IN\n");
 }
@@ -124,7 +124,7 @@ fn output_error_propagates_after_resupply_completes() {
     let before = snapshot(&m);
     m.set_output(Broken);
     assert_eq!(
-        m.execute_source("d=()"),
+        m.execute_source("dock=()"),
         Err(SourceError::Runtime(RuntimeError::OutputError))
     );
     assert!(m.stack().starts_with(PREFIX));

@@ -31,7 +31,7 @@ fn reports_condition_priority_and_latest_owned_state_without_side_effects() {
             3230 - days
         );
         for count in 1..=2 {
-            m.execute_source("v=()").unwrap();
+            m.execute_source("status=()").unwrap();
             assert_eq!(m.output(), expected.repeat(count).as_bytes());
             assert_eq!(m.stack(), PREFIX);
             for i in 0..240 {

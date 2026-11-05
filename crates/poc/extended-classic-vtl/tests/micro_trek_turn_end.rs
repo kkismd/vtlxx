@@ -22,7 +22,7 @@ fn machine(k: i16, energy: i16, days: i16, enemy_hp: i16, base: bool) -> Machine
 }
 
 fn run(m: &mut Machine, result: i16) {
-    m.execute_source("u=()").unwrap();
+    m.execute_source("endturn=()").unwrap();
     let mut expected = PREFIX.to_vec();
     expected.push(result);
     assert_eq!(m.stack(), expected);
@@ -101,7 +101,7 @@ fn callee_output_errors_propagate_without_a_result() {
         let mut m = machine(1, 1, 1, 300, base);
         m.set_output(Broken);
         assert_eq!(
-            m.execute_source("u=()"),
+            m.execute_source("endturn=()"),
             Err(SourceError::Runtime(RuntimeError::OutputError))
         );
         assert!(m.stack().starts_with(PREFIX));

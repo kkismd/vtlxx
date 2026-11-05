@@ -46,7 +46,7 @@ fn scan_marks_only_visible_cells_and_is_idempotent() {
         let mut m = machine(u, v, 0);
         let before: Vec<_> = (0..240).map(|i| m.storage(i)).collect();
         for count in 1..=2 {
-            m.execute_source("l=()").unwrap();
+            m.execute_source("longscan=()").unwrap();
             assert_eq!(m.stack(), PREFIX);
             assert_eq!(m.output(), expected(u, v).repeat(count).as_bytes());
             for i in 0..240 {
@@ -70,7 +70,7 @@ fn damaged_sensor_only_displays_device_and_position() {
     for damage in [1, 3] {
         let mut m = machine(4, 4, damage);
         let before: Vec<_> = (0..240).map(|i| m.storage(i)).collect();
-        m.execute_source("l=()").unwrap();
+        m.execute_source("longscan=()").unwrap();
         assert_eq!(m.stack(), PREFIX);
         assert_eq!(m.output(), format!("NOW: QUADRANT(44) SECTOR(45)\n*LONG RANGE SENSOR*DAMAGED!\n{damage}\n YEARS ESTIMATED FOR REPAIR.\n").as_bytes());
         for i in 0..240 {

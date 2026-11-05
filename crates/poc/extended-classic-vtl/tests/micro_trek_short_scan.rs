@@ -42,7 +42,7 @@ fn healthy_sensor_prints_all_cells_without_mutating_state() {
     }
     expected.push_str("  1 2 3 4 5 6 7 8\n");
     for count in 1..=2 {
-        m.execute_source("s=()").unwrap();
+        m.execute_source("shortmap=()").unwrap();
         assert_eq!(m.stack(), PREFIX);
         assert_eq!(m.output(), expected.repeat(count).as_bytes());
         for i in 0..26 {
@@ -61,7 +61,7 @@ fn damaged_sensor_displays_status_without_map_or_state_changes() {
     for damage in [1, 3] {
         let mut m = machine(damage);
         let before: Vec<_> = (0..240).map(|i| m.storage(i)).collect();
-        m.execute_source("s=()").unwrap();
+        m.execute_source("shortmap=()").unwrap();
         assert_eq!(m.stack(), PREFIX);
         for i in 0..26 {
             if ![0, 1].contains(&i) {

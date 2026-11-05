@@ -113,15 +113,15 @@ fn mission_and_replay_follow_the_same_prng_stream() {
         let first = expected(seed);
         let second = expected(first.state);
         let mut m = machine(seed);
-        m.execute_source("i=()").unwrap();
+        m.execute_source("initgame=()").unwrap();
         check(&m, &first);
         // Simulate damage and changed scalars before replay; never reseed.
         m.execute_source("I=64 *=I<=70 [ @=I,99 I=I+1 ] @=160,1 @=161,2 @=162,3 @=170,1 D=99 E=99 F=99 K=99 U=99 V=99 X=99 Y=99 N=99 O=99")
             .unwrap();
-        m.execute_source("i=()").unwrap();
+        m.execute_source("initgame=()").unwrap();
         check(&m, &second);
         let mut repeat = machine(seed);
-        repeat.execute_source("i=() i=()").unwrap();
+        repeat.execute_source("initgame=() initgame=()").unwrap();
         check(&repeat, &second);
     }
     assert_eq!(expected(-32766).attempts, [4, 2]);

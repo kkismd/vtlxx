@@ -21,7 +21,7 @@ fn machine(input: impl Read + 'static) -> Machine {
 }
 
 fn check_call(m: &mut Machine, expected: (i16, i16, i16), prompts: usize) {
-    m.execute_source("c=()").unwrap();
+    m.execute_source("course=()").unwrap();
     let mut stack = PREFIX.to_vec();
     stack.extend([expected.0, expected.1, expected.2]);
     assert_eq!(m.stack(), stack);
@@ -84,7 +84,7 @@ fn fatal_input_error_propagates() {
     }
     let mut m = machine(Broken);
     assert_eq!(
-        m.execute_source("c=()"),
+        m.execute_source("course=()"),
         Err(SourceError::Runtime(RuntimeError::InputError))
     );
     assert_eq!(m.output(), PROMPT.as_bytes());

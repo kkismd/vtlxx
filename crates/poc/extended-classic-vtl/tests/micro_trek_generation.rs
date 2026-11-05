@@ -104,7 +104,7 @@ fn canonical_prng_is_callable_and_advances_once() {
         (999, 390, -13597),
         (32767, 31097, 31096),
     ] {
-        m.execute_source(&format!("r={bound}")).unwrap();
+        m.execute_source(&format!("random={bound}")).unwrap();
         assert_eq!(m.pop().unwrap(), value);
         assert_eq!(m.stack(), PREFIX);
         assert_eq!(m.storage(192), state);
@@ -126,7 +126,7 @@ fn galaxy_draw_order_retries_thresholds_and_owned_state() {
         let mut m = machine(seed);
         let storage: Vec<_> = (0..=u16::MAX).map(|i| m.storage(i)).collect();
         let registers: Vec<_> = (0..26).map(|i| m.register(i)).collect();
-        m.execute_source("g=()").unwrap();
+        m.execute_source("gengal=()").unwrap();
         assert_eq!(m.stack(), PREFIX, "seed {seed}");
         assert_eq!(m.storage(163), expected.enemies, "K seed {seed}");
         assert_eq!(m.storage(164), expected.bases, "B seed {seed}");
@@ -186,7 +186,7 @@ fn seed_zero_has_a_fixed_galaxy() {
     ];
     for _ in 0..2 {
         let mut m = machine(0);
-        m.execute_source("g=()").unwrap();
+        m.execute_source("gengal=()").unwrap();
         assert_eq!(
             (0..64).map(|i| m.storage(i)).collect::<Vec<_>>(),
             expected_cells
