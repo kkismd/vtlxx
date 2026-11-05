@@ -89,8 +89,18 @@ fn run(target: bool, input: &[u8]) -> Output {
 fn compare(input: &[u8]) {
     let rust = run(false, input);
     let target = run(true, input);
+    let repeated = run(true, input);
     assert!(rust.status.success(), "Rust: {rust:?}");
     assert!(target.status.success(), "6502: {target:?}");
+    assert_eq!(target.status, repeated.status, "6502 exit, input {input:?}");
+    assert_eq!(
+        target.stdout, repeated.stdout,
+        "6502 stdout, input {input:?}"
+    );
+    assert_eq!(
+        target.stderr, repeated.stderr,
+        "6502 stderr, input {input:?}"
+    );
     assert_eq!(rust.status.code(), target.status.code());
     assert_eq!(rust.stdout, target.stdout, "input {input:?}");
     assert_eq!(rust.stderr, target.stderr, "input {input:?}");
