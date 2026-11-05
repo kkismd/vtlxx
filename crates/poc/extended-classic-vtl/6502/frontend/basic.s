@@ -17,6 +17,7 @@
 .import cc_jump_to
 .import cc_work_push, cc_work_pop
 .import cc_is_bound, cc_publish, cc_resolve
+.import cc_name, cc_name_len
 .import cc_push_const, cc_call, cc_load_reg, cc_store_reg
 .import cc_literal_output_begin, cc_literal_output_byte, cc_literal_output_finish
 .import rt_init, rt_load_storage, rt_store_storage
@@ -94,7 +95,9 @@ constant_name: .res 16
 constant_table: .res 128*19 ; 16-byte NUL-terminated name + signed i16
 while_loop_targets: .res 16*2
 while_exit_patches: .res 16*2
-top_level_chunk_targets: .res 53*2
+top_level_chunk_targets: .res 91*2
+definition_name: .res 8
+definition_length: .res 1
 
 .segment "CODE"
 ; Carry clear on success; A/X is the completed entry. Compile errors never
@@ -182,11 +185,11 @@ fe_start_chunk:
     rts
 
 ; Complete the active top-level chunk and retain only its completed u16 entry.
-; The fixed table supports 52 possible named owners plus the surrounding
+; The fixed table supports 90 possible named owners plus the surrounding
 ; source chunks before, between, and after their definitions.
 fe_finish_chunk:
     lda chunk_count
-    cmp #53
+    cmp #91
     bcc @capacity_available
     ; Chunk targets are frontend-owned compile state, not backend status.
     lda #4
@@ -393,6 +396,30 @@ skip_separators:
 @done:
     rts
 
+; Extend a lowercase name in cc_name, preserving the first non-name byte.
+; A ninth lowercase letter is always a syntax error.
+scan_write_name_tail:
+    lda look_state
+    cmp #1
+    bne @done
+    lda look_byte
+    cmp #'a'
+    bcc @done
+    cmp #'z'+1
+    bcs @done
+    ldx cc_name_len
+    cpx #8
+    bcs @bad
+    sta cc_name,x
+    inc cc_name_len
+    jsr take
+    jsr peek
+    jmp scan_write_name_tail
+@bad:
+    jmp syntax_error
+@done:
+    rts
+
 statement:
     compile_stack_guard
     lda look_byte
@@ -407,6 +434,16 @@ statement:
     jcc @require_equals
     cmp #'z'+1
     jcs @require_equals
+    lda target_index
+    sta cc_name
+    lda #1
+    sta cc_name_len
+    jsr scan_write_name_tail
+    lda fe_compile_status
+    jne @done
+    lda cc_name_len
+    cmp #1
+    bne @require_equals
     lda look_byte
     cmp #'{'
     jeq template_call
@@ -454,8 +491,6 @@ statement:
     cmp #'z'+1
     jcs @compile_operand
     ; Resolve at compile time. Runtime code calls only the resolved target.
-    lda #0
-    ldx target_index
     jsr cc_resolve
     sta call_target
     stx call_target+1
@@ -848,26 +883,44 @@ statement:
     cmp #'z'+1
     jcs @write_definition_syntax
     sta definition_identity
+    sta cc_name
+    lda #1
+    sta cc_name_len
     jsr take
     jsr peek
-    lda look_state
+    jsr scan_write_name_tail
+    lda fe_compile_status
+    jne @write_definition_done
+    lda cc_name_len
     cmp #1
-    jne @write_definition_syntax
+    bne @normal_definition
     lda look_byte
     cmp #'{'
     jeq @template_definition
+@normal_definition:
     jsr require_form_boundary
     lda fe_compile_status
     bne @write_definition_done
+    lda cc_name_len
+    cmp #1
+    bne @check_write_binding
     lda definition_identity
     jsr template_is_bound
     bne @write_definition_syntax
-    lda #0
-    ldx definition_identity
+@check_write_binding:
     jsr cc_is_bound
     bcs @write_definition_syntax
     lda cc_status
     jne @write_definition_backend
+    lda cc_name_len
+    sta definition_length
+    tax
+@save_definition_name:
+    dex
+    lda cc_name,x
+    sta definition_name,x
+    cpx #0
+    bne @save_definition_name
 
     ; Preserve source order by finishing the prior chunk before the named
     ; owner, then resume with a fresh chunk after publication.
@@ -885,8 +938,14 @@ statement:
     stx cc_arg+1
     lda cc_status
     jne @write_definition_backend
-    lda #0
-    ldx definition_identity
+    ldx definition_length
+    stx cc_name_len
+@restore_definition_name:
+    dex
+    lda definition_name,x
+    sta cc_name,x
+    cpx #0
+    bne @restore_definition_name
     jsr cc_publish
     lda cc_status
     jne @write_definition_backend
@@ -917,14 +976,6 @@ statement:
     lda definition_identity
     jsr template_is_bound
     bne @write_definition_syntax
-    lda #0
-    ldx definition_identity
-    jsr cc_is_bound
-    bcs @write_definition_syntax
-    lda cc_status
-    jne @write_definition_backend
-    lda #1
-    ldx definition_identity
     jsr cc_is_bound
     bcs @write_definition_syntax
     lda cc_status
