@@ -5,7 +5,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const CYCLE_LIMIT: &str = "4000000";
+const CYCLE_LIMIT: &str = "100000000";
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 struct TestDir(PathBuf);
@@ -203,7 +203,7 @@ fn compile_failures_do_not_start_runtime_and_report_expected_causes() {
     assert!(success.status.success(), "{success:?}");
     assert_eq!(success.stdout, b"42");
 
-    // The IDs and byte lengths match docs/ecvtl-6502-negative-e2e-investigation.md.
+    // The arena case uses the current 24 KiB capacity; other cases retain the documented failures.
     let cases: Vec<(&str, Vec<u8>, &str, i32, i32)> = vec![
         ("syntax", b"?=42\nA=".to_vec(), "syntax error", 130, 66),
         (
@@ -214,8 +214,8 @@ fn compile_failures_do_not_start_runtime_and_report_expected_causes() {
             40,
         ),
         (
-            "arena-170",
-            arena_source(170),
+            "arena-full",
+            arena_source(2200),
             "compiler resource error",
             132,
             33,

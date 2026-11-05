@@ -8,6 +8,7 @@
 .import cc_begin_owner, cc_complete_owner, cc_is_bound, cc_is_completed, cc_publish, cc_resolve
 .import cc_define_label, cc_label_jump
 .import cc_source_begin, cc_source_append, cc_source_finish, cc_source_abort, cc_source_is_active
+.import cc_name_len, cc_name
 .import cc_arena
 .import cc_work_push, cc_work_pop, cc_work_swap, cc_work_reset
 .import rt_init, rt_print_number, rt_print_char, rt_push
@@ -17,6 +18,14 @@
 .macro WORD value
     lda #<(value)
     ldx #>(value)
+.endmacro
+
+; Set the private binding input for a single-character name.
+.macro NAME value
+    lda #1
+    sta cc_name_len
+    lda #value
+    sta cc_name
 .endmacro
 
 .macro OK
@@ -276,7 +285,7 @@ _main:
     jmp bad
 :
 .elseif TEST_CASE = 8
-    ; The two binding roles have separate direct slots for the same identity.
+    ; Distinct Write names resolve to their own completed targets.
     jsr cc_begin_owner
     jsr cc_complete_owner
     sta address
@@ -284,8 +293,7 @@ _main:
     sta cc_arg
     stx cc_arg+1
     OK
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_publish
     OK
     jsr cc_begin_owner
@@ -293,12 +301,10 @@ _main:
     sta cc_arg
     stx cc_arg+1
     OK
-    lda #1
-    ldx #'a'
+    NAME 'b'
     jsr cc_publish
     OK
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_resolve
     cmp address
     beq :+
@@ -309,8 +315,7 @@ _main:
     jmp bad
 :
     OK
-    lda #1
-    ldx #'a'
+    NAME 'b'
     jsr cc_resolve
     cmp address
     bne :+
@@ -319,8 +324,7 @@ _main:
     jmp bad
 :
     OK
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_publish
     ERROR
 .elseif TEST_CASE = 9
@@ -328,23 +332,20 @@ _main:
     jsr cc_begin_owner
     sta cc_arg
     stx cc_arg+1
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_publish
     ERROR
     jsr cc_init
-    lda #0
-    ldx #'z'
-    jsr cc_resolve
-    ERROR
-    jsr cc_init
-    lda #2
-    ldx #'a'
+    NAME 'z'
     jsr cc_resolve
     ERROR
     jsr cc_init
     lda #0
-    ldx #'A'
+    sta cc_name_len
+    jsr cc_resolve
+    ERROR
+    jsr cc_init
+    NAME 'A'
     jsr cc_resolve
     ERROR
 .elseif TEST_CASE = 10
@@ -529,15 +530,13 @@ _main:
     sta cc_arg
     stx cc_arg+1
     OK
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_publish
     OK
     jsr cc_begin_owner
     sta entry
     stx entry+1
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_resolve
     jsr cc_call
     jsr cc_complete_owner
@@ -658,9 +657,8 @@ _main:
     jmp @stage
 :
 .elseif TEST_CASE = 20
-    ; Availability queries are non-destructive and isolated by role/identity.
-    lda #0
-    ldx #'a'
+    ; Availability queries are non-destructive and isolated by complete name.
+    NAME 'a'
     jsr cc_is_bound
     bcc :+
     jmp bad
@@ -676,18 +674,15 @@ _main:
     sta cc_arg
     stx cc_arg+1
     OK
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_publish
     OK
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_is_bound
     bcs :+
     jmp bad
 :
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_is_bound
     bcs :+
     jmp bad
@@ -696,14 +691,12 @@ _main:
     beq :+
     jmp bad
 :
-    lda #0
-    ldx #'b'
+    NAME 'b'
     jsr cc_is_bound
     bcc :+
     jmp bad
 :
-    lda #1
-    ldx #'a'
+    NAME 'c'
     jsr cc_is_bound
     bcc :+
     jmp bad
@@ -713,8 +706,7 @@ _main:
     jmp bad
 :
     ; The query leaves the published target usable and duplicate publish fails.
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_resolve
     cmp address
     beq :+
@@ -724,13 +716,11 @@ _main:
     beq :+
     jmp bad
 :
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_publish
     ERROR
     jsr cc_init
-    lda #0
-    ldx #'b'
+    NAME 'b'
     jsr cc_is_bound
     bcc :+
     jmp bad
@@ -739,18 +729,16 @@ _main:
     beq :+
     jmp bad
 :
-    lda #2
-    ldx #'a'
+    lda #0
+    sta cc_name_len
     jsr cc_is_bound
     ERROR
     jsr cc_init
-    lda #0
-    ldx #'A'
+    NAME 'A'
     jsr cc_is_bound
     ERROR
     jsr cc_init
-    lda #0
-    ldx #'a'
+    NAME 'a'
     jsr cc_resolve
     ERROR
 .elseif TEST_CASE = 21

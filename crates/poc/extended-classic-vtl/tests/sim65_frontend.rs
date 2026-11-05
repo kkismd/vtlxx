@@ -443,7 +443,6 @@ fn malformed_source_never_starts_runtime() {
         "A=UNKNOWN",
         "&=",
         "&=P [ ]",
-        "&=pq [ ]",
         "&=p[ ]",
         "&=p",
         "&=p [",

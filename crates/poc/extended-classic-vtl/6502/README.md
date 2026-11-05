@@ -42,7 +42,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_runtime -- --ignored
 
 `compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 24,576 B の共有 code/source arena、binding、owner、source work stack を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。compiler の失敗は `cc_status` に保持し、後続の compile-run driver が runtime を開始せず HALT する。
 
-target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_is_bound`、`cc_publish`、`cc_resolve` は A=role（0 Write、1 SourceProcedure）、X=`a..z` を取る。`cc_is_bound` は bound なら carry set、unbound なら carry clear を返し、有効な問い合わせでは `cc_status` と binding table を変更しない。`cc_publish` は `cc_arg`=completed target を取り、`cc_resolve` は同じ role と identity から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
+target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_is_bound`、`cc_publish`、`cc_resolve` は `cc_name_len` と `cc_name` に入れた ASCII 小文字1〜8文字の通常 Write 名を取る。`cc_is_bound` は bound なら carry set、unbound なら carry clear を返し、有効な問い合わせでは `cc_status` と binding table を変更しない。`cc_publish` は `cc_arg`=completed target を取り、`cc_resolve` は完全名から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
 
 | 操作 | 役割 |
 | --- | --- |
@@ -73,7 +73,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_
 
 ## Basic source frontend（#276 / #293 / #301 / #304）
 
-`frontend/basic.s` は `fe_init` / `fe_next` の 1 byte 先読みだけで source を読み、top-level runtime code を ownerごとの completed chunk にする。top-level の `&=p [ ... ]` は lowercase identity `a..z` の Write definitionを開始する。既存 bindingを body owner開始前に `cc_is_bound` で調べ、既に定義済みなら拒否する。未定義なら現在のchunkを完了し、required blockを新しい named ownerへcompileし、owner completion成功後にだけ `cc_publish` する。definition owner自体はruntime sequenceへ含めない。block内の label / IF / While は named ownerへinline compileされる。EOF後に最大53個の chunk targetをsource順に直接callする final driver ownerを完成し、そのtargetだけをruntime entryとして実行する。chunk table容量はfrontend所有のcompile-only資源であり、超過は frontend の compile-run failureにする。したがってcompile failureでは、先に完成したchunkがあってもruntimeを開始しない。`p=...` は compile時に `cc_resolve` したtargetへの直接callとなり、`p=()` は operandなしのcallとなる。両方ともWriteの共有value stackを使う。`fe_compile_run` は成功時 carry clear、compile 失敗時 carry setで返し、`fe_compile_status` は source/transport = 1、syntax = 2、literal range = 3、compile/backend resource = 4を示す。source frameの終端以降はreaderを呼ばず、残りのserial bytesはruntime inputとして保持する。
+`frontend/basic.s` は `fe_init` / `fe_next` の 1 byte 先読みだけで source を読み、top-level runtime code を ownerごとの completed chunk にする。top-level の `&=p [ ... ]` は ASCII 小文字1〜8文字の Write definitionを開始する。既存 bindingを body owner開始前に `cc_is_bound` で調べ、既に定義済みなら拒否する。未定義なら現在のchunkを完了し、required blockを新しい named ownerへcompileし、owner completion成功後にだけ `cc_publish` する。definition owner自体はruntime sequenceへ含めない。block内の label / IF / While は named ownerへinline compileされる。EOF後に最大91個の chunk targetをsource順に直接callする final driver ownerを完成し、そのtargetだけをruntime entryとして実行する。chunk table容量はfrontend所有のcompile-only資源であり、超過は frontend の compile-run failureにする。したがってcompile failureでは、先に完成したchunkがあってもruntimeを開始しない。`p=...` は compile時に `cc_resolve` したtargetへの直接callとなり、`p=()` は operandなしのcallとなる。両方ともWriteの共有value stackを使う。`fe_compile_run` は成功時 carry clear、compile 失敗時 carry setで返し、`fe_compile_status` は source/transport = 1、syntax = 2、literal range = 3、compile/backend resource = 4を示す。source frameの終端以降はreaderを呼ばず、残りのserial bytesはruntime inputとして保持する。
 
 コンパイル時のCPU hardware stackは、statement / required_block / operand / valueで残量を検査する。Sが25未満の場合に限り、通常の復帰・temporary-source abortを行わず、`fe_compile_status=4`、exit132で即時HALTする。stdoutは空で生成runtimeは開始しない。通常のsyntax/source/backend失敗は従来どおり呼出元へ返す。閾値・linked library・入口外経路の根拠と再監査条件は[stack guard監査](../../../../docs/ecvtl-6502-stack-guard.md)を参照。
 
@@ -89,7 +89,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_frontend -- --ignored
 
 `&=a{} [ ... ]` は lowercase identity 1 byte のcompile-only template definitionである。本文は通常のRHS compilerへ渡さず、register assignment (`A..Z=`) と hole assignment (`{}=`) の形、および `{}` holeだけを検証する。コメントを除いたstatement sourceを元の文字順で共有arenaへ保存し、statement間はLF 1 byteで区切る。全条件と `cc_source_finish` が成功した後にだけ26-entry registryへ公開する。空本文・holeなし・不正header/body・名前衝突・arena容量不足ではcompile-runを失敗させ、runtimeを開始しない。template registryはcompile-runごとにresetされる。
 
-template identityは既存Write roleとSourceProcedure roleのbindingを両方照会し、templateとWriteの同名定義も拒否する。今後SourceProcedure roleを追加するfrontendも、公開前に同じrole照会を行う。既存 `cc_binding` tableやrole意味論は変更しない。
+template 名は1文字のままで、同じ完全名の通常 Write 定義と排他とする。例えば `a{}` と `a` は排他だが、`ab` とは共存できる。通常 Write は最大64件、template は独立に最大26件を登録できる。
 
 frontend専用template moduleの選択ABIは次のとおり（portable ECVTL APIではない）。
 
