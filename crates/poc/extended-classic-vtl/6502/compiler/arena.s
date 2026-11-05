@@ -1,4 +1,4 @@
-; EC07 compiler-private, append-only 2 KiB native code arena.
+; Compiler-private, append-only 24 KiB code/source arena.
 .setcpu "6502"
 
 .export cc_arena_reset, cc_mark, cc_emit_byte, cc_emit_u16, cc_patch
@@ -35,9 +35,9 @@ cc_bit_mask = zp_phase + 88
 patch_masks: .byte 1,2,4,8,16,32,64,128
 
 .segment "BSS"
-cc_arena:     .res 2048
+cc_arena:     .res 24576
 cc_arena_end:
-patch_bits:   .res 256
+patch_bits:   .res 3072
 
 .segment "CODE"
 cc_arena_reset:
@@ -69,10 +69,19 @@ cc_patch_reset:
     lda #0
     sta cc_pending_count
     sta cc_pending_count+1
-    tax
+    lda #<patch_bits
+    sta cc_bit_index
+    lda #>patch_bits
+    sta cc_bit_index+1
+    ldx #12
+    ldy #0
+    lda #0
 @clear:
-    sta patch_bits,x
-    inx
+    sta (cc_bit_index),y
+    iny
+    bne @clear
+    inc cc_bit_index+1
+    dex
     bne @clear
     rts
 
@@ -410,16 +419,16 @@ cc_patch:
     rts
 
 ; Track an unpatched placeholder operand until cc_patch/cc_patch_here resolves it.
-; The bitset covers all 2048 possible byte positions without a second limit.
+; The bitset covers all 24576 possible byte positions.
 cc_track_patch:
     jsr cc_patch_bit_address
-    ldy cc_bit_index
-    lda patch_bits,y
+    ldy #0
+    lda (cc_bit_index),y
     and cc_bit_mask
     bne @done
-    lda patch_bits,y
+    lda (cc_bit_index),y
     ora cc_bit_mask
-    sta patch_bits,y
+    sta (cc_bit_index),y
     inc cc_pending_count
     bne @done
     inc cc_pending_count+1
@@ -428,14 +437,14 @@ cc_track_patch:
 
 cc_untrack_patch:
     jsr cc_patch_bit_address
-    ldy cc_bit_index
-    lda patch_bits,y
+    ldy #0
+    lda (cc_bit_index),y
     and cc_bit_mask
     beq @done
     lda cc_bit_mask
     eor #$ff
-    and patch_bits,y
-    sta patch_bits,y
+    and (cc_bit_index),y
+    sta (cc_bit_index),y
     lda cc_pending_count
     bne @low
     dec cc_pending_count+1
@@ -463,4 +472,11 @@ cc_patch_bit_address:
     ror cc_bit_index
     dex
     bne @divide
+    clc
+    lda cc_bit_index
+    adc #<patch_bits
+    sta cc_bit_index
+    lda cc_bit_index+1
+    adc #>patch_bits
+    sta cc_bit_index+1
     rts

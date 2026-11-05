@@ -5,7 +5,7 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const CYCLE_LIMIT: &str = "4000000";
+const CYCLE_LIMIT: &str = "30000000";
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 struct TempDir(PathBuf);
@@ -177,7 +177,7 @@ fn binding_availability_query_is_non_destructive() {
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn shared_arena_source_storage_and_owner_guards() {
     expect(21, b"QK");
-    for case in 22..=27 {
+    for case in 22..=28 {
         expect(case, b"K");
     }
 }

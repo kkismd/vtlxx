@@ -28,9 +28,10 @@ struct ExampleCase {
 const EXAMPLES: &[ExampleCase] = &[
     ExampleCase {
         name: "1024.vtl",
-        disposition: Disposition::Deferred {
-            reason: "generated code exceeds the current 2 KiB shared arena",
-            followup_issue: "#481 / ADR #480",
+        disposition: Disposition::Portable {
+            expected_stdout: None,
+            cycle_limit: Some(256_000_000),
+            runtime_input: Some(include_bytes!("fixtures/1024_quit.txt")),
         },
     },
     ExampleCase {
@@ -68,8 +69,8 @@ const EXAMPLES: &[ExampleCase] = &[
     ExampleCase {
         name: "micro_trek.vtl",
         disposition: Disposition::Deferred {
-            reason: "EC08 game is incomplete and exceeds the current constant table",
-            followup_issue: "#463 / #464",
+            reason: "fixed-seed scenario coverage is tracked separately",
+            followup_issue: "#513",
         },
     },
     ExampleCase {
@@ -251,13 +252,18 @@ fn run(
         command.arg("--cycle-limit").arg(cycle_limit.to_string());
     }
     if target && runtime_input.is_some() {
-        command.arg("--runtime-input").arg(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/tests/fixtures/interactive_input.txt"
-        ));
-        assert_eq!(
-            runtime_input,
-            Some(include_bytes!("fixtures/interactive_input.txt").as_slice())
+        let fixture =
+            if runtime_input == Some(include_bytes!("fixtures/interactive_input.txt").as_slice()) {
+                "interactive_input.txt"
+            } else if runtime_input == Some(include_bytes!("fixtures/1024_quit.txt").as_slice()) {
+                "1024_quit.txt"
+            } else {
+                return Err("unknown runtime input fixture".to_owned());
+            };
+        command.arg("--runtime-input").arg(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(fixture),
         );
     }
     if !target && let Some(input) = runtime_input {
