@@ -1,0 +1,6 @@
+&=a [ ?="a" ]
+&=ab [ ?="b" ]
+&=reads [ A=~ ]
+&=roads [ ?="r" ]
+&=eightchr [ %=1 [ reads=~ ] *=B<1 [ roads=() B=B+1 ] ]
+a=() ab=() ~=7 eightchr=~+1 ?=A
