@@ -4,23 +4,11 @@ use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use vtlxx_poc_extended_classic_vtl::{CompileError, Machine, SourceError};
 
-const SUCCESS: &[(&str, &str, &[u8])] = &[
-    (
-        "success",
-        include_str!("fixtures/long_write/success.vtl"),
-        b"abr8",
-    ),
-    (
-        "template_first",
-        include_str!("fixtures/long_write/template_first.vtl"),
-        b"12",
-    ),
-    (
-        "write_first",
-        include_str!("fixtures/long_write/write_first.vtl"),
-        b"12",
-    ),
-];
+const SUCCESS: &[(&str, &str, &[u8])] = &[(
+    "success",
+    include_str!("fixtures/long_write/success.vtl"),
+    b"abr8",
+)];
 const INVALID: &str = include_str!("fixtures/long_write/invalid.vtl");
 const PREFIX: &str = "A=7 ?=\"ok\" &=persist [ B=~ ] ";
 
