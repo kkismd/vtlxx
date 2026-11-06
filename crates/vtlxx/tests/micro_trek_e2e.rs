@@ -35,7 +35,7 @@ const SOURCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.v
 const LIMIT: Duration = Duration::from_secs(30);
 
 fn run(input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
         .arg(SOURCE)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

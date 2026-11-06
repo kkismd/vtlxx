@@ -33,7 +33,7 @@ fn example_lists_all_solutions_using_public_api() {
 #[test]
 fn example_runs_from_cli() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/eight_queens.vtl");
-    let output = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
         .arg(path)
         .output()
         .unwrap();
@@ -53,7 +53,7 @@ fn storage_example_lists_all_solutions_using_public_api() {
 #[test]
 fn storage_example_runs_from_cli() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/eight_queens_storage.vtl");
-    let output = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
         .arg(path)
         .output()
         .unwrap();

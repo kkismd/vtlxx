@@ -39,9 +39,9 @@ fn run(target: bool, input: &[u8]) -> Output {
         thread::current().id()
     ));
     let mut command = Command::new(if target {
-        env!("CARGO_BIN_EXE_ecvtl6502")
+        env!("CARGO_BIN_EXE_vtlxx6502")
     } else {
-        env!("CARGO_BIN_EXE_ecvtl")
+        env!("CARGO_BIN_EXE_vtlxx")
     });
     command
         .arg(SOURCE)
@@ -140,7 +140,7 @@ fn initial_eof_is_normal_exit() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65"]
 fn interactive_prompt_is_visible_before_input() {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_ecvtl6502"));
+    let mut command = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"));
     command.process_group(0);
     let mut child = Guard(
         command

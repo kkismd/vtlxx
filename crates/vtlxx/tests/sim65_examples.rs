@@ -162,7 +162,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
         unreachable!("deferred examples are not executed");
     };
     let rust = run(
-        env!("CARGO_BIN_EXE_ecvtl"),
+        env!("CARGO_BIN_EXE_vtlxx"),
         &source,
         None,
         runtime_input,
@@ -170,7 +170,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
     )
     .map_err(|error| format!("{}: {error}", case.name))?;
     if rust.status.code().is_none() {
-        return Err(format!("{}: Rust ecvtl terminated by signal", case.name));
+        return Err(format!("{}: Rust vtlxx terminated by signal", case.name));
     }
     if !rust.status.success() {
         return Err(format!(
@@ -182,7 +182,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
     }
 
     let target = run(
-        env!("CARGO_BIN_EXE_ecvtl6502"),
+        env!("CARGO_BIN_EXE_vtlxx6502"),
         &source,
         cycle_limit,
         runtime_input,
@@ -191,7 +191,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
     .map_err(|error| format!("{}: {error}", case.name))?;
     if target.status.code().is_none() {
         return Err(format!(
-            "{}: 6502 ecvtl6502 terminated by signal",
+            "{}: 6502 vtlxx6502 terminated by signal",
             case.name
         ));
     }

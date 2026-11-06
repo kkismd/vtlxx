@@ -4,7 +4,7 @@ VTLXX は、classic VTL の簡潔な表面構文を発展させ、値スタッ�
 
 この crate は、従来 ECVTL と呼んでいた**現在の正式な VTLXX 実装**です（[採用 ADR #540](https://github.com/kkismd/vtlxx/issues/540)）。M01 の独立した bootstrap 計画は廃番です。SourceProcedure と手続テンプレートも、それぞれ ADR #433 / #528 により廃止されています。
 
-Rust package `vtlxx` と path `crates/vtlxx/` は正式名称へ移行済みです。CLI 名 `ecvtl` / `ecvtl6502` は後続の [移行 Tracker #541](https://github.com/kkismd/vtlxx/issues/541) の issue で変更します。
+Rust package `vtlxx`、path `crates/vtlxx/`、CLI `vtlxx` / `vtlxx6502` は正式名称へ移行済みです。
 
 この README は、**現在の `main` で VTLXX source を読み書きする人間およびエージェント向けの実用入口**です。完全な言語仕様書ではありません。
 
@@ -39,13 +39,13 @@ Rust package `vtlxx` と path `crates/vtlxx/` は正式名称へ移行済みで�
 repository root から source file を実行します。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl -- path/to/program.vtl
+cargo run -p vtlxx --bin vtlxx -- path/to/program.vtl
 ```
 
 Eight Queens example:
 
 ```sh
-cargo run -p vtlxx --bin ecvtl -- \
+cargo run -p vtlxx --bin vtlxx -- \
   crates/vtlxx/examples/eight_queens.vtl
 ```
 
@@ -60,10 +60,10 @@ Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Rea
 
 ## NMOS 6502 コンパイラの手動実行
 
-`ecvtl6502` は VTLXX source を既存の NMOS 6502 compiler で native code にし、`sim65` で実行します。Rust reference VMへのフォールバックはありません。実行には cc65 の `ca65`、`ld65`、`sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。
+`vtlxx6502` は VTLXX source を既存の NMOS 6502 compiler で native code にし、`sim65` で実行します。Rust reference VMへのフォールバックはありません。実行には cc65 の `ca65`、`ld65`、`sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl6502 -- \
+cargo run -p vtlxx --bin vtlxx6502 -- \
   crates/vtlxx/examples/sim65_cli.vtl
 ```
 
@@ -72,20 +72,20 @@ source file は raw bytes で読み、最大 65535 bytes までです。target �
 6502 frontend では `$` を待機文字入力として利用できます（#317、採用 ADR #328）。`--runtime-input` で指定した raw bytes は source frame の後ろに渡され、VTLXX の `$` から読み取られます。物理 NUL (`0x00`) は読み捨てられ、`1..255` は値として返り、入力 EOF は `-1` になります。したがって `0xff` は EOF ではなく `255` です。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl6502 -- \
+cargo run -p vtlxx --bin vtlxx6502 -- \
   path/to/program.vtl --runtime-input path/to/input.bin
 ```
 
 Unix ホストの端末で対話するには `--interactive` を指定します。prompt は改行がなくても表示され、通常の端末設定では文字の後に Enter を押して入力します。プログラムが用意する終了操作で終了でき、Ctrl-C でも中断できます。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl6502 -- path/to/program.vtl --interactive
+cargo run -p vtlxx --bin vtlxx6502 -- path/to/program.vtl --interactive
 ```
 
 1文字の入力を試すには、Rust/Cargo と上記の cc65 ツールを PATH に用意し、repository root から次を実行します。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl6502 -- \
+cargo run -p vtlxx --bin vtlxx6502 -- \
   crates/vtlxx/examples/interactive_input.vtl --interactive
 ```
 
@@ -103,7 +103,7 @@ ASCII: 65
 sim65 の実行上限は一括モードでは既定で 4,000,000 cycles、対話モードでは無制限です。どちらのモードでも `--cycle-limit` に正の10進数を指定できます。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl6502 -- \
+cargo run -p vtlxx --bin vtlxx6502 -- \
   path/to/program.vtl --cycle-limit 256000000
 ```
 
@@ -687,7 +687,7 @@ opener / closer の改行配置には今後評価する余地がありますが�
 [`examples/1024.vtl`](examples/1024.vtl) は 4×4 の盤面で同じ数を合わせて 1024 を目指すゲームです。repository root から Rust CLI で起動します。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl -- \
+cargo run -p vtlxx --bin vtlxx -- \
   crates/vtlxx/examples/1024.vtl
 ```
 
@@ -696,7 +696,7 @@ cargo run -p vtlxx --bin ecvtl -- \
 同じ source は 6502/sim65 でも実行できます。固定入力による終了は、[`tests/sim65_examples.rs`](tests/sim65_examples.rs) の ignored 統合テストで、Rust reference と 6502 の正常終了・stdout 一致を検証しています。検証条件は `1024_quit.txt` を入力に使い、cycle 上限を `256000000` とした一括実行です。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl6502 -- \
+cargo run -p vtlxx --bin vtlxx6502 -- \
   crates/vtlxx/examples/1024.vtl \
   --runtime-input crates/vtlxx/tests/fixtures/1024_quit.txt \
   --cycle-limit 256000000
@@ -705,7 +705,7 @@ cargo run -p vtlxx --bin ecvtl6502 -- \
 端末から操作する場合は、次の対話モードを使用します。ただし、上記の固定入力テストは対話操作の全経路まで検証するものではありません。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl6502 -- \
+cargo run -p vtlxx --bin vtlxx6502 -- \
   crates/vtlxx/examples/1024.vtl --interactive
 ```
 
@@ -728,7 +728,7 @@ cargo run -p vtlxx --bin ecvtl6502 -- \
 実行:
 
 ```sh
-cargo run -p vtlxx --bin ecvtl -- \
+cargo run -p vtlxx --bin vtlxx -- \
   crates/vtlxx/examples/eight_queens.vtl
 ```
 
@@ -743,7 +743,7 @@ cargo run -p vtlxx --bin ecvtl -- \
 この例では `.VISITED_BASE`、`.PATH_BASE`、`.DIRECTION_BASE` を定義し、storage 領域の基点を手続き内から参照します。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl -- \
+cargo run -p vtlxx --bin vtlxx -- \
   crates/vtlxx/examples/maze_dfs.vtl
 ```
 
@@ -752,7 +752,7 @@ cargo run -p vtlxx --bin ecvtl -- \
 [`examples/rpn_evaluator.vtl`](examples/rpn_evaluator.vtl) は source 自身が indexed storage に `3 4 ADD 2 MUL 7 SUB` を初期化し、共有 value stack を operand stack として評価して `7` を表示します。operator 手続きはそれぞれ `( lhs rhs -- result )` で、token は program counter で順に読みます。
 
 ```sh
-cargo run -p vtlxx --bin ecvtl -- \
+cargo run -p vtlxx --bin vtlxx -- \
   crates/vtlxx/examples/rpn_evaluator.vtl
 ```
 

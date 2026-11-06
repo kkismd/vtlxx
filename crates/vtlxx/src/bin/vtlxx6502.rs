@@ -14,8 +14,8 @@ const DEFAULT_CYCLE_LIMIT: u32 = 4_000_000;
 const MAX_SOURCE_LEN: usize = u16::MAX as usize;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
-const USAGE: &str = "Usage: ecvtl6502 <source.vtl> [--runtime-input <path> | --interactive] [--cycle-limit <cycles>]\n\
-Compile ECVTL source with the NMOS 6502 target and run it with sim65.\n\
+const USAGE: &str = "Usage: vtlxx6502 <source.vtl> [--runtime-input <path> | --interactive] [--cycle-limit <cycles>]\n\
+Compile VTLXX source with the NMOS 6502 target and run it with sim65.\n\
 Options:\n\
   --runtime-input <path>  Supply raw runtime input bytes\n\
   --interactive           Connect runtime input and output to standard I/O\n\
@@ -31,7 +31,7 @@ impl TempDir {
             .map_err(|error| format!("temporary directory clock: {error}"))?
             .as_nanos();
         let path = std::env::temp_dir().join(format!(
-            "vtlxx-ecvtl6502-{}-{nonce}-{}",
+            "vtlxx-vtlxx6502-{}-{nonce}-{}",
             std::process::id(),
             NEXT_TEMP_ID.fetch_add(1, Ordering::Relaxed)
         ));
@@ -275,7 +275,7 @@ fn build_and_run(
         objects.push(object);
     }
 
-    let executable = temp.0.join("ecvtl6502.prg");
+    let executable = temp.0.join("vtlxx6502.prg");
     let mut link_args = vec![
         OsStr::new("-t"),
         OsStr::new("sim6502"),
@@ -397,7 +397,7 @@ fn main() {
     let parsed = match parse_arguments(std::env::args_os().skip(1)) {
         Ok(parsed) => parsed,
         Err(error) => {
-            eprintln!("ecvtl6502: {error}\n{USAGE}");
+            eprintln!("vtlxx6502: {error}\n{USAGE}");
             std::process::exit(2);
         }
     };
@@ -406,12 +406,12 @@ fn main() {
         ParsedArguments::Run(arguments) => match execute(arguments) {
             Ok(output) => {
                 if let Err(error) = io::stdout().write_all(&output.stdout) {
-                    eprintln!("ecvtl6502: write stdout: {error}");
+                    eprintln!("vtlxx6502: write stdout: {error}");
                     std::process::exit(2);
                 }
                 if !output.status.success() {
                     let (status, message) = report_simulation_failure(&output);
-                    eprintln!("ecvtl6502: {message}");
+                    eprintln!("vtlxx6502: {message}");
                     std::process::exit(status);
                 }
                 if !output.stderr.is_empty() {
@@ -419,7 +419,7 @@ fn main() {
                 }
             }
             Err(error) => {
-                eprintln!("ecvtl6502: {error}");
+                eprintln!("vtlxx6502: {error}");
                 std::process::exit(2);
             }
         },

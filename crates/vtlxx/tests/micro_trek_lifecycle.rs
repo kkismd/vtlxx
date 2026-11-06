@@ -98,7 +98,7 @@ fn retry_input_failure_is_not_eof() {
 fn cli_starts_and_exits_on_x_or_eof() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.vtl");
     for input in [b"X\n".as_slice(), b""] {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
             .arg(path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -128,7 +128,7 @@ fn cli_cancel_and_committed_action_return_to_command() {
             "*STARDATE : 3201\n",
         ),
     ] {
-        let mut child = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
             .arg(path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -150,7 +150,7 @@ fn cli_cancel_and_committed_action_return_to_command() {
 fn cli_replay_initializes_a_second_mission_without_reseeding() {
     fn play() -> Vec<u8> {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.vtl");
-        let mut child = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+        let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
             .arg(path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
