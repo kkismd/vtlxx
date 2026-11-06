@@ -4,7 +4,7 @@ VTLXX は、classic VTL の簡潔な表面構文を発展させ、値スタッ�
 
 このcrateは、従来ECVTLと呼んでいた**現在の正式なVTLXX実装**です（[採用ADR #540](https://github.com/kkismd/vtlxx/issues/540)）。M01は廃番であり、段階的自己ホストやSourceProcedureの自己拡張を必須要件としません。移行中の物理crate名 `vtlxx-poc-extended-classic-vtl`、path `crates/poc/extended-classic-vtl/`、CLI名 `ecvtl`/`ecvtl6502` は実装が改名されるまでの現行名称です（[移行Tracker #541](https://github.com/kkismd/vtlxx/issues/541)）。
 
-この README は、**現在の `main` で ECVTL source を読み書きする人間およびエージェント向けの実用入口**です。完全な言語仕様書ではありません。
+この README は、**現在の `main` で VTLXX source を読み書きする人間およびエージェント向けの実用入口**です。完全な言語仕様書ではありません。
 
 ## Source of Truth
 
@@ -54,7 +54,7 @@ cargo test --workspace
 
 Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Read` を受け取ります。`$` の PrimaryRead は NUL を読み捨てて `1..255` または EOF の `-1` を返し、入力エラーは runtime error になります。入力位置は同じ Machine の手続きと top-level で共有されます。未設定時は空入力です。現在のRust対話CLIは、runtime stdinをMachine入力へ接続し、stdoutを逐次出力します（#313）。
 
-## NMOS 6502 PoC の手動実行
+## NMOS 6502 コンパイラの手動実行
 
 `ecvtl6502` は ECVTL source を既存の NMOS 6502 compiler で native code にし、`sim65` で実行します。Rust reference VMへのフォールバックはありません。実行には cc65 の `ca65`、`ld65`、`sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。
 
