@@ -10,9 +10,9 @@
 .importzp cc_status, cc_arg, cc_cursor
 
 .importzp zp_phase
-em_word = zp_phase + 89
-em_patch = zp_phase + 91
-em_index = zp_phase + 93
+em_word = zp_phase + 62
+em_patch = zp_phase + 64
+em_index = zp_phase + 66
 
 .segment "BSS"
 literal_patch: .res 2

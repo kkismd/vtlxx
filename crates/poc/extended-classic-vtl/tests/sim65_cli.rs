@@ -185,29 +185,25 @@ fn runtime_input_primary_read_matches_waiting_input_semantics() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn template_runs_without_test_sentinel_and_compile_failure_is_nonzero() {
+fn removed_template_syntax_fails_before_runtime() {
     let temp = TestDir::new();
-    let source = temp.0.join("program.vtl");
-    fs::write(&source, b"&=a{} [ {}=42 ] a{A}=() a{B}=() ?=A ?=B").unwrap();
-    let success = Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
-        .arg(&source)
-        .output()
-        .unwrap();
-    assert!(
-        success.status.success(),
-        "{}",
-        String::from_utf8_lossy(&success.stderr)
-    );
-    assert_eq!(success.stdout, b"4242");
-
-    fs::write(&source, b"A=").unwrap();
-    let failure = Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
-        .arg(&source)
-        .output()
-        .unwrap();
-    assert!(!failure.status.success());
-    assert!(failure.stdout.is_empty());
-    assert!(String::from_utf8_lossy(&failure.stderr).contains("compilation failed"));
+    for (index, source) in [
+        "?=42 &=a{} [ {}=1 ] ?=99",
+        "?=42 a{A}=() ?=99",
+        "?=42 a{A}=7 ?=99",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let result = run_program_with_input(
+            &temp,
+            &format!("removed-template-{index}"),
+            source.as_bytes(),
+            b"",
+        );
+        assert_eq!(result.status.code(), Some(130), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
 }
 
 #[test]
@@ -240,16 +236,6 @@ fn dotted_constants_compile_and_execute_in_source_order() {
             ".LOOP:=1 .INNER:=4 &=p [ ?=.INNER ] A=0 ^=.LOOP A=A+1 %=A<3 [ #=.LOOP ] p=() ?=A",
             b"43",
         ),
-        (
-            "template",
-            ".GAINA:=2 .BIASA:=1 &=t{} [ {}={}*.GAIN{} {}={}+.BIAS{} ] A=3 t{A}=() ?=A ?=\".GAINA\" B=7 ?=B",
-            b"7.GAINA7",
-        ),
-        (
-            "template-operand",
-            ".GAINA:=2 .INIT:=3 &=t{} [ {}={}*.GAIN{} ] A=1 t{A}=(.INIT+1) ?=A B=9 ?=B",
-            b"29",
-        ),
         ("same-value", ".FOO:=2 .BAR:=2 ?=.FOO ?=.BAR", b"22"),
     ];
     for &(name, source, expected) in cases {
@@ -263,7 +249,7 @@ fn constant_table_accepts_128_entries_and_rejects_129() {
     let temp = TestDir::new();
     let definitions: String = (0..128).map(|i| format!(".N{i}:={i}\n")).collect();
     let path = temp.0.join("constants.vtl");
-    // Exercise every constant entry within the shared arena.
+    // Exercise every constant entry within the code arena.
     for start in (0..128).step_by(16) {
         let references: String = (start..start + 16)
             .map(|i| format!("?=.N{i} ?=()\n"))
@@ -327,12 +313,10 @@ fn dotted_constant_errors_do_not_start_runtime() {
         "&=p [ ==INNER,1 ]",
         "%=1 [ ==INNER,1 ]",
         "*=0 [ ==INNER,1 ]",
-        "&=t{} [ .INNER:=1 ]",
         ".TWO:=2 A=1.TWO",
         ".TWO:=2 A=.TWO.TWO",
         ".NEG:=-1 A=1.NEG",
         ".TWO:=2 A=.TWO3",
-        ".GAINA:=2 &=t{} [ {}={}*.GAIN{} ] t{A}=() A=.MISSING",
     ];
     for (index, source) in cases.iter().enumerate() {
         let source = format!("?=42 {source}");
@@ -362,11 +346,6 @@ fn dotted_constant_sources_match_both_implementations() {
             "shared-forms",
             "A=1 .MAX \t:=\t3 .LOOP:=1 ; comment\r\n^=.LOOP A=A+1 %=A<.MAX [ #=.LOOP ] ?=A ?=\".MAX\"",
             b"3.MAX".as_slice(),
-        ),
-        (
-            "shared-template",
-            ".GAINA:=2 .BIASA:=1 &=t{} [ {}={}*.GAIN{} {}={}+.BIAS{} ] A=3 t{A}=() ?=A",
-            b"7".as_slice(),
         ),
         (
             "shared-storage",
@@ -410,20 +389,6 @@ fn dotted_constant_sources_match_both_implementations() {
     let output = run_program_with_input(&temp, "shared-failure-profile", source.as_bytes(), b"");
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn p0a_template_calibration_example_matches_reference_output_bytes() {
-    let example = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples/p0a_template_calibration.vtl");
-    let output = run_cli(&[example.to_str().unwrap()]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, b"58\n20\n40\n");
 }
 
 #[test]
@@ -494,11 +459,6 @@ fn literal_output_matches_reference_and_preserves_runtime_state() {
             "control",
             "?=\"T\" &=p [ ?=\"P\" ?=1 ] p=() %=1 [ ?=\"I\" ] A=0 *=A<2 [ ?=\"W\" A=A+1 ] p=() ?=() $=66",
             b"TP1IWWP1\nB",
-        ),
-        (
-            "template-owner",
-            "&=a{} [ {}=1 ] &=p [ ?=\"P\" ] a{A}=() ?=\"T\" p=() a{A}=() ?=A",
-            b"TP1",
         ),
     ];
     for &(name, source, expected) in cases {

@@ -8,8 +8,8 @@
 .import serial_in
 
 .importzp zp_phase
-fe_remaining = zp_phase + 46
-fe_status = zp_phase + 48
+fe_remaining = zp_phase + 40
+fe_status = zp_phase + 42
 
 .segment "CODE"
 ; Read the frame length. Carry is clear on success, set on truncated header.

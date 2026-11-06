@@ -58,8 +58,6 @@ fn build_and_run_custom(input: &[u8], frontend_fixture: &str, basic: Option<&str
         frontend_fixture,
         "6502/target/zp_layout.s",
         "6502/frontend/basic.s",
-        "6502/frontend/template.s",
-        "6502/frontend/template_reader.s",
         "6502/frontend/source.s",
         "6502/compiler/arena.s",
         "6502/compiler/emitter.s",
@@ -152,7 +150,7 @@ fn phase_transition_initializes_runtime_and_preserves_return_state() {
     assert_eq!(basic.matches(marker).count(), 1);
     // All compilation and publication have completed here. Fill the entire
     // shared range with a nonzero pattern before runtime initialization.
-    let basic = basic.replace(marker, "    lda entry\n    sta phase_expected_entry\n    lda entry+1\n    sta phase_expected_entry+1\n    ldx #110\n    lda #$a5\n@poison_phase:\n    sta zp_phase,x\n    dex\n    bpl @poison_phase\n    jsr rt_init");
+    let basic = basic.replace(marker, "    lda entry\n    sta phase_expected_entry\n    lda entry+1\n    sta phase_expected_entry+1\n    ldx #99\n    lda #$a5\n@poison_phase:\n    sta zp_phase,x\n    dex\n    bpl @poison_phase\n    jsr rt_init");
     let basic = format!(
         "{basic}\n.importzp zp_phase\n.export phase_expected_entry\n.segment \"BSS\"\nphase_expected_entry: .res 2\n"
     );
@@ -599,143 +597,11 @@ fn primary_read_compile_failure_does_not_start_runtime() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn template_definitions_are_saved_and_published_without_runtime_code() {
-    expect("&=a{} [ {}={}+1 ]", 0, b"Z");
-    expect("&=a{} [ A=.MAX{} ; ignored ]\n]", 0, b"Z");
-    expect("&=a{} [ A=.MAX{}\n{}=A+ ]", 0, b"Z");
-    expect("&=a{} [ A={} B= ]", 0, b"Z");
-    expect("&=a{} [ A={} ] &=b{} [ {}=A{} ]", 0, b"Z");
-    expect("&=p [ ?=7 ] &=a{} [ A={} ] p=()", 0, b"7Z");
-    expect("&=a{} [ A={} ] &=p [ ?=7 ] p=()", 0, b"7Z");
-
-    let many_holes = format!("&=a{{}} [ A={} ]", "{}".repeat(256));
-    expect(&many_holes, 0, b"Z");
-    let many_statements = format!("&=a{{}} [ {}]", "A={} ".repeat(256));
-    expect(&many_statements, 0, b"Z");
-
-    for source in [
-        "&=a{} [ ]",
-        "&=a{} [ A=1 ]",
-        "&=a{}[ A={} ]",
-        "&=a{ } [ A={} ]",
-        "&=a{} [ A={X ]",
-        "&=a{} [ [ A={} ] ]",
-        "&=a{} [ ?=1 ]",
-        "&=a{} [ @=1,{} ]",
-        "&=a{} [ a={} ]",
-        "&=a{} [ A={} &= ]",
-        "&=a{} [ A={} ] &=a{} [ B={} ]",
-        "&=a{} [ A={} ] &=p [ ] &=p{} [ B={} ]",
-        "&=p [ ] &=a{} [ A={} ] &=p [ ]",
-        "&=a{} [ A={} ] &=b{} [ B=1 ]",
-        "&=A{} [ A={} ]",
-        "&=ab{} [ A={} ]",
-        "&=é{} [ A={} ]",
-        "&=a{} [ A={} ]?=1",
-    ] {
+fn removed_template_forms_fail_before_runtime() {
+    for source in ["?=9 &=a{} [ {}=1 ]", "?=9 a{A}=()", "?=9 a{A}=7"] {
         expect(source, 2, b"");
     }
-
-    let mut too_large = String::from("&=a{} [ A={}");
-    too_large.push_str(&"X".repeat(25000));
-    too_large.push_str(" ]");
-    expect(&too_large, 4, b"");
-
-    let mut source = b"&=a{} [ A={} ]".to_vec();
-    let framed_len = (source.len() + 2) as u16;
-    let mut framed = vec![framed_len as u8, (framed_len >> 8) as u8];
-    framed.append(&mut source);
-    let truncated = build_and_run_input(&framed);
-    assert_eq!(truncated.status.code(), Some(1), "{truncated:?}");
-    assert!(truncated.stdout.is_empty(), "{truncated:?}");
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn template_registry_points_to_canonical_saved_source() {
-    let source = b"&=a{} [ A={} ; discarded ]\n{}=.MAX{} ]";
-    let mut framed = vec![source.len() as u8, (source.len() >> 8) as u8];
-    framed.extend_from_slice(source);
-    framed.push(b'Z');
-    let result =
-        build_and_run_input_with_frontend(&framed, "tests/fixtures/sim65/template_probe.s");
-    assert_eq!(result.status.code(), Some(0), "{result:?}");
-    assert_eq!(result.stdout, b"OKZ", "{result:?}");
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn failed_duplicate_template_does_not_replace_published_source() {
-    let source = b"&=a{} [ A={} ] &=a{} [ B={} ]";
-    let mut framed = vec![source.len() as u8, (source.len() >> 8) as u8];
-    framed.extend_from_slice(source);
-    framed.push(b'Z');
-    let result =
-        build_and_run_input_with_frontend(&framed, "tests/fixtures/sim65/template_failure_probe.s");
-    assert_eq!(result.status.code(), Some(0), "{result:?}");
-    assert_eq!(result.stdout, b"P", "{result:?}");
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn template_registry_keeps_u16_source_length() {
-    let mut source = String::from("&=a{} [ A={}");
-    source.push_str(&"X".repeat(300));
-    source.push_str(" ]");
-    let source = source.into_bytes();
-    let mut framed = vec![source.len() as u8, (source.len() >> 8) as u8];
-    framed.extend_from_slice(&source);
-    let result =
-        build_and_run_input_with_frontend(&framed, "tests/fixtures/sim65/template_length_probe.s");
-    assert_eq!(result.status.code(), Some(0), "{result:?}");
-    assert_eq!(result.stdout, b"L", "{result:?}");
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn template_calls_expand_into_the_current_caller() {
-    expect(
-        "&=a{} [ {}={}+1 ] A=0 B=10 a{A}=() a{B}=() ?=A ?=B",
-        0,
-        b"111Z",
-    );
-    expect("&=a{} [ A=.MAX{} ] a{A}=()", 2, b"");
-    expect(".MAXA:=3 &=a{} [ A=.MAX{} ] a{A}=() ?=A", 0, b"3Z");
-    expect("&=a{} [ A={} ] a{C}=() ?=C", 0, b"0Z");
-    expect("&=a{} [ {}={} ] a{A}=()", 0, b"Z");
-    expect("&=a{} [ {}={}+1 ] A=0 &=p [ a{A}=() ?=A ] p=()", 0, b"1Z");
-    expect("&=a{} [ {}={}+1 ] A=0 %=1 [ a{A}=() ] ?=A", 0, b"1Z");
-    expect("&=a{} [ {}={}+1 ] A=0 *=A<1 [ a{A}=() ] ?=A", 0, b"1Z");
-    expect("&=a{} [ {}={} ] a{A}=() ; tail\n?=A", 0, b"0Z");
-    expect("&=a{} [ {}=A+ ] a{B}=()", 2, b"");
-    for source in [
-        "a{a}=()",
-        "a{}=()",
-        "a{AA}=()",
-        "a{A}=1",
-        "a{A}=(1)",
-        "a{A}=()?=1",
-    ] {
-        expect(source, 2, b"");
-    }
-    let mut long_body = String::from("A=0 &=a{} [ ");
-    long_body.push_str(&"A={} ".repeat(60));
-    long_body.push_str("] a{A}=() ?=A");
-    expect(&long_body, 0, b"0Z");
-
-    let mut all_identities = String::new();
-    for identity in b'a'..=b'z' {
-        let identity = char::from(identity);
-        all_identities.push_str(&format!(
-            "&={identity}{{}} [ {{}}={{}} ] {identity}{{A}}=() "
-        ));
-    }
-    expect(&all_identities, 0, b"Z");
-
-    let mut capacity_failure = String::from("&=a{} [ ");
-    capacity_failure.push_str(&"A={} ".repeat(3000));
-    capacity_failure.push_str("] a{A}=()");
-    expect(&capacity_failure, 4, b"");
+    expect("&=a [ ?=7 ] a=()", 0, b"7Z");
 }
 
 fn stack_fixture() -> String {
@@ -808,45 +674,26 @@ fn compile_stack_guard_halts_deep_sources_before_runtime_or_wrap() {
         (
             "statement",
             format!("?=9 {}A=1{}", "%=1 [ ".repeat(16), " ]".repeat(16)),
-            false,
         ),
         (
             "required_block",
             format!("?=9 {}A=1{}", "%=1 [ ".repeat(16), " ]".repeat(16)),
-            false,
         ),
         (
             "operand",
             format!("?=9 %=0 [ A={}0{} ]", "0+(".repeat(16), ")".repeat(16)),
-            false,
         ),
         (
             "value",
             format!("?=9 %=0 [ A={}0{} ]", "0+(".repeat(16), ")".repeat(16)),
-            false,
-        ),
-        (
-            "value",
-            format!(
-                "&=a{{}} [ {{}}={}0{} ] ?=9 %=0 [ a{{A}}=() ]",
-                "0+(".repeat(16),
-                ")".repeat(16)
-            ),
-            true,
         ),
     ];
-    for (entry, source, virtual_source) in cases {
+    for (entry, source) in cases {
         let mut basic = stack_probe_basic();
         let baseline = run_stack_probe(&source, &basic);
         assert_eq!(baseline.status.code(), Some(0), "{baseline:?}");
         assert_eq!(baseline.stdout, b"9");
-        // Only the selected entry gets a stricter threshold. For P0a, ensure
-        // that the failure actually occurs while reading the expansion.
-        let check = if virtual_source {
-            "    lda virtual_active\n    beq :+\n    tsx\n    cpx #200\n    bcs :+\n    jmp compile_stack_exhausted\n:\n"
-        } else {
-            "    tsx\n    cpx #200\n    bcs :+\n    jmp compile_stack_exhausted\n:\n"
-        };
+        let check = "    tsx\n    cpx #200\n    bcs :+\n    jmp compile_stack_exhausted\n:\n";
         // Operand's first BNE must consume the incoming Z before any probe.
         let marker = if entry == "operand" {
             "operand:\n    bne @operators\n    compile_stack_guard\n".to_owned()
@@ -857,11 +704,7 @@ fn compile_stack_guard_halts_deep_sources_before_runtime_or_wrap() {
         basic = basic.replace(&marker, &format!("{marker}{check}"));
         basic = basic.replace("    jsr rt_init", "    jmp audit_failed");
         let result = run_stack_probe(&source, &basic);
-        assert_eq!(
-            result.status.code(),
-            Some(132),
-            "{entry}, virtual={virtual_source}: {result:?}"
-        );
+        assert_eq!(result.status.code(), Some(132), "{entry}: {result:?}");
         assert!(result.stdout.is_empty(), "{result:?}");
     }
 }
@@ -880,273 +723,4 @@ fn compile_stack_guard_accepts_201_byte_fixture_and_observes_headroom() {
     assert!((25..132).contains(&minimum), "{result:?}");
     assert_eq!(result.stdout, b"0");
     eprintln!("201-byte fixture: minimum guard S={minimum}");
-}
-
-// #427 expectation/observation ledger: fixtures/template_p0a/README.md.
-fn p0a_source(name: &str) -> String {
-    fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/fixtures/template_p0a")
-            .join(format!("{name}.vtl")),
-    )
-    .unwrap()
-}
-
-fn p0a_frame(source: &str) -> Vec<u8> {
-    let mut input = u16::try_from(source.len()).unwrap().to_le_bytes().to_vec();
-    input.extend_from_slice(source.as_bytes());
-    input
-}
-
-fn p0a_result(result: &Output, status: i32, stdout: &[u8]) {
-    assert_eq!(result.status.code(), Some(status), "{result:?}");
-    assert_eq!(result.stdout, stdout, "{result:?}");
-    assert!(result.stderr.is_empty(), "{result:?}");
-}
-
-// This private adapter checks the live registry before process exit, never by
-// compiling another source after failure. On success the runtime state is
-// checked first; template_lookup then reuses compiler scratch after execution.
-// Only 'a' may be published in these
-// fixtures; compare its entire canonical body, and reject every other slot.
-fn p0a_probe(source: &str, body: Option<&str>, failure: Option<bool>) -> Output {
-    p0a_probe_status(source, body, failure.map(|reader| (reader, 2)))
-}
-
-fn p0a_probe_status(source: &str, body: Option<&str>, failure: Option<(bool, u8)>) -> Output {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut basic = fs::read_to_string(root.join("6502/frontend/basic.s")).unwrap();
-    let mut checks = String::new();
-    if let Some((virtual_rhs, status)) = failure {
-        // Record the input reader at the actual syntax error, before cleanup
-        // clears virtual_active. Runtime entry is a trap, not an output proxy.
-        let marker = if status == 4 {
-            "backend_error:\n"
-        } else {
-            "syntax_error:\n"
-        };
-        assert_eq!(basic.matches(marker).count(), 1);
-        basic = basic.replace(
-            marker,
-            &format!("{marker}    lda virtual_active\n    sta p0a_error_reader\n"),
-        );
-        let marker = "    jsr rt_init";
-        assert_eq!(basic.matches(marker).count(), 1);
-        basic = basic.replace(marker, "    lda #99\n    jmp halt");
-        basic.push_str("\n.export p0a_error_reader\n.segment \"BSS\"\np0a_error_reader: .res 1\n");
-        checks.push_str(&format!(
-            ".import p0a_error_reader\n    jcc failed\n    lda fe_compile_status\n    cmp #{status}\n    jne failed\n    lda p0a_error_reader\n    cmp #{}\n    jne failed\n", u8::from(virtual_rhs)
-        ));
-    } else {
-        checks.push_str("    jcs failed\n    lda rt_depth\n    jne failed\n");
-    }
-    if matches!(failure, Some((_, 4))) {
-        checks.push_str("    lda cc_status\n    cmp #1\n    jne failed\n");
-    }
-    for identity in b'a'..=b'z' {
-        checks.push_str(&format!("    lda #{identity}\n    jsr template_lookup\n"));
-        if let Some(body) = body.filter(|_| identity == b'a') {
-            checks.push_str(&format!("    jcs failed\n    lda cc_data_length\n    cmp #{}\n    jne failed\n    lda cc_data_length+1\n    jne failed\n", body.len()));
-            for (index, byte) in body.bytes().enumerate() {
-                checks.push_str(&format!(
-                    "    ldy #{index}\n    lda (cc_arg),y\n    cmp #{byte}\n    jne failed\n"
-                ));
-            }
-        } else {
-            checks.push_str("    jcc failed\n");
-        }
-    }
-    let adapter = format!(
-        ".setcpu \"6502\"\n.macpack longbranch\n.export _main\n.import fe_compile_run, template_lookup, halt\n.importzp fe_compile_status, cc_status, cc_arg, cc_data_length, rt_depth\n.segment \"CODE\"\n_main:\n    jsr fe_compile_run\n{checks}    lda #0\n    jmp halt\nfailed:\n    lda #98\n    jmp halt\n"
-    );
-    let temp = TempDir::new();
-    let path = temp.0.join("p0a_probe.s");
-    fs::write(&path, adapter).unwrap();
-    build_and_run_custom(&p0a_frame(source), path.to_str().unwrap(), Some(&basic))
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn p0a_shared_success_sources_match_reference_and_empty_stack() {
-    for (name, stdout) in [
-        ("minimal_two_arguments", b"1\n11\n".as_slice()),
-        ("block_then_else", b"1\n7\n0\n4\n".as_slice()),
-    ] {
-        let source = p0a_source(name);
-        let reference = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
-            .arg(
-                Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join(format!("tests/fixtures/template_p0a/{name}.vtl")),
-            )
-            .output()
-            .unwrap();
-        p0a_result(&reference, 0, stdout);
-        // Unmodified production CLI adapter: no appended runtime sentinel.
-        let result =
-            build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s");
-        p0a_result(&result, 0, &reference.stdout);
-        p0a_result(&p0a_probe(&source, Some("{}={}+1"), None), 0, stdout);
-    }
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn p0a_shared_failures_preserve_phase_publication_and_never_start_runtime() {
-    let definition = p0a_source("deferred_rhs_definition");
-    p0a_result(
-        &build_and_run_input_with_frontend(&p0a_frame(&definition), "6502/target/sim65_cli.s"),
-        0,
-        b"",
-    );
-    p0a_result(&p0a_probe(&definition, Some("{}=A+"), None), 0, b"");
-
-    let failures = [
-        (
-            format!("{definition}{}", p0a_source("deferred_rhs_call")),
-            Some("{}=A+"),
-            true,
-        ),
-        (
-            p0a_source("partial_expansion_failure"),
-            Some("A=3\n{}=A+"),
-            true,
-        ),
-        (p0a_source("chunk_failure_profiles"), Some("A={}"), false),
-    ];
-    for (source, body, virtual_rhs) in failures {
-        // CLI status 128 + syntax(2), distinct from source(129) and resource(132).
-        p0a_result(
-            &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
-            130,
-            b"",
-        );
-        p0a_result(&p0a_probe(&source, body, Some(virtual_rhs)), 0, b"");
-    }
-    for (name, count) in [("invalid_definitions", 7), ("invalid_call_forms", 5)] {
-        let fixture = p0a_source(name);
-        assert_eq!(
-            fixture.lines().count(),
-            count,
-            "{name}: update the expectation ledger when rows change"
-        );
-        for (line, statement) in fixture.lines().enumerate() {
-            assert!(!statement.trim().is_empty());
-            if name == "invalid_call_forms" && statement == "a{A}=1" {
-                // The P0a source is retained for history; P0b accepts this row.
-                let source = format!("&=a{{}} [ A={{}} ]\n{statement} ?=~");
-                p0a_result(
-                    &build_and_run_input_with_frontend(
-                        &p0a_frame(&source),
-                        "6502/target/sim65_cli.s",
-                    ),
-                    0,
-                    b"1",
-                );
-                continue;
-            }
-            let (source, body) = if name == "invalid_call_forms" {
-                (format!("&=a{{}} [ A={{}} ]\n{statement}"), Some("A={}"))
-            } else {
-                (statement.to_owned(), None)
-            };
-            eprintln!("{name}:{}: syntax failure before virtual RHS", line + 1);
-            p0a_result(
-                &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
-                130,
-                b"",
-            );
-            p0a_result(&p0a_probe(&source, body, Some(false)), 0, b"");
-        }
-    }
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn p0b_shared_fixture_and_rhs_forms_match_reference() {
-    let path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/template_p0b/minimal.vtl");
-    let source = fs::read_to_string(&path).unwrap();
-    let reference = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
-        .arg(path)
-        .output()
-        .unwrap();
-    p0a_result(&reference, 0, b"15\n");
-    p0a_result(
-        &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
-        0,
-        &reference.stdout,
-    );
-    p0a_result(&p0a_probe(&source, Some("{}=~+{}"), None), 0, b"15\n");
-
-    for (source, stdout) in [
-        (
-            ".NUM:=3 &=a{} [ {}=~+{} ] B=2 a{B}=(B+.NUM) a{B}=1,4 ?=B ?=~",
-            b"111".as_slice(),
-        ),
-        ("&=a{} [ {}=~+{} ] ~=4 A=1 a{A}=~+2 ?=A", b"7".as_slice()),
-        (
-            "&=a{} [ {}=~+{} ] &=p [ a{A}=2 ] A=0 %=1 [ a{A}=3 ] [ a{A}=99 ] *=A<7 [ a{A}=1 ] p=() ?=A",
-            b"9".as_slice(),
-        ),
-    ] {
-        p0a_result(
-            &build_and_run_input_with_frontend(&p0a_frame(source), "6502/target/sim65_cli.s"),
-            0,
-            stdout,
-        );
-    }
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn p0b_failures_keep_published_template_and_do_not_start_runtime() {
-    let fixture = fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/template_p0b/invalid_rhs.vtl"),
-    )
-    .unwrap();
-    for (source, body, virtual_rhs) in [
-        (fixture, "{}=~", false),
-        ("&=a{} [ {}=~ ] a{A}=".to_owned(), "{}=~", false),
-        ("&=a{} [ {}=~ ] a{A}=q".to_owned(), "{}=~", false),
-        ("&=a{} [ {}=A+ ] a{A}=1".to_owned(), "{}=A+", true),
-        ("&=a{} [ {}=~ ] z{A}=1".to_owned(), "{}=~", false),
-        ("&=a{} [ {}=~ ] a{AB}=1".to_owned(), "{}=~", false),
-    ] {
-        p0a_result(
-            &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
-            130,
-            b"",
-        );
-        p0a_result(&p0a_probe(&source, Some(body), Some(virtual_rhs)), 0, b"");
-    }
-    let source = format!("&=a{{}} [ {{}}=~ ] a{{A}}={}", vec!["1"; 3000].join("+"));
-    p0a_result(
-        &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
-        132,
-        b"",
-    );
-    p0a_result(
-        &p0a_probe_status(&source, Some("{}=~"), Some((false, 4))),
-        0,
-        b"",
-    );
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn shared_arena_exhaustion_preserves_published_template_in_both_directions() {
-    let source_append = format!("&=a{{}} [ {{}}=~ ] &=b{{}} [ A={{}}{} ]", "X".repeat(25000));
-    let code_reserve = format!("&=a{{}} [ {{}}=~ ] ?=7 {}", "A=1 ".repeat(3000));
-    for source in [source_append, code_reserve] {
-        p0a_result(
-            &build_and_run_input_with_frontend(&p0a_frame(&source), "6502/target/sim65_cli.s"),
-            132,
-            b"",
-        );
-        p0a_result(
-            &p0a_probe_status(&source, Some("{}=~"), Some((false, 4))),
-            0,
-            b"",
-        );
-    }
 }

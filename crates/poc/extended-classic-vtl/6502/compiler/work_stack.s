@@ -6,9 +6,9 @@
 .importzp cc_status
 
 .importzp zp_phase
-cc_work_depth = zp_phase + 108
-work_low = zp_phase + 109
-work_high = zp_phase + 110
+cc_work_depth = zp_phase + 80
+work_low = zp_phase + 81
+work_high = zp_phase + 82
 
 .segment "BSS"
 work_words: .res 32

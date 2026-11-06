@@ -77,10 +77,9 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "p0a_template_calibration.vtl",
-        disposition: Disposition::Portable {
-            expected_stdout: Some(b"58\n20\n40\n"),
-            cycle_limit: None,
-            runtime_input: None,
+        disposition: Disposition::Deferred {
+            reason: "procedure templates have been removed from the 6502 frontend",
+            followup_issue: "#532",
         },
     },
     ExampleCase {

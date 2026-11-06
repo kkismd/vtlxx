@@ -100,13 +100,6 @@ fn invalid_names_and_definitions_do_not_start_runtime() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn template_and_normal_prefix_coexist_in_both_orders() {
-    success("&=a{} [ {}=1 ] &=ab [ B=2 ] a{A}=() ab=() ?=A ?=B", b"12");
-    success("&=ab [ B=2 ] &=a{} [ {}=1 ] a{A}=() ab=() ?=A ?=B", b"12");
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn sixty_four_definitions_and_deep_calls_succeed_but_sixty_five_fail() {
     let mut definitions = String::new();
     for i in 0..64 {
@@ -123,21 +116,14 @@ fn sixty_four_definitions_and_deep_calls_succeed_but_sixty_five_fail() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn sixty_four_writes_and_twenty_six_templates_fit_ninety_one_chunks() {
+fn sixty_five_top_level_chunks_run_in_source_order() {
     let mut source = String::new();
+    let mut expected = Vec::new();
     for i in 0..64 {
-        source.push_str(&format!("&={} [ A=A+1 ] ", name(i)));
+        source.push_str(&format!("$={} &={} [ ] ", 65 + i % 26, name(i)));
+        expected.push(b'A' + (i % 26) as u8);
     }
-    for ch in b'a'..=b'z' {
-        source.push_str(&format!("&={}{{}} [ {{}}={{}}+1 ] ", ch as char));
-    }
-    for i in 0..64 {
-        source.push_str(&format!("{}=() ", name(i)));
-    }
-    for ch in b'a'..=b'z' {
-        source.push_str(&format!("{}{{B}}=() ", ch as char));
-    }
-    source.push_str("?=A ?=B");
-    success(&source, b"6426");
-    failure(&format!("{source} &={} [ ]", name(64)));
+    source.push_str("$=33");
+    expected.push(b'!');
+    success(&source, &expected);
 }
