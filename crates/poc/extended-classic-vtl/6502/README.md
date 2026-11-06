@@ -40,7 +40,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_runtime -- --ignored
 
 ## Native compiler backend（#275）
 
-`compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 24,576 B のコード専用 arena、binding、owner、source work stack を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。compiler の失敗は `cc_status` に保持し、後続の compile-run driver が runtime を開始せず HALT する。
+`compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 24,576 B のコード専用 arena、binding、owner を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。compiler の失敗は `cc_status` に保持し、後続の compile-run driver が runtime を開始せず HALT する。
 
 target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_is_bound`、`cc_publish`、`cc_resolve` は `cc_name_len` と `cc_name` に入れた ASCII 小文字1〜8文字の通常 Write 名を取る。`cc_is_bound` は bound なら carry set、unbound なら carry clear を返し、有効な問い合わせでは `cc_status` と binding table を変更しない。`cc_publish` は `cc_arg`=completed target を取り、`cc_resolve` は完全名から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
 
@@ -52,9 +52,8 @@ target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は
 | `cc_jump_placeholder`、`cc_jz_placeholder`、`cc_patch_here`、`cc_jump_to` | absolute target の後方 patch と直接 jump |
 | `cc_begin_owner`、`cc_complete_owner` | owner の開始、未解決参照の検証、final RTS、completed target |
 | `cc_define_label`、`cc_label_jump` | owner-local の numeric label と forward fixup |
-| `cc_work_push`、`cc_work_pop`、`cc_work_swap`、`cc_work_reset` | runtime value stack と別の 16×u16 source work stack |
 
-`cc_status = 0` は成功。非ゼロは compile-run failure で、1 arena full、2 invalid patch、3 owner misuse、4 duplicate label、5 label full、6 fixup full、7 unresolved reference、8 binding error、9 work stack error。失敗後の継続は契約に含めない。placeholder は patch 完了まで追跡し、未解決のまま owner を完了できない。完了済み owner の bytes は patch できない。binding には完了済み owner の entry だけを登録できる。
+`cc_status = 0` は成功。非ゼロは compile-run failure で、1 arena full、2 invalid patch、3 owner misuse、4 duplicate label、5 label full、6 fixup full、7 unresolved reference、8 binding error。失敗後の継続は契約に含めない。placeholder は patch 完了まで追跡し、未解決のまま owner を完了できない。完了済み owner の bytes は patch できない。binding には完了済み owner の entry だけを登録できる。
 
 JZ template が呼ぶ `rt_pop_condition` は runtime value stack の top Cell を 1 つ consume し、0 の場合に zero flag を立てる target 内 helper。source control の解釈は持たない。
 
@@ -77,7 +76,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_
 
 コンパイル時のCPU hardware stackは、statement / required_block / operand / valueで残量を検査する。Sが25未満の場合に限り、通常の復帰を行わず、`fe_compile_status=4`、exit132で即時HALTする。stdoutは空で生成runtimeは開始しない。通常のsyntax/source/backend失敗は従来どおり呼出元へ返す。閾値・linked library・入口外経路の根拠と再監査条件は[stack guard監査](../../../../docs/ecvtl-6502-stack-guard.md)を参照。
 
-現在の対象は signed i16 literal、A-Z register、`@(address)` read / `@=address,value` write、算術・比較、`?` / `$` output、grouping、左結合の式、左から右への comma operand、RHS 先頭だけの `~`、`&=p [ ... ]` Write definition と lowercase Write call、top-level named integer 定義と RHS / numeric label operand 参照、anonymous block `[ ... ]`、one/two-arm IF `%=`、native While `*=condition` である。definition bodyは独立ownerへcompileされ、block内の label / control はそのownerを使う。ordinary blockは surrounding owner へ inline compileされ、numeric label namespaceを共有する。IF の else は次 source form が `[` のときだけ読み、block 深さは16までである。While は IF と同じ通常の bounded RHS 条件式の後に required body block を1つ取り、条件コードをループ先頭へ生成する。backend の JZ placeholder、direct jump、patch を使って loop を生成する。loop target / exit patch は frontend-private 16-entry frame に保持し、While の入れ子16段を source work stack の容量から独立して扱う。条件式の結果は runtime で各反復1 Cell消費される。named integer はトップレベルで `.NAME := value` と定義し、`.NAME` と参照する。名前本体は `[A-Z][A-Z0-9_]+` の2〜16 byteで、接頭の `.` は名前の長さに含めず表にも保存しない。値は単一の signed i16 decimal literal、compile-run あたり128件までである。通常 statement と同じ空白・改行・コメント・source 終端で区切り、`.MAX:=10 .MIN:=-1 A=.MAX` のように同一行に置ける。`:=` の前後だけ ASCII space / HTAB を許し、定義中の改行は許さない。定義後のみ参照でき、重複定義と旧形式 `==NAME,value` や裸の複数文字定数参照は compile failure となる。constant table / spelling は compile-only で runtime code へ出力しない。`^=operand` は owner-local numeric label を定義し、`#=operand` は同じ owner 内へ無条件 jump する。operand は decimal または `.NAME` 形式の定義済み named integer で、解決後の範囲は `0..32767`。label / fixup の重複、未解決、容量超過は backend compile failure となり runtime を開始しない。
+現在の対象は signed i16 literal、A-Z register、`@(address)` read / `@=address,value` write、算術・比較、`?` / `$` output、grouping、左結合の式、左から右への comma operand、RHS 先頭だけの `~`、`&=p [ ... ]` Write definition と lowercase Write call、top-level named integer 定義と RHS / numeric label operand 参照、anonymous block `[ ... ]`、one/two-arm IF `%=`、native While `*=condition` である。definition bodyは独立ownerへcompileされ、block内の label / control はそのownerを使う。ordinary blockは surrounding owner へ inline compileされ、numeric label namespaceを共有する。IF の else は次 source form が `[` のときだけ読み、block 深さは16までである。While は IF と同じ通常の bounded RHS 条件式の後に required body block を1つ取り、条件コードをループ先頭へ生成する。backend の JZ placeholder、direct jump、patch を使って loop を生成する。IF の forward patch と While の exit patch / loop target は、block の入れ子深さに対応する frontend-private な各16-entry table に保持する。式の入れ子上限は独立している。条件式の結果は runtime で各反復1 Cell消費される。named integer はトップレベルで `.NAME := value` と定義し、`.NAME` と参照する。名前本体は `[A-Z][A-Z0-9_]+` の2〜16 byteで、接頭の `.` は名前の長さに含めず表にも保存しない。値は単一の signed i16 decimal literal、compile-run あたり128件までである。通常 statement と同じ空白・改行・コメント・source 終端で区切り、`.MAX:=10 .MIN:=-1 A=.MAX` のように同一行に置ける。`:=` の前後だけ ASCII space / HTAB を許し、定義中の改行は許さない。定義後のみ参照でき、重複定義と旧形式 `==NAME,value` や裸の複数文字定数参照は compile failure となる。constant table / spelling は compile-only で runtime code へ出力しない。`^=operand` は owner-local numeric label を定義し、`#=operand` は同じ owner 内へ無条件 jump する。operand は decimal または `.NAME` 形式の定義済み named integer で、解決後の範囲は `0..32767`。label / fixup の重複、未解決、容量超過は backend compile failure となり runtime を開始しない。
 
 ```sh
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_frontend -- --ignored
@@ -108,3 +107,5 @@ E2E は Rust 側の 5 テストに対応する 7 入力系列を raw stdout/stde
 上記 script は production と同じ module の link map/labels を生成し、sim65 `-c` で総 cycles を別実行で取得する。EOF 30,211,835、表示後 X 31,352,775、2 回敗北・RETRY 47,418,752 cycles。compile/runtime 相別は未計測。script は別途 frontend の一時コピーに成功した `fe_build_driver` の直後、runtime 開始前の `cc_cursor` を出力して停止する診断を挿入する。診断 binary の arena は `$2bad`、cursor は `$687f`、生成量 15,570 B、残り 9,006 B。ゲームは P0a を使わない。この値は診断 binary の測定であり production CLI の直接観測ではない。
 
 動的 CPU S、value/work stack、cc65 software SP の最大使用量は本測定では未計測で、全経路の動的安全性は未証明。静的非重複はその証明ではない。compile guard は S < 25 を検出するが runtime や IRQ/NMI に適用しない。この測定時点の共有 arena と template 専用テストは #528 によって廃止された。現行の code-only arena と owner の検証は `sim65_backend` を参照。EC09 #463 の完了判定には、未測定の stack と相別 cycles、および実 CLI 勝利未到達を含めて評価が必要。
+
+正式 sim65 CLI の link map（#524）では ZEROPAGE 132 B、BSS 34,903 B、CODE 6,145 B、RODATA 49 B。compile view は共有 ZP の offset 0..79、runtime view は 0..99 を使い、予約は 100 B のまま。両 status と entry、cc65 用領域は別に確保する。

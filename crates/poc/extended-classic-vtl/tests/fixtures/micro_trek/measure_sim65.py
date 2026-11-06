@@ -4,7 +4,7 @@ import subprocess, pathlib, struct, tempfile
 root=pathlib.Path('crates/poc/extended-classic-vtl')
 scratch = tempfile.TemporaryDirectory(prefix='micro-trek-measure-')
 out = pathlib.Path(scratch.name)
-sources=['target/sim65_cli','frontend/basic','frontend/source','compiler/arena','compiler/emitter','compiler/owner','compiler/binding','compiler/work_stack','target/zp_layout','runtime/state','runtime/primitives','runtime/arithmetic','target/sim65_adapter']
+sources=['target/sim65_cli','frontend/basic','frontend/source','compiler/arena','compiler/emitter','compiler/owner','compiler/binding','target/zp_layout','runtime/state','runtime/primitives','runtime/arithmetic','target/sim65_adapter']
 objs=[]
 for i,s in enumerate(sources):
  p=root/'6502'/f'{s}.s'; o=out/f'{i}.o'; subprocess.run(['ca65','-t','sim6502',str(p),'-o',str(o)],check=True); objs.append(str(o))

@@ -66,7 +66,6 @@ fn build_and_run(case: u8) -> Result<Output, String> {
         root.join("6502/compiler/emitter.s"),
         root.join("6502/compiler/owner.s"),
         root.join("6502/compiler/binding.s"),
-        root.join("6502/compiler/work_stack.s"),
         root.join("6502/target/zp_layout.s"),
         root.join("6502/runtime/state.s"),
         root.join("6502/runtime/primitives.s"),
@@ -152,12 +151,6 @@ fn completed_owner_binding_and_owner_local_labels() {
     expect(15, b"K");
     expect(16, b"K");
     expect(17, b"QK");
-}
-
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn source_work_stack_capacity_and_order() {
-    expect(14, b"K");
 }
 
 #[test]

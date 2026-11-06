@@ -66,7 +66,6 @@ fn build_and_run_custom(input: &[u8], frontend_fixture: &str, basic: Option<&str
         "6502/compiler/emitter.s",
         "6502/compiler/owner.s",
         "6502/compiler/binding.s",
-        "6502/compiler/work_stack.s",
         "6502/runtime/state.s",
         "6502/runtime/primitives.s",
         "6502/runtime/arithmetic.s",
@@ -356,6 +355,33 @@ fn basic_source_compiles_and_executes() {
     expect("A=0 *=A<2 [ %=1 [ A=A+1 ] ] ?=A", 0, b"2Z");
     expect("A=0 %=1 [ *=A<2 [ A=A+1 ] ] ?=A", 0, b"2Z");
     expect("A=0 *=A<2 [ A=A+1 *=0 [ A=99 ] ] ?=A", 0, b"2Z");
+    // Each pending patch must survive both kinds of nested frame, including
+    // the replacement of an IF false patch by its else-end patch.
+    expect(
+        "A=0 %=1 [ *=A<2 [ %=A [ ?=8 ] [ ?=7 ] A=A+1 ] ] [ ?=9 ] ?=A",
+        0,
+        b"782Z",
+    );
+    expect(
+        "A=0 *=A<2 [ %=A [ *=0 [ ?=9 ] ?=8 ] [ ?=7 ] A=A+1 ] ?=A",
+        0,
+        b"782Z",
+    );
+    expect(
+        "%=0 [ ?=9 ] [ ?=1 ] *=0 [ ?=9 ] %=1 [ ?=2 ] [ ?=9 ] ?=3",
+        0,
+        b"123Z",
+    );
+    expect(
+        "&=p [ A=0 %=1 [ *=A<2 [ %=A [ ?=8 ] [ ?=7 ] A=A+1 ] ] [ ?=9 ] ?=A ] p=()",
+        0,
+        b"782Z",
+    );
+    let mixed_16 = format!("{}?=9{}", "%=1 [ *=1 [ ".repeat(8), " ]".repeat(16));
+    // The innermost statement is unreachable at runtime; all frames are
+    // nevertheless compiled and patched. Avoid executing the infinite loops.
+    let mixed_16 = mixed_16.replacen("*=1", "*=0", 1);
+    expect(&mixed_16, 0, b"Z");
     expect(".VALUE:=42 %=1 [ ?=.VALUE ]", 0, b"42Z");
     expect("%=1 [ #=2 ?=1 ^=2 ?=8 ]", 0, b"8Z");
     let nested_16 = format!("{}?=9{}", "%=1 [ ".repeat(16), " ]".repeat(16));
@@ -532,6 +558,9 @@ fn malformed_source_never_starts_runtime() {
     expect(&nested_17, 2, b"");
     let nested_while_17 = format!("{}?=9{}", "*=0 [ ".repeat(17), " ]".repeat(17));
     expect(&nested_while_17, 2, b"");
+    let mixed_17 = format!("{}%=1 [ ?=9 ]{}", "%=1 [ *=0 [ ".repeat(8), " ]".repeat(16));
+    expect(&mixed_17, 2, b"");
+    expect("?=7 %=1 [ *=0 [ %=1 [ ] [", 2, b"");
     let mut too_many_labels = String::new();
     for label in 0..33 {
         too_many_labels.push_str(&format!("^={label} "));

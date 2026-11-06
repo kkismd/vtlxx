@@ -248,7 +248,6 @@ fn build_and_run(
         "6502/compiler/emitter.s",
         "6502/compiler/owner.s",
         "6502/compiler/binding.s",
-        "6502/compiler/work_stack.s",
         "6502/target/zp_layout.s",
         "6502/runtime/state.s",
         "6502/runtime/primitives.s",
