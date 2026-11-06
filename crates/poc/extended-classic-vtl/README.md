@@ -2,7 +2,9 @@
 
 VTLXX は、classic VTL の簡潔な表面構文を発展させ、値スタック、通常のユーザー定義手続き、IfElse / While、Rust参照実装と実際の6502ネイティブコンパイラを備える実験的な言語処理系です。
 
-このcrateは、従来ECVTLと呼んでいた**現在の正式なVTLXX実装**です（[採用ADR #540](https://github.com/kkismd/vtlxx/issues/540)）。M01は廃番で、段階的自己ホストは必須要件ではありません。SourceProcedureと手続テンプレートはそれぞれ採用ADR #433 / #528により廃止済みです。移行中の物理crate名 `vtlxx-poc-extended-classic-vtl`、path `crates/poc/extended-classic-vtl/`、CLI名 `ecvtl`/`ecvtl6502` は実装が改名されるまでの現行名称です（[移行Tracker #541](https://github.com/kkismd/vtlxx/issues/541)）。
+この crate は、従来 ECVTL と呼んでいた**現在の正式な VTLXX 実装**です（[採用 ADR #540](https://github.com/kkismd/vtlxx/issues/540)）。M01 の独立した bootstrap 計画は廃番です。SourceProcedure と手続テンプレートも、それぞれ ADR #433 / #528 により廃止されています。
+
+名称移行中の物理 crate 名は `vtlxx-poc-extended-classic-vtl`、path は `crates/poc/extended-classic-vtl/`、CLI 名は `ecvtl` / `ecvtl6502` です。後続の改名作業は [移行 Tracker #541](https://github.com/kkismd/vtlxx/issues/541) で管理します。
 
 この README は、**現在の `main` で VTLXX source を読み書きする人間およびエージェント向けの実用入口**です。完全な言語仕様書ではありません。
 
@@ -28,7 +30,9 @@ VTLXX は、classic VTL の簡潔な表面構文を発展させ、値スタッ�
 - [#265](https://github.com/kkismd/vtlxx/issues/265): anonymous block の `[ ... ]` 一本化
 - [#280](https://github.com/kkismd/vtlxx/issues/280): value stack 接続記号を `~` に変更
 - [#469](https://github.com/kkismd/vtlxx/issues/469), [#255](https://github.com/kkismd/vtlxx/issues/255): 名前付き整数の構文と定義順
-- [#194](https://github.com/kkismd/vtlxx/issues/194): EC03 Tracker
+- [#217](https://github.com/kkismd/vtlxx/issues/217): target profile ごとの indexed storage の容量とアドレス規則
+- [#433](https://github.com/kkismd/vtlxx/issues/433), [#528](https://github.com/kkismd/vtlxx/issues/528): SourceProcedure・手続テンプレートの廃止
+- [#541](https://github.com/kkismd/vtlxx/issues/541): VTLXX への名称移行 Tracker
 
 ## 実行方法
 
@@ -144,7 +148,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_cli -- --ignored
 
 ### Storage
 
-storage は 65536 Cell の address space です。
+storage は target profile ごとにアドレス幅が決まる ring 状の記憶領域です（採用 ADR [#217](https://github.com/kkismd/vtlxx/issues/217)）。Rust reference は **16 bit / 65536 Cell**、現行 6502/sim65 は **8 bit / 256 Cell** です。どちらも値そのものは signed 16-bit Cell です。
 
 ```vtl
   @=10,42
@@ -153,14 +157,14 @@ storage は 65536 Cell の address space です。
 
 `@=address,value` が書き込み、`@(address)` が読み取りです。
 
-address には Cell の raw 16-bit pattern を使います。したがって負の Cell も `u16` と同じ bit pattern の address として扱われます。
+address は Cell の raw 16-bit pattern の**下位アドレス幅ぶん**を使います。負の Cell も同じ規則で扱い、容量を超えたアドレスは ring 上で循環します。
 
 ```vtl
   @=-1,42
   A=@(-1)
 ```
 
-この例の `-1` は storage address `65535` を指します。
+この例の `-1` は Rust reference では address `65535`、現行 6502/sim65 では `255` を指します。同様に `256` は Rust では `256`、6502 では `0` を指します。複数のターゲットで同じ結果を必要とするプログラムでは、利用する storage のアドレスを共通範囲に収めてください。
 
 ### Value stack
 
@@ -295,7 +299,7 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 
 定義後の RHS 式、数値ラベルの `^=` と `#=` から参照できます。手続きや anonymous block の中で定義することはできません。未定義名の参照と同名の再定義は compile error です。異なる名前に同じ値を指定できます。`^=` / `#=` で使う値には既存のラベル範囲 `0..32767` が適用されます。
 
-定数表は compile-run の source processing 中だけ存在し、runtime に定数名や表を残しません。Rust の `execute_source` では呼び出し1回ごとに表を作ります。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで定数名を再利用するには再定義が必要です。6502 の現行 sim65 構成は compile-run あたり128件まで、Rust reference はその target 固有の件数制限を設けません。旧 EC07 の16件制限は歴史的な初期構成です（#528）。
+定数表は compile-run の source processing 中だけ存在し、runtime に定数名や表を残しません。Rust の `execute_source` では呼び出し1回ごとに表を作ります。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで定数名を再利用するには再定義が必要です。6502 の現行 sim65 構成は compile-run あたり最大128件の定数宣言を受け付け、Rust reference はこの件数上限を設けません（採用 ADR [#528](https://github.com/kkismd/vtlxx/issues/528)）。
 
 ### Comma operand
 
@@ -689,7 +693,16 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 
 `W` / `A` / `S` / `D` で上下左右、`R` で新しいゲーム、`Q` で終了します。小文字も使えます。通常の端末ではコマンドを入力して Enter を押してください。入力文字と改行は端末の echo として表示されます。
 
-同じ source の 6502 適合を試すコマンドは次のとおりです。現行の 6502 compiler ではコンパイル資源エラーとなり、ゲームを実行できません。
+同じ source は 6502/sim65 でも実行できます。固定入力による終了は、[`tests/sim65_examples.rs`](tests/sim65_examples.rs) の ignored 統合テストで、Rust reference と 6502 の正常終了・stdout 一致を検証しています。検証条件は `1024_quit.txt` を入力に使い、cycle 上限を `256000000` とした一括実行です。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
+  crates/poc/extended-classic-vtl/examples/1024.vtl \
+  --runtime-input crates/poc/extended-classic-vtl/tests/fixtures/1024_quit.txt \
+  --cycle-limit 256000000
+```
+
+端末から操作する場合は、次の対話モードを使用します。ただし、上記の固定入力テストは対話操作の全経路まで検証するものではありません。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
