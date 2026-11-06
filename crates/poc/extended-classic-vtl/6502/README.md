@@ -80,7 +80,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_
 
 **6502初期targetの通常Write上限は64件**です。65件目はコンパイル失敗となり、runtimeは開始しません。64件すべてを定義するsourceでも、arena等の別の資源上限は独立に適用されます。最大64定義に対しtop-level source chunkは最大65件です。Rust referenceには64件という件数制限を設けていません。6502 `compiler/binding.s` の現在のprivate名前表は `length:u8 | name[8] | completed target:u16` の11B×64件（704B）であり、これはportableな言語仕様やruntime APIではありません。
 
-現行の直接テストは [`tests/sim65_long_write_names.rs`](../tests/sim65_long_write_names.rs)（64件成功、65件目失敗、65 chunk順序）と [`tests/long_write_names.rs`](../tests/long_write_names.rs)（Rustの65件以上、完全名照合、失敗時binding）です。長名導入時の資源比較は [当時の監査記録](../../../../docs/ecvtl-6502-long-write-resources.md) にあり、その数値は現在のlink mapや動的stack高水位の値ではありません。
+現行の直接テストは [`tests/sim65_long_write_names.rs`](../tests/sim65_long_write_names.rs)（64件成功、65件目失敗、65 chunk順序）と [`tests/long_write_names.rs`](../tests/long_write_names.rs)（Rustの65件以上、完全名照合、失敗時binding）です。長名導入時のROM/RAM/stack比較は [当時の監査記録](../../../../docs/ecvtl-6502-long-write-resources.md) にあり、その数値は現在の配置ではありません。現在の正式CLIのZP/BSS/CODE/RODATA測定は [PR #537](https://github.com/kkismd/vtlxx/pull/537) に記録されています。いずれも全経路の動的stack高水位の実測を意味しません。
 
 コンパイル時のCPU hardware stackは、statement / required_block / operand / valueで残量を検査する。Sが25未満の場合に限り、通常の復帰を行わず、`fe_compile_status=4`、exit132で即時HALTする。stdoutは空で生成runtimeは開始しない。通常のsyntax/source/backend失敗は従来どおり呼出元へ返す。閾値・linked library・入口外経路の根拠と再監査条件は[stack guard監査](../../../../docs/ecvtl-6502-stack-guard.md)を参照。
 
