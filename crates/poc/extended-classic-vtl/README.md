@@ -1,10 +1,12 @@
-# Extended Classic VTL (ECVTL) PoC
+# VTLXX（旧称 Extended Classic VTL / ECVTL）
 
-Extended Classic VTL (ECVTL) は、classic VTL の小さい表面構文を保ちながら、value stack、source-defined procedure、自己拡張可能な source role などを検証するための PoC です。
+VTLXX は、classic VTL の簡潔な表面構文を発展させ、値スタック、通常のユーザー定義手続き、IfElse / While、Rust参照実装と実際の6502ネイティブコンパイラを備える実験的な言語処理系です。
 
-この crate は VTLXX の最終言語仕様そのものではなく、意味論と bootstrap 構造を検証する reference implementation / executable specification です。
+この crate は、従来 ECVTL と呼んでいた**現在の正式な VTLXX 実装**です（[採用 ADR #540](https://github.com/kkismd/vtlxx/issues/540)）。M01 の独立した bootstrap 計画は廃番です。SourceProcedure と手続テンプレートも、それぞれ ADR #433 / #528 により廃止されています。
 
-この README は、**現在の `main` で ECVTL source を読み書きする人間およびエージェント向けの実用入口**です。完全な言語仕様書ではありません。
+名称移行中の物理 crate 名は `vtlxx-poc-extended-classic-vtl`、path は `crates/poc/extended-classic-vtl/`、CLI 名は `ecvtl` / `ecvtl6502` です。後続の改名作業は [移行 Tracker #541](https://github.com/kkismd/vtlxx/issues/541) で管理します。
+
+この README は、**現在の `main` で VTLXX source を読み書きする人間およびエージェント向けの実用入口**です。完全な言語仕様書ではありません。
 
 ## Source of Truth
 
@@ -14,7 +16,7 @@ Extended Classic VTL (ECVTL) は、classic VTL の小さい表面構文を保ち
 - user-facing example は [`examples/eight_queens.vtl`](examples/eight_queens.vtl) です。
 - formatting rule は [#200](https://github.com/kkismd/vtlxx/issues/200) で整理しています。
 
-特に、ECVTL は開発中です。採用済み ADR に存在していても、まだ `main` に実装されていない surface があります。この README の「現在使える構文」は `main` のコードとテストに合わせています。
+特に、VTLXX は開発中です。採用済み ADR に存在していても、まだ `main` に実装されていない surface があります。この README の「現在使える構文」は `main` のコードとテストに合わせています。
 
 関連する主要な ADR / Tracker:
 
@@ -28,7 +30,9 @@ Extended Classic VTL (ECVTL) は、classic VTL の小さい表面構文を保ち
 - [#265](https://github.com/kkismd/vtlxx/issues/265): anonymous block の `[ ... ]` 一本化
 - [#280](https://github.com/kkismd/vtlxx/issues/280): value stack 接続記号を `~` に変更
 - [#469](https://github.com/kkismd/vtlxx/issues/469), [#255](https://github.com/kkismd/vtlxx/issues/255): 名前付き整数の構文と定義順
-- [#194](https://github.com/kkismd/vtlxx/issues/194): EC03 Tracker
+- [#217](https://github.com/kkismd/vtlxx/issues/217): target profile ごとの indexed storage の容量とアドレス規則
+- [#433](https://github.com/kkismd/vtlxx/issues/433), [#528](https://github.com/kkismd/vtlxx/issues/528): SourceProcedure・手続テンプレートの廃止
+- [#541](https://github.com/kkismd/vtlxx/issues/541): VTLXX への名称移行 Tracker
 
 ## 実行方法
 
@@ -52,11 +56,11 @@ cargo test --manifest-path crates/poc/extended-classic-vtl/Cargo.toml
 cargo test --workspace
 ```
 
-Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Read` を受け取ります。`$` の PrimaryRead は NUL を読み捨てて `1..255` または EOF の `-1` を返し、入力エラーは runtime error になります。入力位置は同じ Machine の手続きと top-level で共有されます。未設定時は空入力です。現時点の Rust CLI は stdin をこの入力へ接続していません（後続 #313）。
+Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Read` を受け取ります。`$` の PrimaryRead は NUL を読み捨てて `1..255` または EOF の `-1` を返し、入力エラーは runtime error になります。入力位置は同じ Machine の手続きと top-level で共有されます。未設定時は空入力です。現在のRust対話CLIは、runtime stdinをMachine入力へ接続し、stdoutを逐次出力します（#313）。
 
-## NMOS 6502 PoC の手動実行
+## NMOS 6502 コンパイラの手動実行
 
-`ecvtl6502` は ECVTL source を既存の NMOS 6502 compiler で native code にし、`sim65` で実行します。Rust reference VMへのフォールバックはありません。実行には cc65 の `ca65`、`ld65`、`sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。
+`ecvtl6502` は VTLXX source を既存の NMOS 6502 compiler で native code にし、`sim65` で実行します。Rust reference VMへのフォールバックはありません。実行には cc65 の `ca65`、`ld65`、`sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
@@ -65,7 +69,7 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
 
 source file は raw bytes で読み、最大 65535 bytes までです。target は stdin の先頭に source 長の u16 little-endian 2 byte を受け取り、その後に source bytes と runtime input bytes を読みます。任意の runtime input file は `--runtime-input` で指定できます。
 
-6502 frontend では `$` を待機文字入力として利用できます（#317、採用 ADR #328）。`--runtime-input` で指定した raw bytes は source frame の後ろに渡され、ECVTL の `$` から読み取られます。物理 NUL (`0x00`) は読み捨てられ、`1..255` は値として返り、入力 EOF は `-1` になります。したがって `0xff` は EOF ではなく `255` です。
+6502 frontend では `$` を待機文字入力として利用できます（#317、採用 ADR #328）。`--runtime-input` で指定した raw bytes は source frame の後ろに渡され、VTLXX の `$` から読み取られます。物理 NUL (`0x00`) は読み捨てられ、`1..255` は値として返り、入力 EOF は `-1` になります。したがって `0xff` は EOF ではなく `255` です。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
@@ -144,7 +148,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_cli -- --ignored
 
 ### Storage
 
-storage は 65536 Cell の address space です。
+storage は target profile ごとにアドレス幅が決まる ring 状の記憶領域です（採用 ADR [#217](https://github.com/kkismd/vtlxx/issues/217)）。Rust reference は **16 bit / 65536 Cell**、現行 6502/sim65 は **8 bit / 256 Cell** です。どちらも値そのものは signed 16-bit Cell です。
 
 ```vtl
   @=10,42
@@ -153,18 +157,18 @@ storage は 65536 Cell の address space です。
 
 `@=address,value` が書き込み、`@(address)` が読み取りです。
 
-address には Cell の raw 16-bit pattern を使います。したがって負の Cell も `u16` と同じ bit pattern の address として扱われます。
+address は Cell の raw 16-bit pattern の**下位アドレス幅ぶん**を使います。負の Cell も同じ規則で扱い、容量を超えたアドレスは ring 上で循環します。
 
 ```vtl
   @=-1,42
   A=@(-1)
 ```
 
-この例の `-1` は storage address `65535` を指します。
+この例の `-1` は Rust reference では address `65535`、現行 6502/sim65 では `255` を指します。同様に `256` は Rust では `256`、6502 では `0` を指します。複数のターゲットで同じ結果を必要とするプログラムでは、利用する storage のアドレスを共通範囲に収めてください。
 
 ### Value stack
 
-ECVTL の procedure / primitive は共通の value stack を使います。
+VTLXX の procedure / primitive は共通の value stack を使います。
 
 引数個数や戻り値個数の arity metadata は持ちません。stack effect は programmer contract です。
 
@@ -234,7 +238,7 @@ double-quoted string 内の whitespace と `;` は内容として保持されま
 
 ## Expression
 
-ECVTL の expression は、小さい parser と source role binding で構成されています。
+VTLXX の expression は、小さい parser と source role binding で構成されています。
 
 主な value:
 
@@ -259,7 +263,7 @@ ECVTL の expression は、小さい parser と source role binding で構成さ
 
 ### Operator precedence
 
-現在の ECVTL では、binary operator ごとの precedence はありません。operator は同じ優先順位で**左結合**です。
+現在の VTLXX では、binary operator ごとの precedence はありません。operator は同じ優先順位で**左結合**です。
 
 ```vtl
   A=2+3*4
@@ -295,7 +299,7 @@ ECVTL の expression は、小さい parser と source role binding で構成さ
 
 定義後の RHS 式、数値ラベルの `^=` と `#=` から参照できます。手続きや anonymous block の中で定義することはできません。未定義名の参照と同名の再定義は compile error です。異なる名前に同じ値を指定できます。`^=` / `#=` で使う値には既存のラベル範囲 `0..32767` が適用されます。
 
-定数表は compile-run の source processing 中だけ存在し、runtime に定数名や表を残しません。Rust の `execute_source` では呼び出し1回ごとに表を作ります。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで定数名を再利用するには再定義が必要です。6502 の EC07 profile は compile-run あたり16件まで、Rust reference はその target 固有の件数制限を設けません。
+定数表は compile-run の source processing 中だけ存在し、runtime に定数名や表を残しません。Rust の `execute_source` では呼び出し1回ごとに表を作ります。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで定数名を再利用するには再定義が必要です。6502 の現行 sim65 構成は compile-run あたり最大128件の定数宣言を受け付け、Rust reference はこの件数上限を設けません（採用 ADR [#528](https://github.com/kkismd/vtlxx/issues/528)）。
 
 ### Comma operand
 
@@ -562,7 +566,7 @@ source から procedure を公開するときは、本文のコンパイルと�
 
 ## Source role の用語
 
-ECVTL の binding model は identity と source role の組です。
+VTLXX の binding model は identity と source role の組です。
 
 利用者向けには次の用語を使います。
 
@@ -579,7 +583,7 @@ ECVTL の binding model は identity と source role の組です。
 
 ## Formatting / indentation
 
-indentation は構文ではありませんが、user-facing ECVTL source では [#200](https://github.com/kkismd/vtlxx/issues/200) の規則を使います。
+indentation は構文ではありませんが、user-facing VTLXX source では [#200](https://github.com/kkismd/vtlxx/issues/200) の規則を使います。
 
 ### 基本
 
@@ -689,7 +693,16 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 
 `W` / `A` / `S` / `D` で上下左右、`R` で新しいゲーム、`Q` で終了します。小文字も使えます。通常の端末ではコマンドを入力して Enter を押してください。入力文字と改行は端末の echo として表示されます。
 
-同じ source の 6502 適合を試すコマンドは次のとおりです。現行の 6502 compiler ではコンパイル資源エラーとなり、ゲームを実行できません。
+同じ source は 6502/sim65 でも実行できます。固定入力による終了は、[`tests/sim65_examples.rs`](tests/sim65_examples.rs) の ignored 統合テストで、Rust reference と 6502 の正常終了・stdout 一致を検証しています。検証条件は `1024_quit.txt` を入力に使い、cycle 上限を `256000000` とした一括実行です。
+
+```sh
+cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
+  crates/poc/extended-classic-vtl/examples/1024.vtl \
+  --runtime-input crates/poc/extended-classic-vtl/tests/fixtures/1024_quit.txt \
+  --cycle-limit 256000000
+```
+
+端末から操作する場合は、次の対話モードを使用します。ただし、上記の固定入力テストは対話操作の全経路まで検証するものではありません。
 
 ```sh
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
@@ -698,7 +711,7 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl6502 -- \
 
 ## Example: Eight Queens
 
-[`examples/eight_queens.vtl`](examples/eight_queens.vtl) は current ECVTL の user-facing example です。
+[`examples/eight_queens.vtl`](examples/eight_queens.vtl) は current VTLXX の user-facing example です。
 
 次をまとめて使っています。
 
@@ -743,9 +756,9 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
   crates/poc/extended-classic-vtl/examples/rpn_evaluator.vtl
 ```
 
-## ECVTL source を書くときの確認事項
+## VTLXX source を書くときの確認事項
 
-新しい ECVTL source を追加・変更するときは、少なくとも次を確認してください。
+新しい VTLXX source を追加・変更するときは、少なくとも次を確認してください。
 
 1. current Tracker で、その surface が `main` に実装済みか確認する。
 2. statement 内へ whitespace を入れない。

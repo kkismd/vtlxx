@@ -4,13 +4,11 @@
 
 ## プロジェクトの位置付け
 
-VTLXX は、極小の実行系から上位の言語層を bootstrap する構造を検証する実験的な言語処理系である。
+VTLXX は、Classic VTL の簡潔なプログラミングモデルを発展させた、小型コンピュータ向けの実験的な言語およびコンパイラである。旧称 ECVTL（Extended Classic VTL）の言語仕様・Rust参照実装・actual 6502ネイティブコンパイラを正式なVTLXXとして継承する（採用ADR #540）。
 
-Rust 実装は最終ターゲットそのものではなく、意味論と bootstrap 構造を検証するための reference implementation / executable specification として扱う。
+Rust実装は言語意味論のreference implementation / executable specificationとして扱い、6502実装との可搬な意味論の一致を確認する。限られたメモリ・I/O環境への移植可能性、明快な責務分担、小さな機構、既存の失敗時契約を重視する。
 
-将来の低水準実装へ移植可能な程度に単純な構造を優先し、Rust 固有の高度な抽象化を必要性が明確になる前に導入しない。
-
-VTLXX 固有の bootstrap 設計原則は、一般的な言語処理系、Rust、ソフトウェア設計の慣習より優先する。一般的には妥当な方式でも、bootstrap kernel の最小性、stage 間責務、移植可能性その他の本書の原則に反する場合は採用しない。
+M01の独立した極小シード辞書からのbootstrap計画は廃番であり、自己ホスト・ソース処理自己拡張はVTLXXの必須完成条件ではない。将来の再検討には具体的な用途と独立のResearch/ADRを必要とする。M01の過去ADRやコードを現行VTLXXの仕様として暗黙に適用しない。名称移行中の旧crate/path/CLIはTracker #541の計画に従い、実際のコードが変更されるまでは現行名称を使う。
 
 ## 正本と確認順序
 
@@ -24,7 +22,7 @@ VTLXX 固有の bootstrap 設計原則は、一般的な言語処理系、Rust�
 
 repository root の `AGENTS.md` に加え、変更対象パスにより近い `AGENTS.md` が存在する場合は、それも適用する。関連文書は変更対象と issue が要求するものを確認し、過去 stage や別対象の資料を現在仕様として扱わない。
 
-VTLXX repository 全体の概要と主要文書への入口は root `README.md` を参照する。ECVTL の source surface、実行方法、記述例、formatting rule を扱う場合は、`crates/poc/extended-classic-vtl/README.md` を実用入口として確認する。これらの README は探索と実用上の案内であり、設計判断・現在の開発段階・現在の実装事実の正本を置き換えない。
+VTLXX repository 全体の概要と主要文書への入口は root `README.md` を参照する。VTLXX（旧称ECVTL）の source surface、実行方法、記述例、formatting rule を扱う場合は、`crates/poc/extended-classic-vtl/README.md` を実用入口として確認する。これらの README は探索と実用上の案内であり、設計判断・現在の開発段階・現在の実装事実の正本を置き換えない。
 
 設計判断は採用済み ADR を正本とする。現在の実装事実はコードとテストを正本とする。
 
@@ -55,49 +53,42 @@ ChatGPT や他のエージェントの過去の発言だけを、確定仕様ま
 * 既存のコードで既に定義されている型名、モジュール名、関数名、crate 名その他のコード上の識別子は、この方針の対象外とし、既存の英名を日本語へ翻訳しない。
 * 新しいコード上の識別子そのものの命名については、既存コードおよび言語ごとの命名規則に従う。
 
-## bootstrap 設計の原則
+## 言語処理系の設計原則
 
-* 下位 stage は、完成された便利な言語ではなく、次の言語層を構築するための最小機構として評価する。
-* 高水準の便利さだけを理由に、下位 stage や bootstrap kernel を複雑化しない。
-* 複数 stage で primitive や意味論を不必要に二重実装しない。
-* parser と execution semantics を分離する。
-* primitive は source syntax を直接解釈しない。
-* stack effect で説明できるものは、可能な限り stack effect として定義する。
-* 下位機構へ上位構文固有の都合を安易に持ち込まない。
-* machine-level value は、特別扱いが不要なら通常の Cell として扱う方向を優先する。
-* 上位構文は、可能な限り下位 machine の既存 primitive / semantics へ変換できる形を優先する。
-* 未決定事項を実装上の都合だけで確定仕様にしない。
-* bootstrap 可能性、意味論の単純さ、移植可能性を、実装上の技巧より優先する。
+* 実装済みの言語仕様とターゲット資源契約を基点に、変更理由と影響を具体的なworkload・検証で説明する。
+* 高水準の便利さや自己拡張の一般的な魅力だけを理由に、コンパイラ・実行系を複雑化しない。
+* 既存の小さく直交した機構・通常手続き・primitiveの組合せで要件を満たせるなら、新しい言語機構を優先しない。
+* parser / source reader と execution semantics を分離する。primitiveはsource syntaxを直接解釈しない。
+* stack effectで説明できるものは可能な限りその形で定義し、実行時値とコンパイル用状態の所有主体を区別する。
+* machine-level valueは特別扱いを要しないなら通常のCellとして扱う。
+* Rust参照実装と6502コンパイラで可搬な意味論を共有する一方、OSやUART等に依存するI/Oはtarget-private adapterへ置く。
+* early binding、完成後公開、OwnerDiscard、WholeProgramCompileRun、stack safety等の現行契約は独立ADRに従い維持する。
+* 未決事項や新しい機構を実装上の都合だけで確定仕様にしない。小型CPUへの移植可能性と既存workloadの継続動作を、実装技巧より優先する。
+* 自己ホストや段階的bootstrapを将来検討する場合は、現行VTLXXへの必須機構追加とせず、具体用途に基づく独立Research/ADRで評価する。
 
-これらは長期的な設計原則であり、具体的な stage 構成、primitive 集合、memory model、dictionary、control flow 等の現在の仕様をこの文書だけから推測してはならない。
+## 新機構の設計・レビュー時の判断基準
 
-## 下位 stage の設計・レビュー時の判断基準
+コンパイラ・実行系へ新しい機構を追加・維持する必要性を検討するときは、少なくとも次を確認する。
 
-下位 stage へ新しい機構を追加・維持する必要性を検討するときは、少なくとも次を確認する。
-
-* 次の言語層を構築するために本当に必要か。
+* 実在するプログラムやターゲット制約から必要性があるか。
 * より小さい機構で代替できないか。
-* 既存 primitive や user-defined word 等で代替できないか。
-* parser 側または上位 stage へ置けないか。
-* C / assembly でも自然に表現できるか。
-* stack effect と machine state の変化で意味を説明できるか。
+* 既存のprimitiveや通常のユーザー定義手続きで代替できないか。
+* parser、source reader、target-private adapterのどこが責務を持つべきか。
+* C / assembly / NMOS 6502でも自然に表現・検証できるか。
+* stack effect、machine state、失敗時の状態契約として説明できるか。
 
-syntax-specific な専用機構を追加する前に、既存の小さく直交した機構の合成で表現できないか確認する。
-
-特定用途向け primitive や下位 stage の専用機構を追加する場合は、既存 primitive、user-defined word、parser 側の処理、上位 stage の機構等の組み合わせでは十分に表現できない理由を、issue / ADR / PR のいずれかに明記する。
-
-「便利である」「Rust では実装しやすい」「一般的な言語処理系ではよく使われる」ことだけを、下位 stage へ機構を置く根拠にしない。
+言語やcompilerに特別な専用機構を導入する際は、既存機構では不十分な具体的根拠をissue/ADR/PRのいずれかに明記する。「便利である」「Rustでは実装しやすい」「一般的にはよく使われる」ことだけを採用理由にしない。
 
 ## 実装上のガードレール
 
 issue または採用済み ADR に根拠がない限り、次のような変更を先回りして導入しない。
 
 * 高度な trait hierarchy や generic abstraction
-* AST 中心の下位 stage 設計
+* 小型ターゲットでの必要性・資源上限を確認しない AST 中心の再設計
 * GC、arena その他の複雑な memory management
-* 長い識別子や高水準構文のための下位機構
+* 現行仕様を超える識別子や高水準構文を見越した、実用途のない専用機構
 * parser と primitive の直接結合
-* stage ごとに別実装された同一 semantics
+* Rust と 6502 の言語意味論を別々の仕様として再定義すること
 
 具体的な型構成、関数分割、内部 API のうち、意味論・責務分担・公開境界・後続実装へ影響しない局所的な物理詳細は実装者に委ねる。
 
@@ -124,7 +115,7 @@ issue または採用済み ADR に根拠がない限り、次のような変更
 * data stack / return stack の役割
 * 副作用順序
 * error 時の machine state
-* stage 間で共有する semantics
+* Rust と 6502 で共通にする言語意味論
 
 既存 ADR または仕様から一意に導けない重要な設計判断が必要になった場合は、その場で確定せず、調査・検討 issue または ADR issue へ分離する。
 
@@ -136,7 +127,7 @@ issue は、次の種別を明記する。
 
 * **Tracker / マイルストーン**: 開発段階を管理し、目的、対象範囲、子 issue、依存関係、完了条件を整理する。
 * **調査・検討**: 現状確認、選択肢比較、必要条件整理、検証、ADR の判断材料作成を行う。
-* **ADR**: 言語仕様、bootstrap 構造、VM semantics その他の重要な設計判断を記録する。
+* **ADR**: 言語仕様、実行意味論、ターゲット共通の契約その他の重要な設計判断を記録する。
 * **実装**: 採用済み仕様または ADR に基づきコード、テスト、文書等を変更する。
 
 原則として次の順で進める。
@@ -217,7 +208,7 @@ Issue本文の役割を「判断・調査の記録」と「現在有効な作業
 3. 決定内容
 4. 採用理由
 5. 代替案
-6. stage 間構造と bootstrap への影響
+6. 現行言語仕様・既存実装・ターゲット資源への影響（該当する範囲）
 7. 意味論上の不変条件
 8. 実装・移行方針
 9. 関連 Tracker・issue・ADR
