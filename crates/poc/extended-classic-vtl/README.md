@@ -501,17 +501,19 @@ Rust reference と actual 6502 frontend の両方でこの構文を使います�
 
 ## Source-defined 手続き
 
-user-defined Write binding は、利用者向けには「手続き」と呼びます。
-
-現在の surface は:
+user-defined Write binding は、利用者向けには「手続き」と呼びます。通常の手続きは `&=name [ ... ]` で定義し、`name=RHS` または `name=()` で呼びます。例えば、次のように複数文字名を使用できます。
 
 ```vtl
-  &=p [
-    ; procedure body
+  &=showval [
+    ?=~
   ]
+
+  showval=42
 ```
 
-Rust reference では通常手続きの名前は ASCII 小文字 1〜8 文字（`[a-z]{1,8}`）です。完全な名前で区別し、例えば `a` と `ab` は別の手続きです。手続きテンプレートの名前は引き続き 1 文字で、通常手続きと完全に同じ名前は併用できません。6502 実装も同じ名前構文に対応し、通常手続きは最大64件です。
+通常の手続き名は Rust reference と 6502 の両方で **ASCII 小文字 1〜8 文字**（`[a-z]{1,8}`）です。1文字名も有効で、`a` と `ab`、`read` と `reader` は別名として扱います。空名、大文字、数字、underscore、9文字以上の名前は使用できません。名前の伸長は通常の user-defined Write に限られ、A-Z register、組み込み語、`.NAME` 名前付き整数の構文は変わりません。
+
+**手続きの定義件数は名前長とは別の制限**です。Rust reference は通常手続きに人為的な64件上限を設けず、6502初期targetは通常手続きの定義を最大64件まで受け付けます。ただしarena等の別の資源上限により、64件の定義が常に成功する保証はありません。65件目の定義ではコンパイルに失敗し、6502では生成された runtime を実行しません。テンプレート用の名前空間は採用ADR [#528](https://github.com/kkismd/vtlxx/issues/528) により廃止されています。
 
 例:
 
@@ -546,9 +548,15 @@ callee が stack input を要求する場合、zero-operand call でも existing
 
 ### Definition order
 
-source から procedure を公開するとき、call site は source-processing 時に binding を解決します。未定義 procedure の将来定義を runtime で再検索する仕組みはありません。
+source から procedure を公開するときは、本文のコンパイルと完成が成功してから binding に登録します。call site は source-processing 時に完全名を解決し、解決済みの呼出先を使用します。runtime で名前を再検索する仕組みはありません。同一完全名の再定義、未定義呼出、呼出先が後に定義される forward call はコンパイルエラーです。
 
-依存する procedure は、原則として callee を先に定義してください。
+依存する procedure は、callee を先に定義してください。コンパイル失敗で未完成の手続きは公開されず、既に完成した手続きの binding は維持されます。
+
+### 長い通常手続名の現行サンプル
+
+手続き数が多い例では、役割が分かる名前を使っています。[`micro_trek.vtl`](examples/micro_trek.vtl) は `random`、`longscan`、`gameend` など23手続、[`1024.vtl`](examples/1024.vtl) は `newtile`、`movegrid`、`gameloop` など9手続を定義しています。[`eight_queens.vtl`](examples/eight_queens.vtl) と [`eight_queens_storage.vtl`](examples/eight_queens_storage.vtl) は `collide`、`printsol`、`search` など、[`maze_dfs.vtl`](examples/maze_dfs.vtl) は `visit`、`pushpath`、`showlen` などを使います。
+
+小規模な [`rpn_evaluator.vtl`](examples/rpn_evaluator.vtl) のように、短い1文字の通常手続名を残すことも有効です。通常Writeの長名・失敗時の意味論は [`tests/long_write_names.rs`](tests/long_write_names.rs)、6502の件数上限と複数chunkの実行順序は [`tests/sim65_long_write_names.rs`](tests/sim65_long_write_names.rs) で検証しています。
 
 ## Source role の用語
 
