@@ -14,7 +14,7 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 -- --ignored
 
 `runtime/state.s`、`runtime/arithmetic.s`、`runtime/primitives.s` は第一6502 proof profile の実行状態と primitive を実装する。後続の native emitter は `rt_init` を一度呼び、その後に以下の entry point を JSR で呼ぶ。いずれも target 内の link contract であり、portable ECVTL API ではない。
 
-sim65 では、全 source の compile と driver 完成の後に `rt_init` へ移るため、compile 専用 Zero Page scratch と runtime 状態を `target/zp_layout.s` の同じ 111 B に配置する。driver entry、frontend/backend の結果 status、および両フェーズで使う cc65 library の領域は共有しない。compile failure は runtime 開始前に戻る。runtime から新たな source compile へ戻る経路はない。
+sim65 では、全 source の compile と driver 完成の後に `rt_init` へ移るため、compile 専用 Zero Page scratch と runtime 状態を `target/zp_layout.s` の同じ **100 B**（`zp_phase`）に時間的に重ねて配置する。compile view は offset `0..79`、runtime view は `0..99` を使用する。driver entry、frontend/backend の結果 status、および両フェーズで使う cc65 library の領域は別予約であり、この100 Bに含めない。compile failure は runtime 開始前に戻る。runtime から新たな source compile へ戻る経路はない。
 
 | entry | 入力 | value stack effect |
 | --- | --- | --- |
@@ -42,12 +42,14 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_runtime -- --ignored
 
 `compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 24,576 B のコード専用 arena、binding、owner を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。compiler の失敗は `cc_status` に保持し、後続の compile-run driver が runtime を開始せず HALT する。
 
+`compiler/arena.s` は生成コード専用の24,576 B arenaと、arena全域のbyte位置を追跡する`patch_bits`・`completed_bits`（各3,072 B）を保持する。手続テンプレートのsource保存領域や仮想readerは廃止済みであり、通常のsource frameは`frontend/source.s`が読み取る。コードの予約・patch・owner完成と、完成済みbindingのみ公開する順序は維持する。
+
 target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_is_bound`、`cc_publish`、`cc_resolve` は `cc_name_len` と `cc_name` に入れた ASCII 小文字1〜8文字の通常 Write 名を取る。`cc_is_bound` は bound なら carry set、unbound なら carry clear を返し、有効な問い合わせでは `cc_status` と binding table を変更しない。`cc_publish` は `cc_arg`=completed target を取り、`cc_resolve` は完全名から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
 
 | 操作 | 役割 |
 | --- | --- |
 | `cc_mark`、`cc_emit_byte`、`cc_emit_u16`、`cc_patch` | append と既存 operand の little-endian patch |
-| `cc_push_const`、`cc_call`、`cc_return`、`cc_jump`、`cc_jz` | fixed native template |
+| `cc_push_const`、`cc_call`、`cc_return`、`cc_jump`、`cc_jz` | 固定のnative命令列を生成（廃止された手続テンプレートとは別） |
 | `cc_load_reg`、`cc_store_reg` | X = register index 0..25 を受け取り、index setup と register helper call を backend で emit |
 | `cc_jump_placeholder`、`cc_jz_placeholder`、`cc_patch_here`、`cc_jump_to` | absolute target の後方 patch と直接 jump |
 | `cc_begin_owner`、`cc_complete_owner` | owner の開始、未解決参照の検証、final RTS、completed target |
@@ -55,7 +57,7 @@ target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は
 
 `cc_status = 0` は成功。非ゼロは compile-run failure で、1 arena full、2 invalid patch、3 owner misuse、4 duplicate label、5 label full、6 fixup full、7 unresolved reference、8 binding error。失敗後の継続は契約に含めない。placeholder は patch 完了まで追跡し、未解決のまま owner を完了できない。完了済み owner の bytes は patch できない。binding には完了済み owner の entry だけを登録できる。
 
-JZ template が呼ぶ `rt_pop_condition` は runtime value stack の top Cell を 1 つ consume し、0 の場合に zero flag を立てる target 内 helper。source control の解釈は持たない。
+JZ用の生成命令列が呼ぶ `rt_pop_condition` は runtime value stack の top Cell を 1 つ consume し、0 の場合に zero flag を立てる target 内 helper。source control の解釈は持たない。
 
 ```sh
 cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_backend -- --ignored
@@ -73,6 +75,8 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_6502 truncated_source_
 ## Basic source frontend（#276 / #293 / #301 / #304）
 
 `frontend/basic.s` は `fe_init` / `fe_next` の 1 byte 先読みだけで source を読み、top-level runtime code を ownerごとの completed chunk にする。top-level の `&=p [ ... ]` は ASCII 小文字1〜8文字の Write definitionを開始する。既存 bindingを body owner開始前に `cc_is_bound` で調べ、既に定義済みなら拒否する。未定義なら現在のchunkを完了し、required blockを新しい named ownerへcompileし、owner completion成功後にだけ `cc_publish` する。definition owner自体はruntime sequenceへ含めない。block内の label / IF / While は named ownerへinline compileされる。EOF後に最大65個の chunk targetをsource順に直接callする final driver ownerを完成し、そのtargetだけをruntime entryとして実行する。chunk table容量はfrontend所有のcompile-only資源であり、超過は frontend の compile-run failureにする。したがってcompile failureでは、先に完成したchunkがあってもruntimeを開始しない。`p=...` は compile時に `cc_resolve` したtargetへの直接callとなり、`p=()` は operandなしのcallとなる。両方ともWriteの共有value stackを使う。`fe_compile_run` は成功時 carry clear、compile 失敗時 carry setで返し、`fe_compile_status` は source/transport = 1、syntax = 2、literal range = 3、compile/backend resource = 4を示す。source frameの終端以降はreaderを呼ばず、残りのserial bytesはruntime inputとして保持する。
+
+IfElseの分岐先パッチとWhileの出口パッチ・ループ先頭は、`frontend/basic.s`の構造化された入れ子深さに対応する2つのprivateな16要素テーブルに保持する。旧`compiler/work_stack.s`と`cc_work_*`は[#524 / PR #537](https://github.com/kkismd/vtlxx/pull/537)で撤去済みであり、汎用source work stackは使用しない。`frontend/source.s`はsource frameの有界readerとして引き続き使用する。
 
 ### 通常Writeの名前と定義件数（EC10 #453）
 
@@ -98,7 +102,24 @@ cargo test -p vtlxx-poc-extended-classic-vtl --test sim65_frontend -- --ignored
 
 crate root の `ecvtl6502` host binaryが source/runtime inputをraw bytesで読み、source lengthをu16 LEで検証・framingする。`ca65` / `ld65` は argvで起動し、対象source、既存runtime/frontend/compiler、CLI entry、`sim65_adapter.s` を組み立てて `sim6502.lib` と linkする。生成programは4,000,000 cycle limit付きでsim65へ渡す。一時directoryは各実行で新規作成し、終了時に削除する。
 
-## Micro TREK の sim65 E2E と資源 (#513)
+## 現行の6502資源構成
+
+現在のsim65用コンパイラは、生成コードだけを保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。現在のpatch追跡・完成済み位置のbitsetは各3,072 Bで、ownerの完成・公開とコード境界の検査を維持している。
+
+最新の正式sim65 CLIの静的リンク計測（[#524 / PR #537](https://github.com/kkismd/vtlxx/pull/537)、`ca65`/`ld65`のmap）:
+
+| 領域 | 計測値 |
+| --- | ---: |
+| ZEROPAGE | 132 B |
+| BSS | 34,903 B |
+| CODE | 6,145 B |
+| RODATA | 49 B |
+
+共有ZPの`zp_phase`は100 B予約で、compile viewは80 B、runtime viewは100 Bを使用する。driver entry、compiler/frontend status、cc65共通ZPは別領域である。この表は**PR #537時点の静的配置**であって、portable ABIや全入力の上界ではない。動的CPU hardware stackの高水位、IRQ/NMIを含む実機安全性、compile/runtime別cyclesを実測したものでもない。実際の配置は最新のlink mapとコードを正本とする。
+
+## 過去の計測記録: Micro TREK の sim65 E2E と資源（#513）
+
+この節のアドレス、領域、cycles、stackに関する記述は **#513で計測した当時の構成を保存する歴史的記録** である。現在のarenaはコード専用で、汎用work stackはすでに削除されている。以下のテストや測定スクリプトを最新`main`で実行しても、当時の配置やcyclesが再現されるとは限らない。現行の値は上節と最新の実装・計測PRを参照する。
 
 基準 main `07350a863c450529d098fbd5f2bf896deb9d00cf`、Ubuntu cc65 package 2.19-1 の ca65/ld65/sim65 V2.18 で測定。正本 `examples/micro_trek.vtl` を変更せず固定 seed 0 で使う。以下は repository root から実行する。
 
@@ -116,4 +137,3 @@ E2E は Rust 側の 5 テストに対応する 7 入力系列を raw stdout/stde
 
 動的 CPU S、value/work stack、cc65 software SP の最大使用量は本測定では未計測で、全経路の動的安全性は未証明。静的非重複はその証明ではない。compile guard は S < 25 を検出するが runtime や IRQ/NMI に適用しない。この測定時点の共有 arena と template 専用テストは #528 によって廃止された。現行の code-only arena と owner の検証は `sim65_backend` を参照。EC09 #463 の完了判定には、未測定の stack と相別 cycles、および実 CLI 勝利未到達を含めて評価が必要。
 
-正式 sim65 CLI の link map（#524）では ZEROPAGE 132 B、BSS 34,903 B、CODE 6,145 B、RODATA 49 B。compile view は共有 ZP の offset 0..79、runtime view は 0..99 を使い、予約は 100 B のまま。両 status と entry、cc65 用領域は別に確保する。
