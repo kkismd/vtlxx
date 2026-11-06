@@ -9,7 +9,6 @@
 .import cc_define_label, cc_label_jump
 .import cc_name_len, cc_name
 .import cc_arena
-.import cc_work_push, cc_work_pop, cc_work_swap, cc_work_reset
 .import rt_init, rt_print_number, rt_print_char, rt_push
 .import serial_out, halt
 .importzp cc_status, cc_arg, cc_cursor, cc_pending_count, rt_depth
@@ -445,49 +444,6 @@ _main:
     bne @fixups
     WORD 7
     jsr cc_label_jump
-    ERROR
-.elseif TEST_CASE = 14
-    lda #0
-    sta counter
-@push:
-    lda counter
-    ldx #$a5
-    jsr cc_work_push
-    OK
-    inc counter
-    lda counter
-    cmp #16
-    bne @push
-    WORD $ffff
-    jsr cc_work_push
-    ERROR
-    jsr cc_init
-    jsr cc_work_reset
-    WORD $1234
-    jsr cc_work_push
-    WORD $5678
-    jsr cc_work_push
-    jsr cc_work_swap
-    OK
-    jsr cc_work_pop
-    cmp #$34
-    beq :+
-    jmp bad
-:
-    cpx #$12
-    beq :+
-    jmp bad
-:
-    jsr cc_work_pop
-    cmp #$78
-    beq :+
-    jmp bad
-:
-    cpx #$56
-    beq :+
-    jmp bad
-:
-    jsr cc_work_pop
     ERROR
 .elseif TEST_CASE = 15
     ; Manual placeholders are also unresolved owner work until patched.

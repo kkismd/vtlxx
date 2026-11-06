@@ -9,7 +9,6 @@
 .import cc_define_label, cc_label_jump
 .import cc_mark, cc_jz_placeholder, cc_jump_placeholder, cc_patch_here
 .import cc_jump_to
-.import cc_work_push, cc_work_pop
 .import cc_is_bound, cc_publish, cc_resolve
 .import cc_name, cc_name_len
 .import cc_push_const, cc_call, cc_load_reg, cc_store_reg
@@ -43,8 +42,6 @@ look_byte = zp_phase + 1
 target_index = zp_phase + 11
 nesting = zp_phase + 12
 structured_depth = zp_phase + 13
-while_depth = zp_phase + 14
-while_slot = zp_phase + 15
 while_offset = zp_phase + 16
 patch_scratch = zp_phase + 17
 while_word = zp_phase + 19
@@ -74,7 +71,7 @@ operator_high:  .byte >rt_add,>rt_sub,>rt_mul,>rt_div,>rt_rem,>rt_lt,>rt_gt
 constant_name: .res 16
 constant_table: .res 128*19 ; 16-byte NUL-terminated name + signed i16
 while_loop_targets: .res 16*2
-while_exit_patches: .res 16*2
+structured_patches: .res 16*2
 top_level_chunk_targets: .res 65*2
 definition_name: .res 8
 definition_length: .res 1
@@ -89,7 +86,6 @@ fe_compile_run:
     sta look_state
     sta nesting
     sta structured_depth
-    sta while_depth
     sta chunk_count
     sta constant_count
     jsr fe_init
@@ -658,9 +654,18 @@ statement:
     lda fe_compile_status
     jne @conditional_done
     jsr cc_jz_placeholder
-    jsr cc_work_push
+    sta patch_scratch
+    stx patch_scratch+1
     lda cc_status
     jne backend_error
+    lda structured_depth
+    asl a
+    tay
+    lda patch_scratch
+    sta structured_patches,y
+    iny
+    lda patch_scratch+1
+    sta structured_patches,y
     jsr required_block
     lda fe_compile_status
     bne @conditional_done
@@ -673,16 +678,28 @@ statement:
     lda look_byte
     cmp #'['
     bne @one_arm
-    ; Keep this IF's work-stack depth constant while replacing false with end.
-    jsr cc_work_pop
+    ; Replace the false patch with the end patch in this depth's frame.
+    lda structured_depth
+    asl a
+    tay
+    lda structured_patches,y
     sta patch_scratch
-    stx patch_scratch+1
-    lda cc_status
-    jne backend_error
+    iny
+    lda structured_patches,y
+    sta patch_scratch+1
     jsr cc_jump_placeholder
-    jsr cc_work_push
+    sta while_word
+    stx while_word+1
     lda cc_status
     jne backend_error
+    lda structured_depth
+    asl a
+    tay
+    lda while_word
+    sta structured_patches,y
+    iny
+    lda while_word+1
+    sta structured_patches,y
     lda patch_scratch
     ldx patch_scratch+1
     jsr cc_patch_here
@@ -691,13 +708,16 @@ statement:
     jsr required_block
     lda fe_compile_status
     bne @conditional_done
-    jsr cc_work_pop
-    jsr cc_patch_here
-    lda cc_status
-    jne backend_error
-    rts
 @one_arm:
-    jsr cc_work_pop
+    lda structured_depth
+    asl a
+    tay
+    lda structured_patches,y
+    sta patch_scratch
+    iny
+    lda structured_patches,y
+    tax
+    lda patch_scratch
     jsr cc_patch_here
     lda cc_status
     jne backend_error
@@ -709,12 +729,9 @@ statement:
 @while:
     ; Compile one ordinary RHS condition at the loop target. The generated
     ; condition code then runs again after each body jump.
-    lda while_depth
+    lda structured_depth
     cmp #16
     jcs syntax_error
-    lda while_depth
-    sta while_slot
-    inc while_depth
 
     ; Mark before emitting the condition so every iteration starts there.
     jsr cc_mark
@@ -722,9 +739,7 @@ statement:
     stx while_word+1
     lda cc_status
     jne @while_backend
-    lda while_depth
-    sec
-    sbc #1
+    lda structured_depth
     asl a
     tay
     lda while_word
@@ -766,16 +781,14 @@ statement:
     stx while_word+1
     lda cc_status
     jne @while_backend
-    lda while_depth
-    sec
-    sbc #1
+    lda structured_depth
     asl a
     tay
     lda while_word
-    sta while_exit_patches,y
+    sta structured_patches,y
     iny
     lda while_word+1
-    sta while_exit_patches,y
+    sta structured_patches,y
 
     ; The body is one required block. Recompute the frame after nested source
     ; compilation, which may overwrite shared scratch and frame indexes.
@@ -784,9 +797,7 @@ statement:
     bne @while_done
     lda cc_status
     jne @while_backend
-    lda while_depth
-    sec
-    sbc #1
+    lda structured_depth
     asl a
     sta while_offset
     tay
@@ -800,16 +811,15 @@ statement:
     lda cc_status
     jne @while_backend
     ldy while_offset
-    lda while_exit_patches,y
+    lda structured_patches,y
     sta while_word
     iny
-    lda while_exit_patches,y
+    lda structured_patches,y
     tax
     lda while_word
     jsr cc_patch_here
     lda cc_status
     jne @while_backend
-    dec while_depth
     rts
 @while_syntax:
     jmp syntax_error
