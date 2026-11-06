@@ -168,7 +168,7 @@ fn cell_centering_and_score_rendering() {
 
 #[test]
 fn initial_cli_stdout_is_exact() {
-    let output = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/1024.vtl"))
         .stdin(Stdio::null())
         .output()

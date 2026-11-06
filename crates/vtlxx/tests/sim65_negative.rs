@@ -112,7 +112,7 @@ fn run_probe(executable: &Path, source: &[u8]) -> Output {
 fn cli(temp: &TestDir, name: &str, source: &[u8]) -> Output {
     let path = temp.0.join(format!("{name}.vtl"));
     fs::write(&path, source).unwrap();
-    Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+    Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
         .arg(path)
         .args(["--cycle-limit", CYCLE_LIMIT])
         .output()

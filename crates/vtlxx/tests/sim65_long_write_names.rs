@@ -27,7 +27,7 @@ impl Drop for SourceFile {
 
 fn run(source: &str) -> Output {
     let source = SourceFile::new(source);
-    Command::new(env!("CARGO_BIN_EXE_ecvtl6502"))
+    Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
         .arg(&source.0)
         .args(["--cycle-limit", "200000000"])
         .output()

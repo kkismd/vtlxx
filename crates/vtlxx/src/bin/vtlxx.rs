@@ -11,9 +11,9 @@ enum CliError {
 impl fmt::Display for CliError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Usage => write!(f, "usage: ecvtl <source-file>"),
+            Self::Usage => write!(f, "usage: vtlxx <source-file>"),
             Self::Input(error) => write!(f, "cannot read source file: {error}"),
-            Self::Source(error) => write!(f, "ECVTL error: {error:?}"),
+            Self::Source(error) => write!(f, "VTLXX error: {error:?}"),
         }
     }
 }

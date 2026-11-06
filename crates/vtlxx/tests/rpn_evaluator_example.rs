@@ -43,7 +43,7 @@ fn evaluator_preserves_a_callers_older_stack_value() {
 #[test]
 fn rpn_example_runs_from_cli() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/rpn_evaluator.vtl");
-    let output = Command::new(env!("CARGO_BIN_EXE_ecvtl"))
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
         .arg(path)
         .output()
         .unwrap();

@@ -1,6 +1,6 @@
-# 6502 target PoC
+# VTLXX 6502 ターゲット
 
-このディレクトリは EC07 の sim6502 固有コードを置く。`target/sim65_adapter.s` が byte と EOF を carry flag で区別する `serial_in`、1 byte の `serial_out`、8-bit status の `halt` を提供する。`serial_in` は A に任意の byte（`$ff` を含む）を返し carry clear、EOF は carry setで返す。A register を受け渡しに使う呼び出し規約と `sim6502.lib` への接続はこの target 内だけの取り決めであり、portable ECVTL runtime ABI ではない。
+このディレクトリは VTLXX の sim65 固有コードを置く。`target/sim65_adapter.s` が byte と EOF を carry flag で区別する `serial_in`、1 byte の `serial_out`、8-bit status の `halt` を提供する。`serial_in` は A に任意の byte（`$ff` を含む）を返し carry clear、EOF は carry setで返す。A register を受け渡しに使う呼び出し規約と `sim6502.lib` への接続はこの target 内だけの取り決めであり、portable VTLXX runtime ABI ではない。
 
 host 側の `tests/sim65_6502.rs` が `ca65 -t sim6502`、`ld65 -t sim6502`、`sim65 -x` を起動する。生成物は OS の一時ディレクトリに作られ、テスト終了時に削除される。
 
@@ -12,7 +12,7 @@ cargo test -p vtlxx --test sim65_6502 -- --ignored
 
 ## Runtime helper（#274）
 
-`runtime/state.s`、`runtime/arithmetic.s`、`runtime/primitives.s` は第一6502 proof profile の実行状態と primitive を実装する。後続の native emitter は `rt_init` を一度呼び、その後に以下の entry point を JSR で呼ぶ。いずれも target 内の link contract であり、portable ECVTL API ではない。
+`runtime/state.s`、`runtime/arithmetic.s`、`runtime/primitives.s` は現在の6502 target の実行状態と primitive を実装する。native emitter は `rt_init` を一度呼び、その後に以下の entry point を JSR で呼ぶ。いずれも target 内の link contract であり、portable VTLXX API ではない。
 
 sim65 では、全 source の compile と driver 完成の後に `rt_init` へ移るため、compile 専用 Zero Page scratch と runtime 状態を `target/zp_layout.s` の同じ **100 B**（`zp_phase`）に時間的に重ねて配置する。compile view は offset `0..79`、runtime view は `0..99` を使用する。driver entry、frontend/backend の結果 status、および両フェーズで使う cc65 library の領域は別予約であり、この100 Bに含めない。compile failure は runtime 開始前に戻る。runtime から新たな source compile へ戻る経路はない。
 
@@ -100,7 +100,7 @@ cargo test -p vtlxx --test sim65_frontend -- --ignored
 
 `target/sim65_cli.s` は CLI 専用entryで、`_main` から `fe_compile_run` を一度呼ぶ。compile成功時は既にfrontendが実行したruntimeの後で `halt(0)` し、compile error時は `fe_compile_status` を `$80` と OR したtarget statusで終了する。test probe用entryとは分離し、追加serial readやsentinel出力を行わない。
 
-crate root の `ecvtl6502` host binaryが source/runtime inputをraw bytesで読み、source lengthをu16 LEで検証・framingする。`ca65` / `ld65` は argvで起動し、対象source、既存runtime/frontend/compiler、CLI entry、`sim65_adapter.s` を組み立てて `sim6502.lib` と linkする。生成programは4,000,000 cycle limit付きでsim65へ渡す。一時directoryは各実行で新規作成し、終了時に削除する。
+crate root の `vtlxx6502` host binaryが source/runtime inputをraw bytesで読み、source lengthをu16 LEで検証・framingする。`ca65` / `ld65` は argvで起動し、対象source、既存runtime/frontend/compiler、CLI entry、`sim65_adapter.s` を組み立てて `sim6502.lib` と linkする。生成programは4,000,000 cycle limit付きでsim65へ渡す。一時directoryは各実行で新規作成し、終了時に削除する。
 
 ## 現行の6502資源構成
 
