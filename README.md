@@ -7,8 +7,8 @@ Rust の参照実装と actual NMOS 6502 向けネイティブコンパイラが
 ## 読み始める場所
 
 - repository で設計・実装・テスト・レビューを行うときの共通ルールは [`AGENTS.md`](AGENTS.md) を確認してください。
-- VTLXX の現行 source surface、実行方法、記述例、formatting rule は [実用 README](crates/poc/extended-classic-vtl/README.md) を参照してください。
-- **移行中の物理名称**: crate は `vtlxx-poc-extended-classic-vtl`、Rust CLI は `ecvtl`、6502 CLI は `ecvtl6502` です。正式名称に合わせた crate/path/CLI の改名は [移行 Tracker #541](https://github.com/kkismd/vtlxx/issues/541) の後続 issue で行います。現時点の実行コマンドは実用 README に従ってください。
+- VTLXX の現行 source surface、実行方法、記述例、formatting rule は [実用 README](crates/vtlxx/README.md) を参照してください。
+- **現在の実装名**: Rust package は `vtlxx`、path は `crates/vtlxx/`、Rust CLI は `ecvtl`、6502 CLI は `ecvtl6502` です。実行コマンドは実用 README に従ってください。CLI名の移行は [移行 Tracker #541](https://github.com/kkismd/vtlxx/issues/541) の後続 issue で扱います。
 - 現在の開発段階、対象範囲、進捗は対応する GitHub Tracker / マイルストーン issue を確認してください。名称・開発方針の変更は [ADR #540](https://github.com/kkismd/vtlxx/issues/540) を正本とします。
 - 重要な個別言語設計は従来ECVTLの現在有効な採用済みADR、現在の実装事実はコードとテストを正本とします。
 
