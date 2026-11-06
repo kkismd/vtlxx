@@ -6,6 +6,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+#[path = "common/removed_templates.rs"]
+mod removed_templates;
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 type RuntimeInputCase = (&'static str, &'static [u8], &'static [u8], &'static [u8]);
 
@@ -187,14 +190,8 @@ fn runtime_input_primary_read_matches_waiting_input_semantics() {
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn removed_template_syntax_fails_before_runtime() {
     let temp = TestDir::new();
-    for (index, source) in [
-        "?=42 &=a{} [ {}=1 ] ?=99",
-        "?=42 a{A}=() ?=99",
-        "?=42 a{A}=7 ?=99",
-    ]
-    .iter()
-    .enumerate()
-    {
+    for (index, form) in removed_templates::FORMS.iter().enumerate() {
+        let source = format!("?=42 {form} ?=99");
         let result = run_program_with_input(
             &temp,
             &format!("removed-template-{index}"),
