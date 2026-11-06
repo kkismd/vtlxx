@@ -1,8 +1,8 @@
-# Extended Classic VTL (ECVTL) PoC
+# VTLXX（旧称 Extended Classic VTL / ECVTL）
 
-Extended Classic VTL (ECVTL) は、classic VTL の小さい表面構文を保ちながら、value stack、source-defined procedure、自己拡張可能な source role などを検証するための PoC です。
+VTLXX は、classic VTL の簡潔な表面構文を発展させ、値スタック、通常のユーザー定義手続き、IfElse / While、Rust参照実装と実際の6502ネイティブコンパイラを備える実験的な言語処理系です。
 
-この crate は VTLXX の最終言語仕様そのものではなく、意味論と bootstrap 構造を検証する reference implementation / executable specification です。
+このcrateは、従来ECVTLと呼んでいた**現在の正式なVTLXX実装**です（[採用ADR #540](https://github.com/kkismd/vtlxx/issues/540)）。M01は廃番であり、段階的自己ホストやSourceProcedureの自己拡張を必須要件としません。移行中の物理crate名 `vtlxx-poc-extended-classic-vtl`、path `crates/poc/extended-classic-vtl/`、CLI名 `ecvtl`/`ecvtl6502` は実装が改名されるまでの現行名称です（[移行Tracker #541](https://github.com/kkismd/vtlxx/issues/541)）。
 
 この README は、**現在の `main` で ECVTL source を読み書きする人間およびエージェント向けの実用入口**です。完全な言語仕様書ではありません。
 
@@ -52,7 +52,7 @@ cargo test --manifest-path crates/poc/extended-classic-vtl/Cargo.toml
 cargo test --workspace
 ```
 
-Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Read` を受け取ります。`$` の PrimaryRead は NUL を読み捨てて `1..255` または EOF の `-1` を返し、入力エラーは runtime error になります。入力位置は同じ Machine の手続きと top-level で共有されます。未設定時は空入力です。現時点の Rust CLI は stdin をこの入力へ接続していません（後続 #313）。
+Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Read` を受け取ります。`$` の PrimaryRead は NUL を読み捨てて `1..255` または EOF の `-1` を返し、入力エラーは runtime error になります。入力位置は同じ Machine の手続きと top-level で共有されます。未設定時は空入力です。現在のRust対話CLIは、runtime stdinをMachine入力へ接続し、stdoutを逐次出力します（#313）。
 
 ## NMOS 6502 PoC の手動実行
 
