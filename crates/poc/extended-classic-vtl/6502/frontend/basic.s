@@ -75,7 +75,7 @@ constant_name: .res 16
 constant_table: .res 128*19 ; 16-byte NUL-terminated name + signed i16
 while_loop_targets: .res 16*2
 while_exit_patches: .res 16*2
-top_level_chunk_targets: .res 91*2
+top_level_chunk_targets: .res 65*2
 definition_name: .res 8
 definition_length: .res 1
 
@@ -157,11 +157,10 @@ fe_start_chunk:
     rts
 
 ; Complete the active top-level chunk and retain only its completed u16 entry.
-; The fixed table supports 90 possible named owners plus the surrounding
-; source chunks before, between, and after their definitions.
+; Up to 64 Write definitions separate the source into at most 65 chunks.
 fe_finish_chunk:
     lda chunk_count
-    cmp #91
+    cmp #65
     bcc @capacity_available
     ; Chunk targets are frontend-owned compile state, not backend status.
     lda #4

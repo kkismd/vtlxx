@@ -113,3 +113,17 @@ fn sixty_four_definitions_and_deep_calls_succeed_but_sixty_five_fail() {
     success(&format!("{definitions} {}=()", name(63)), b"7");
     failure(&format!("{definitions} &={} [ ]", name(64)));
 }
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn sixty_five_top_level_chunks_run_in_source_order() {
+    let mut source = String::new();
+    let mut expected = Vec::new();
+    for i in 0..64 {
+        source.push_str(&format!("$={} &={} [ ] ", 65 + i % 26, name(i)));
+        expected.push(b'A' + (i % 26) as u8);
+    }
+    source.push_str("$=33");
+    expected.push(b'!');
+    success(&source, &expected);
+}
