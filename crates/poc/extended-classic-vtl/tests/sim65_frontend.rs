@@ -5,6 +5,9 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "common/removed_templates.rs"]
+mod removed_templates;
+
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 struct TempDir(PathBuf);
@@ -598,8 +601,8 @@ fn primary_read_compile_failure_does_not_start_runtime() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn removed_template_forms_fail_before_runtime() {
-    for source in ["?=9 &=a{} [ {}=1 ]", "?=9 a{A}=()", "?=9 a{A}=7"] {
-        expect(source, 2, b"");
+    for form in removed_templates::FORMS {
+        expect(&format!("?=9 {form} ?=99"), 2, b"");
     }
     expect("&=a [ ?=7 ] a=()", 0, b"7Z");
 }

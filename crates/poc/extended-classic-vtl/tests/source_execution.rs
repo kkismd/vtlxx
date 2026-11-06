@@ -1,5 +1,8 @@
 use vtlxx_poc_extended_classic_vtl::{CompileError, Machine, RuntimeError, SourceError};
 
+#[path = "common/removed_templates.rs"]
+mod removed_templates;
+
 #[test]
 fn named_integers_resolve_in_rhs_procedures_and_numeric_labels() {
     let mut machine = Machine::new();
@@ -165,7 +168,7 @@ fn dotted_constants_work_in_storage_control_and_procedures() {
 
 #[test]
 fn removed_template_forms_are_syntax_errors_in_all_source_contexts() {
-    for form in ["&=a{} [ B=1 ]", "a{A}=()", "a{A}=7"] {
+    for form in removed_templates::FORMS {
         for source in [
             format!("{form} B=9"),
             format!("&=q [ {form} B=9 ]"),
@@ -191,7 +194,7 @@ fn removed_template_forms_are_syntax_errors_in_all_source_contexts() {
 
 #[test]
 fn removed_template_forms_preserve_flushed_effects_and_completed_writes() {
-    for form in ["&=a{} [ B=1 ]", "a{A}=()", "a{A}=7"] {
+    for form in removed_templates::FORMS {
         let mut machine = Machine::new();
         let source = format!("A=7 ?=A &=p [ C=~ ] {form} B=9");
         assert_eq!(
