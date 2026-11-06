@@ -156,11 +156,61 @@ fn named_integer_namespace_is_one_execute_source_call() {
 }
 
 #[test]
-fn dotted_constants_work_in_storage_control_and_templates() {
+fn dotted_constants_work_in_storage_control_and_procedures() {
     let mut machine = Machine::new();
-    machine.execute_source(".ADDR:=5\n.LIMIT:=3\n.GAINA:=2\n.AB:=7\n&=t{} [ {}={}*.GAIN{} ] A=1 B=7 @=.ADDR,.AB C=@(.ADDR) %=B==.AB [ t{A}=() ] *=A<.LIMIT [ A=A+1 ]").unwrap();
+    machine.execute_source(".ADDR:=5\n.LIMIT:=3\n.GAINA:=2\n.AB:=7\n&=t [ A=A*.GAINA ] A=1 B=7 @=.ADDR,.AB C=@(.ADDR) %=B==.AB [ t=() ] *=A<.LIMIT [ A=A+1 ]").unwrap();
     assert_eq!(machine.register(0), Some(3));
     assert_eq!(machine.register(2), Some(7));
+}
+
+#[test]
+fn removed_template_forms_are_syntax_errors_in_all_source_contexts() {
+    for form in ["&=a{} [ B=1 ]", "a{A}=()", "a{A}=7"] {
+        for source in [
+            format!("{form} B=9"),
+            format!("&=q [ {form} B=9 ]"),
+            format!("%=1 [ {form} B=9 ] [ B=8 ]"),
+            format!("%=0 [ B=8 ] [ {form} B=9 ]"),
+            format!("*=0 [ {form} B=9 ]"),
+        ] {
+            let mut machine = Machine::new();
+            assert_eq!(
+                machine.execute_source(&source),
+                Err(SourceError::Compile(CompileError::Syntax)),
+                "{source}"
+            );
+            assert_eq!(machine.register(1), Some(0), "{source}");
+            assert_eq!(
+                machine.execute_source("q=()"),
+                Err(SourceError::Compile(CompileError::UndefinedBinding)),
+                "{source}"
+            );
+        }
+    }
+}
+
+#[test]
+fn removed_template_forms_preserve_flushed_effects_and_completed_writes() {
+    for form in ["&=a{} [ B=1 ]", "a{A}=()", "a{A}=7"] {
+        let mut machine = Machine::new();
+        let source = format!("A=7 ?=A &=p [ C=~ ] {form} B=9");
+        assert_eq!(
+            machine.execute_source(&source),
+            Err(SourceError::Compile(CompileError::Syntax)),
+            "{source}"
+        );
+        assert_eq!(machine.register(0), Some(7), "{source}");
+        assert_eq!(machine.register(1), Some(0), "{source}");
+        assert_eq!(machine.output(), b"7", "{source}");
+        machine.execute_source("p=12").unwrap();
+        assert_eq!(machine.register(2), Some(12), "{source}");
+        assert!(machine.stack().is_empty(), "{source}");
+        assert_eq!(
+            machine.execute_source("a=()"),
+            Err(SourceError::Compile(CompileError::UndefinedBinding)),
+            "{source}"
+        );
+    }
 }
 
 #[test]

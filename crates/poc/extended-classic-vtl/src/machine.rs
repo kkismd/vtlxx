@@ -10,7 +10,6 @@ use crate::{
     executable::{Executable, ExecutableBody, ExecutableId, Instruction, RuntimeError},
     primitive::Primitive,
     source::{SourceError, execute_source},
-    template::CompletedTemplate,
 };
 
 const REGISTER_COUNT: usize = 26;
@@ -28,7 +27,6 @@ pub struct Machine {
     pub(crate) value_stack: Vec<Cell>,
     executables: Vec<Executable>,
     bindings: Bindings,
-    templates: HashMap<char, CompletedTemplate>,
     long_writes: HashMap<String, ExecutableId>,
     builtins: Vec<(Primitive, ExecutableId)>,
     pub(crate) output: Vec<u8>,
@@ -55,7 +53,6 @@ impl Machine {
             value_stack: Vec::new(),
             executables: Vec::new(),
             bindings: Bindings::default(),
-            templates: HashMap::new(),
             long_writes: HashMap::new(),
             builtins: Vec::new(),
             output: Vec::new(),
@@ -209,32 +206,12 @@ impl Machine {
         role: SourceRole,
         body: CompletedBody,
     ) -> Result<ExecutableId, BindingError> {
-        if self.templates.contains_key(&identity) || self.resolve(identity, role).is_some() {
+        if self.resolve(identity, role).is_some() {
             return Err(BindingError::AlreadyBound);
         }
         let id = self.install_completed(body);
         self.bindings.bind_initial(identity, role, id)?;
         Ok(id)
-    }
-
-    pub(crate) fn template(&self, identity: char) -> Option<&CompletedTemplate> {
-        self.templates.get(&identity)
-    }
-
-    pub(crate) fn ensure_template_name_available(&self, identity: char) -> bool {
-        !self.templates.contains_key(&identity) && !self.bindings.has_identity(identity)
-    }
-
-    pub(crate) fn publish_template(
-        &mut self,
-        identity: char,
-        completed: CompletedTemplate,
-    ) -> Result<(), ()> {
-        if !self.ensure_template_name_available(identity) {
-            return Err(());
-        }
-        self.templates.insert(identity, completed);
-        Ok(())
     }
 
     fn seed(&mut self, primitive: Primitive, binding: Option<(char, SourceRole)>) {

@@ -84,21 +84,17 @@ fn completed_long_names_survive_failures_and_stay_machine_local() {
 }
 
 #[test]
-fn template_and_normal_names_use_complete_name_for_collisions() {
+fn normal_names_use_complete_name_for_collisions() {
     for source in [
-        "&=a{} [ {}=1 ] &=ab [ B=2 ] a{A}=() ab=()",
-        "&=ab [ B=2 ] &=a{} [ {}=1 ] a{A}=() ab=()",
+        "&=a [ A=1 ] &=ab [ B=2 ] a=() ab=()",
+        "&=ab [ B=2 ] &=a [ A=1 ] a=() ab=()",
     ] {
         let mut machine = Machine::new();
         machine.execute_source(source).unwrap();
         assert_eq!(machine.register(0), Some(1));
         assert_eq!(machine.register(1), Some(2));
-        assert!(matches!(
-            machine.execute_source("ab{A}=()"),
-            Err(SourceError::Compile(_))
-        ));
     }
-    for source in ["&=a{} [ ] &=a [ ]", "&=a [ ] &=a{} [ ]"] {
+    for source in ["&=a [ ] &=a [ ]", "&=ab [ ] &=ab [ ]"] {
         assert!(
             matches!(
                 Machine::new().execute_source(source),
