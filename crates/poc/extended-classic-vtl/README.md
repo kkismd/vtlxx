@@ -515,6 +515,8 @@ user-defined Write binding は、利用者向けには「手続き」と呼び�
 
 **手続きの定義件数は名前長とは別の制限**です。Rust reference は通常手続きに人為的な64件上限を設けず、6502初期targetは通常手続きの定義を最大64件まで受け付けます。ただしarena等の別の資源上限により、64件の定義が常に成功する保証はありません。65件目の定義ではコンパイルに失敗し、6502では生成された runtime を実行しません。テンプレート用の名前空間は採用ADR [#528](https://github.com/kkismd/vtlxx/issues/528) により廃止されています。
 
+廃止された手続テンプレート構文（例: `&=a{} [ {}=A ]`、`a{A}=()`、`a{A}=1`）は、Rust・6502のどちらでも**コンパイル時の構文エラー**になります。通常Writeの定義と呼出は引き続き利用できます。拒否の回帰は [`tests/source_execution.rs`](tests/source_execution.rs)、[`tests/sim65_frontend.rs`](tests/sim65_frontend.rs)、[`tests/sim65_cli.rs`](tests/sim65_cli.rs) で確認します。
+
 例:
 
 ```vtl
@@ -740,37 +742,6 @@ cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
 cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
   crates/poc/extended-classic-vtl/examples/rpn_evaluator.vtl
 ```
-
-## Example: P0a 手続きテンプレートによる整数測定値補正
-
-[`examples/p0a_template_calibration.vtl`](examples/p0a_template_calibration.vtl) は、3チャンネルの整数測定値をそれぞれの倍率・補正値で補正します。1つのテンプレート本文を A/B/C に展開し、Aには同じテンプレートをもう一度適用します。`.GAIN{}` / `.BIAS{}` の穴にチャンネル名を入れ、展開後の名前付き整数を解決します。
-
-```sh
-cargo run -p vtlxx-poc-extended-classic-vtl --bin ecvtl -- \
-  crates/poc/extended-classic-vtl/examples/p0a_template_calibration.vtl
-```
-
-期待出力は次のとおりです。
-
-```text
-58
-20
-40
-```
-
-テンプレートの計算は `f(x,k,b)=(x*k+b)*2` です。Aは `3 → 14 → 58`、Bは `4 → 20`、Cは `5 → 40` となります。テンプレート呼出は実行時 stack に値を残しません。
-
-### Rust/6502 共通適合fixture
-
-`tests/fixtures/template_p0a/` はP0aテンプレートの共通sourceと期待状態です。各 `.vtl` に隣接する `.expected` が、成功・compile error、失敗phase、stdout、最終register/stack、およびRustと6502のprofile差を記録します。出力中の `\\n` はLF byteです。既存の `examples/p0a_template_calibration.vtl` も共通成功fixtureとして使います。
-
-Rust側は次のコマンドでfixtureを実行します。
-
-```sh
-cargo test --manifest-path crates/poc/extended-classic-vtl/Cargo.toml --test template_p0a_fixtures
-```
-
-Block内呼出、定義時のRHS遅延検証、呼出形式エラー、未完成定義の非公開、展開失敗時のcaller owner不変性を確認します。`chunk_failure_profiles.vtl` は同一sourceに対するprofile差を表します。Rustは先行flush済みchunkのeffectを保持しますが、6502のWholeProgramCompileRunはcompile failureでruntimeを開始しません。Rust Machineを複数の `execute_source` 呼出で使うtemplate寿命はAPI固有fixtureであり、serial single-sourceの6502へ複数呼出APIを要求しません。
 
 ## ECVTL source を書くときの確認事項
 
