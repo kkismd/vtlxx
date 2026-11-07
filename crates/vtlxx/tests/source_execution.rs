@@ -300,6 +300,20 @@ fn explicit_return_preserves_stack_and_top_level_unit_boundaries() {
     assert!(machine.stack().is_empty());
 
     let mut machine = Machine::new();
+    machine
+        .execute_source(
+            "~=11 &=p [ A=7 @=3,9 ?=\"x\" ~=42 ~=43 #=() A=99 @=3,8 ?=\"bad\" ~=99 ] p=() B=~ C=~ D=~",
+        )
+        .unwrap();
+    assert_eq!(machine.register(0), Some(7));
+    assert_eq!(machine.register(1), Some(43));
+    assert_eq!(machine.register(2), Some(42));
+    assert_eq!(machine.register(3), Some(11));
+    assert_eq!(machine.storage(3), 9);
+    assert_eq!(machine.output(), b"x");
+    assert!(machine.stack().is_empty());
+
+    let mut machine = Machine::new();
     machine.execute_source("A=1 #=() B=99 &=p [ ] C=7").unwrap();
     assert_eq!(machine.register(0), Some(1));
     assert_eq!(machine.register(1), Some(0));
