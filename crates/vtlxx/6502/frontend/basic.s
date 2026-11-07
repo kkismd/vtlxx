@@ -6,7 +6,7 @@
 .export fe_compile_run
 .exportzp fe_compile_status
 .import fe_init, fe_next, cc_init, cc_begin_owner, cc_complete_owner
-.import cc_define_label, cc_label_jump
+.import cc_define_label, cc_label_jump, cc_return
 .import cc_mark, cc_jz_placeholder, cc_jump_placeholder, cc_patch_here
 .import cc_jump_to
 .import cc_is_bound, cc_publish, cc_resolve
@@ -409,7 +409,36 @@ statement:
     cmp #'^'
     jeq fe_label
     cmp #'#'
-    jeq fe_label
+    bne @not_jump
+    ; `#=()` is an explicit return; keep numeric and named operands on the
+    ; existing owner-local label path. Validate the whole empty form before
+    ; emitting the existing RTS.
+    jsr peek
+    lda look_state
+    cmp #1
+    bne @label_operand
+    lda look_byte
+    cmp #'('
+    bne @label_operand
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #')'
+    jne syntax_error
+    jsr take
+    jsr peek
+    jsr statement_end
+    lda fe_compile_status
+    jne @done
+    jmp cc_return
+@label_operand:
+    jmp fe_label
+@not_jump:
     cmp #'%'
     jeq @conditional
     cmp #'*'

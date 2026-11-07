@@ -443,6 +443,24 @@ label は decimal `0..32767` です。同じ executable owner 内で一意でな
 
 label は top-level と source-defined procedure で別 namespace です。
 
+### RETURN `#=()`
+
+```vtl
+  &=p [
+    ?=1
+    #=()
+    ?=9
+  ]
+  p=()
+  ?=2
+```
+
+`#=()` は現在の手続きから呼出元へ直ちに戻ります。IF / While の入れ子の中でも、最も内側の block や loop ではなく手続き全体を終了します。RETURN 自身の stack effect は `( -- )` で、値スタックを変更しません。実行済みの register、storage、output の副作用も保持します。
+
+トップレベルでも使用でき、その場合は現在の top-level chunk だけを終了します。後続の手続き定義などで分割された独立 chunk は、driver が通常どおり呼び出します。これはプログラム全体を終了する命令ではありません。
+
+`#=n` は従来どおり owner-local label への GOTO です。RETURN は label や fixup を使わず、backend の既存 RTS を出力します。通常の手続き / chunk 末尾に自動追加される RTS も維持されます。
+
 ## IF / While
 
 ### IF `%=`
