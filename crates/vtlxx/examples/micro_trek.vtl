@@ -523,7 +523,7 @@
     ?="COURSE: "
     readnum=()
     B=~ A=~
-    %=B==.PARSE_EOF [ ~=0 ~=0 ~=.COURSE_EOF #=2 ]
+    %=B==.PARSE_EOF [ ~=0 ~=0 ~=.COURSE_EOF #=() ]
     %=(B!=.PARSE_VALID)+(A<0)+(A>.COURSE_MAX) [ #=1 ]
     C=(A+.COURSE_SCALE)/.COURSE_STEP
     D=A-(C*.COURSE_STEP)
@@ -532,20 +532,19 @@
     %=C==2 [ E=.COURSE_SCALE F=0-D ]
     %=C==3 [ E=0-D F=0-.COURSE_SCALE ]
     ~=E ~=F ~=.COURSE_VALID
-  ^=2
   ]
 
 ; Phaser ( -- command-status ). I is the slot and J is the fixed power;
 ; hitcalc/applyhit/devinfo clobber A..F, while readnum clobbers A..H. No PRNG draws.
   &=phaser [
     devinfo=4
-    %=@(.DEVICE_BASE+3)>0 [ ~=.COMMAND_CANCEL #=3 ]
+    %=@(.DEVICE_BASE+3)>0 [ ~=.COMMAND_CANCEL #=() ]
   ^=1
     ?="ENERGY ? " readnum=()
     B=~ A=~
-    %=B==.PARSE_EOF [ ~=.COMMAND_EOF #=3 ]
+    %=B==.PARSE_EOF [ ~=.COMMAND_EOF #=() ]
     %=(B!=.PARSE_VALID)+(A<0) [ #=1 ]
-    %=A==0 [ ~=.COMMAND_CANCEL #=3 ]
+    %=A==0 [ ~=.COMMAND_CANCEL #=() ]
     %=A>@(.SHIP_ENERGY) [
       ?="SORRY ! WE HAVE ONLY " ?=@(.SHIP_ENERGY) ?=" UNITS" ?=() #=1
     ]
@@ -569,7 +568,6 @@
       ]
     ]
     ~=.COMMAND_COMMIT
-  ^=3
   ]
 
 ; Warp departure ( -- command-status ). I retains factor across readnum/course;
@@ -579,16 +577,16 @@
   ^=1
     ?=" FACTOR ? " readnum=()
     B=~ A=~
-    %=B==.PARSE_EOF [ ~=.COMMAND_EOF #=3 ]
+    %=B==.PARSE_EOF [ ~=.COMMAND_EOF #=() ]
     %=(B!=.PARSE_VALID)+(A<0)+(A>.WARP_MAX) [ #=1 ]
-    %=A==0 [ ~=.COMMAND_CANCEL #=3 ]
+    %=A==0 [ ~=.COMMAND_CANCEL #=() ]
     %=(@(.DEVICE_BASE+4)>0)*(A>.DAMAGED_WARP_MAX) [
       ?="TRY 2 AT MOST !" ?=() #=1
     ]
     I=A J=((I*I)+1)/2
     %=@(.SHIP_ENERGY)<J [ ?="WE HAVE NO ENERGY !" ?=() #=1 ]
     course=() A=~ B=~ C=~
-    %=A==.COURSE_EOF [ ~=.COMMAND_EOF #=3 ]
+    %=A==.COURSE_EOF [ ~=.COMMAND_EOF #=() ]
     ?="* ION ENGINE START" ?=()
     @=.MISSION_DAYS,@(.MISSION_DAYS)-1
     @=.SHIP_ENERGY,@(.SHIP_ENERGY)-J
@@ -598,7 +596,6 @@
     *=K<.DEVICE_LIMIT [ %=@(K)>0 [ @=K,@(K)-1 ] K=K+1 ]
     ~=I ~=C ~=B warppath=()
     ~=.COMMAND_COMMIT
-  ^=3
   ]
 
 ; Torpedo ( -- command-status ). I/J are candidate coordinates, P/G are
@@ -606,9 +603,9 @@
 ; Direct scratch A/G/I/J/K/L/P/S/T; course clobbers A..H, applyhit clobbers A..D.
   &=torpedo [
     devinfo=6
-    %=(@(.DEVICE_BASE+5)>0)+(@(.SHIP_TORPEDOES)==0) [ ~=.COMMAND_CANCEL #=3 ]
+    %=(@(.DEVICE_BASE+5)>0)+(@(.SHIP_TORPEDOES)==0) [ ~=.COMMAND_CANCEL #=() ]
     course=() A=~ T=~ S=~
-    %=A==.COURSE_EOF [ ~=.COMMAND_EOF #=3 ]
+    %=A==.COURSE_EOF [ ~=.COMMAND_EOF #=() ]
     @=.SHIP_TORPEDOES,@(.SHIP_TORPEDOES)-1
     ?="ENTERPRISE FIRING TORPEDOES." ?=() ?="TRACK-"
     P=(@(.SHIP_X)*.COURSE_SCALE)+.WARP_HALF
@@ -642,7 +639,6 @@
     ]
   ^=2
     ~=.COMMAND_COMMIT
-  ^=3
   ]
 
 ; Read and dispatch one complete COMMAND line ( -- command-status ).
@@ -666,27 +662,26 @@
       ]
     ]
     %=(B==0)+(B==3) [
-      %=A==.PARSE_EOF [ ~=.COMMAND_EOF ] [ ~=.COMMAND_CANCEL ] #=1
+      %=A==.PARSE_EOF [ ~=.COMMAND_EOF ] [ ~=.COMMAND_CANCEL ] #=()
     ]
     %=(C>=.ASCII_LOWER_A)*(C<=.ASCII_LOWER_Z) [ C=C-.ASCII_CASE ]
-    %=C==.CMD_X [ ~=.COMMAND_EOF #=1 ]
-    %=C==.CMD_G [ galmap=() ~=.COMMAND_CANCEL #=1 ]
-    %=C==.CMD_L [ longscan=() ~=.COMMAND_CANCEL #=1 ]
-    %=C==.CMD_S [ shortmap=() ~=.COMMAND_CANCEL #=1 ]
-    %=C==.CMD_R [ status=() ~=.COMMAND_CANCEL #=1 ]
-    %=C==.CMD_P [ phaser=() #=1 ]
-    %=C==.CMD_W [ warp=() #=1 ]
-    %=C==.CMD_T [ torpedo=() #=1 ]
+    %=C==.CMD_X [ ~=.COMMAND_EOF #=() ]
+    %=C==.CMD_G [ galmap=() ~=.COMMAND_CANCEL #=() ]
+    %=C==.CMD_L [ longscan=() ~=.COMMAND_CANCEL #=() ]
+    %=C==.CMD_S [ shortmap=() ~=.COMMAND_CANCEL #=() ]
+    %=C==.CMD_R [ status=() ~=.COMMAND_CANCEL #=() ]
+    %=C==.CMD_P [ phaser=() #=() ]
+    %=C==.CMD_W [ warp=() #=() ]
+    %=C==.CMD_T [ torpedo=() #=() ]
     %=C==.CMD_HELP [
       ?="*HELP*" ?=() ?="S : SHORT RANGE SENSOR" ?=()
       ?="G : GALAXY MAP" ?=() ?="L : LONG RANGE SENSOR" ?=()
       ?="P : PHASER" ?=() ?="W : WARP" ?=()
       ?="T : TORPEDOES" ?=() ?="R : STATUS REPORT" ?=()
       ?="X : EXIT" ?=() ?="? : HELP" ?=()
-      ~=.COMMAND_CANCEL #=1
+      ~=.COMMAND_CANCEL #=()
     ]
     %=A==.PARSE_EOF [ ~=.COMMAND_EOF ] [ ~=.COMMAND_CANCEL ]
-  ^=1
   ]
 
 ; Display the mission result and read a complete RETRY line
@@ -717,12 +712,11 @@
     ]
     %=(B==1)+(B==2) [
       %=(C>=.ASCII_LOWER_A)*(C<=.ASCII_LOWER_Z) [ C=C-.ASCII_CASE ]
-      %=C==.RETRY_Y [ ~=.RETRY_YES #=2 ]
-      %=C==.RETRY_N [ ~=.RETRY_NO #=2 ]
+      %=C==.RETRY_Y [ ~=.RETRY_YES #=() ]
+      %=C==.RETRY_N [ ~=.RETRY_NO #=() ]
     ]
-    %=A==.PARSE_EOF [ ~=.RETRY_EOF #=2 ]
+    %=A==.PARSE_EOF [ ~=.RETRY_EOF #=() ]
     #=1
-  ^=2
   ]
 
 ; EC08_TEST_DEFINITIONS_END
@@ -736,14 +730,13 @@ initgame=()
 ?="IN 30 YEARS!" ?=() ?="THE NUMBER OF BASE IS " ?=@(.GALAXY_BASES) ?=()
 ^=2
 command=() A=~
-%=A==.COMMAND_EOF [ #=4 ]
+%=A==.COMMAND_EOF [ #=() ]
 %=A==.COMMAND_COMMIT [
   endturn=() A=~
   %=A!=.MISSION_CONTINUE [
     gameend=A A=~
     %=A==.RETRY_YES [ #=1 ]
-    #=4
+    #=()
   ]
 ]
 #=2
-^=4
