@@ -435,6 +435,12 @@ fn compile_statement(
     }
     match target {
         "^" | "#" => {
+            if target == "#" && rhs == "()" {
+                builder
+                    .emit(Instruction::Return)
+                    .map_err(|_| CompileError::Builder)?;
+                return Ok(());
+            }
             let label: i32 = if rhs.bytes().all(|byte| byte.is_ascii_digit()) && !rhs.is_empty() {
                 rhs.parse().map_err(|_| CompileError::Syntax)?
             } else {
