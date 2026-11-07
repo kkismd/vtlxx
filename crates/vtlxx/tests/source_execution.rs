@@ -274,6 +274,81 @@ fn labels_work_across_lines_within_one_source_owner() {
 }
 
 #[test]
+fn explicit_return_exits_the_procedure_through_nested_blocks() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("&=p [ A=0 *=1 [ %=1 [ #=() ] A=99 ] B=99 ] p=() C=3")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(0));
+    assert_eq!(machine.register(1), Some(0));
+    assert_eq!(machine.register(2), Some(3));
+
+    let mut machine = Machine::new();
+    machine
+        .execute_source("&=p [ %=0 [ #=() ] A=2 ] p=()")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(2));
+}
+
+#[test]
+fn explicit_return_preserves_stack_and_top_level_unit_boundaries() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("~=41 &=p [ #=() ~=99 ] p=() A=~")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(41));
+    assert!(machine.stack().is_empty());
+
+    let mut machine = Machine::new();
+    machine
+        .execute_source(
+            "~=11 &=p [ A=7 @=3,9 ?=\"x\" ~=42 ~=43 #=() A=99 @=3,8 ?=\"bad\" ~=99 ] p=() B=~ C=~ D=~",
+        )
+        .unwrap();
+    assert_eq!(machine.register(0), Some(7));
+    assert_eq!(machine.register(1), Some(43));
+    assert_eq!(machine.register(2), Some(42));
+    assert_eq!(machine.register(3), Some(11));
+    assert_eq!(machine.storage(3), 9);
+    assert_eq!(machine.output(), b"x");
+    assert!(machine.stack().is_empty());
+
+    let mut machine = Machine::new();
+    machine.execute_source("A=1 #=() B=99 &=p [ ] C=7").unwrap();
+    assert_eq!(machine.register(0), Some(1));
+    assert_eq!(machine.register(1), Some(0));
+    assert_eq!(machine.register(2), Some(7));
+}
+
+#[test]
+fn explicit_return_uses_normal_separators_and_rejects_other_rhs_forms() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("&=p [ ; before\n #=() ; after\n A=99 ] p=()\tB=3")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(0));
+    assert_eq!(machine.register(1), Some(3));
+
+    for source in ["#=", "#=!", "#=(1)", "#=()x", "^=()"] {
+        let mut machine = Machine::new();
+        assert!(
+            matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+    }
+
+    let mut machine = Machine::new();
+    assert!(matches!(
+        machine.execute_source("&=bad [ #=() A=1+ ]"),
+        Err(SourceError::Compile(_))
+    ));
+    assert!(matches!(
+        machine.execute_source("bad=()"),
+        Err(SourceError::Compile(_))
+    ));
+}
+
+#[test]
 fn one_arm_if_leaves_following_statements_outside_the_block() {
     let mut machine = Machine::new();
     machine
