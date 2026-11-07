@@ -318,6 +318,20 @@ fn basic_source_compiles_and_executes() {
     expect("&=p [ ^=3 ?=9 ] ^=3 ?=8 p=()", 0, b"89Z");
     expect("?=1 &=p [ ?=8 ] ?=2 p=() ?=3", 0, b"1283Z");
     expect("&=p [ ?=1 ] ?=2 &=q [ ?=3 ] ?=4 q=() p=()", 0, b"2431Z");
+    expect("&=p [ ?=1 #=() ; return\n ?=9 ] p=() ?=2", 0, b"12Z");
+    expect(
+        "&=p [ %=1 [ *=1 [ %=1 [ ?=3 #=() ] ] ] ?=9 ] p=() ?=4",
+        0,
+        b"34Z",
+    );
+    expect("&=p [ %=0 [ #=() ] ?=5 ] p=() ?=6", 0, b"56Z");
+    expect(
+        "~=11 &=p [ A=7 @=3,9 ?=\"x\" ~=42 ~=43 #=() A=99 @=3,8 ?=\"bad\" ~=99 ] p=() B=~ C=~ D=~ ?=A ?=@(3)",
+        0,
+        b"x79Z",
+    );
+    expect("#=() ?=9 &=p [ ] B=7 ?=B", 0, b"7Z");
+    expect("#=()", 0, b"Z");
     expect("&=p [ ?=() ] p=()", 0, b"\nZ");
     expect("%=1 [ ?=() ]", 0, b"\nZ");
     expect("A=0 *=A<1 [ ?=() A=A+1 ]", 0, b"\nZ");
@@ -436,6 +450,12 @@ fn basic_source_compiles_and_executes() {
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn malformed_source_never_starts_runtime() {
     for source in [
+        "#=",
+        "#=!",
+        "#=(1)",
+        "#=()x",
+        "^=()",
+        "?=42 #=()x",
         "A=",
         "A=()",
         "?=( )",
