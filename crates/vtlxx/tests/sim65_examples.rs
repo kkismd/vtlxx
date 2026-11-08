@@ -72,7 +72,7 @@ const EXAMPLES: &[ExampleCase] = &[
         disposition: Disposition::Portable {
             expected_stdout: None,
             cycle_limit: Some(4_000_000_000),
-            runtime_input: None,
+            runtime_input: Some(include_bytes!("fixtures/micro_trek_seed0_exit.txt")),
         },
     },
     ExampleCase {
@@ -251,6 +251,10 @@ fn run(
                 "interactive_input.txt"
             } else if runtime_input == Some(include_bytes!("fixtures/1024_quit.txt").as_slice()) {
                 "1024_quit.txt"
+            } else if runtime_input
+                == Some(include_bytes!("fixtures/micro_trek_seed0_exit.txt").as_slice())
+            {
+                "micro_trek_seed0_exit.txt"
             } else {
                 return Err("unknown runtime input fixture".to_owned());
             };

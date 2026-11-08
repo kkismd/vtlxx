@@ -1,4 +1,4 @@
-//! Rust CLI E2E: canonical complete source, `.GAME_SEED = 0`.
+//! Rust CLI E2E: canonical complete source, with seed 0 supplied as the first runtime line.
 //!
 //! CLI exposes output and exit status, not final storage or PRNG. The
 //! corresponding owner-state checks remain in `micro_trek_lifecycle`
@@ -78,9 +78,19 @@ fn run(input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
     (status.code().unwrap_or(-1), output, error)
 }
 
+fn run_seeded(seed: &[u8], input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
+    let mut all = seed.to_vec();
+    all.extend_from_slice(input);
+    run(&all)
+}
+
 fn reproducible(input: &[u8]) -> String {
-    let first = run(input);
-    assert_eq!(first, run(input), "seed 0 and input {input:?}");
+    let first = run_seeded(b"0\n", input);
+    assert_eq!(
+        first,
+        run_seeded(b"0\n", input),
+        "seed 0 and input {input:?}"
+    );
     assert_eq!(first.0, 0, "stderr: {:?}", first.2);
     assert!(first.2.is_empty(), "stderr: {:?}", first.2);
     String::from_utf8(first.1).unwrap()
@@ -191,4 +201,31 @@ fn initial_eof_is_normal_exit() {
     let output = reproducible(b"");
     assert!(output.ends_with("THE NUMBER OF BASE IS 3\nCOMMAND :"));
     assert!(!output.contains("RETRY?(Y/N)"));
+}
+
+#[test]
+fn seed_boundaries_are_accepted_and_deterministic() {
+    for seed in [b"0\n".as_slice(), b"1\n", b"-1\n", b"-32768\n", b"32767\n"] {
+        let first = run_seeded(seed, b"X\n");
+        assert_eq!(first, run_seeded(seed, b"X\n"), "seed {seed:?}");
+        assert_eq!(first.0, 0, "stderr: {:?}", first.2);
+        assert!(first.2.is_empty());
+        assert!(first.1.ends_with(b"COMMAND :"));
+    }
+}
+
+#[test]
+fn seed_eof_and_invalid_lines_do_not_start_the_game() {
+    for (input, expected) in [
+        (b"".as_slice(), b"".as_slice()),
+        (b"\n", b"INVALID SEED\n"),
+        (b"nope\n", b"INVALID SEED\n"),
+        (b"32768\n", b"INVALID SEED\n"),
+        (b"-32769\n", b"INVALID SEED\n"),
+    ] {
+        let result = run(input);
+        assert_eq!(result.0, 0, "input {input:?}, stderr: {:?}", result.2);
+        assert_eq!(result.1, expected, "input {input:?}");
+        assert!(result.2.is_empty());
+    }
 }

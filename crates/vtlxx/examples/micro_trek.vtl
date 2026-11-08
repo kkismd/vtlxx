@@ -79,7 +79,6 @@
 .RETRY_EOF := -1
 .RETRY_Y := 89
 .RETRY_N := 78
-.GAME_SEED := 0
 .ASCII_LOWER_A := 97
 .ASCII_LOWER_Z := 122
 .ASCII_CASE := 32
@@ -721,8 +720,14 @@
 
 ; EC08_TEST_DEFINITIONS_END
 
-; A fixed seed is set only at startup; replay continues the PRNG stream.
-@=.PRNG_STATE,.GAME_SEED
+; The first runtime line supplies the signed seed before any game state is built.
+readnum=() B=~ A=~
+%=B==.PARSE_VALID [
+  @=.PRNG_STATE,A
+] [
+  %=B==.PARSE_INVALID [ ?="INVALID SEED" ?=() ]
+  #=()
+]
 ^=1
 initgame=()
 ?="IT IS STARDATE : 3200" ?=() ?="OBJECTIVE :" ?=()

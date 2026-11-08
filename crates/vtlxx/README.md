@@ -727,6 +727,17 @@ cargo run -p vtlxx --bin vtlxx6502 -- \
   crates/vtlxx/examples/1024.vtl --interactive
 ```
 
+## Example: Micro Trek
+
+`micro_trek.vtl` はゲーム開始前に、runtime 入力の先頭行から符号付き16bit seed（`-32768..32767`）を読みます。直接実行する場合は seed 行を最初に渡し、その後に `X` などのゲーム操作を続けてください。空行、不正値、範囲外の値ではゲームを開始せず、seed入力前のEOFでは何も表示せず正常終了します。
+
+```sh
+printf '0\nX\n' | cargo run -p vtlxx --bin vtlxx -- \
+  crates/vtlxx/examples/micro_trek.vtl
+```
+
+6502/sim65 の一括実行では同じ先頭 seed 行を `--runtime-input` のファイルに含めます。通常プレイ向けの自動seed生成と `--seed` 指定は、後続のゲーム専用ランチャーが提供します。
+
 ## Example: Eight Queens
 
 [`examples/eight_queens.vtl`](examples/eight_queens.vtl) は current VTLXX の user-facing example です。

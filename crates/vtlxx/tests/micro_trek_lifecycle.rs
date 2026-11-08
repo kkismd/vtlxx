@@ -95,9 +95,27 @@ fn retry_input_failure_is_not_eof() {
 }
 
 #[test]
+fn startup_seed_input_failure_remains_fatal() {
+    struct FailedInput;
+    impl Read for FailedInput {
+        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
+            Err(io::ErrorKind::BrokenPipe.into())
+        }
+    }
+
+    let mut m = Machine::new();
+    m.set_input(FailedInput);
+    assert_eq!(
+        m.execute_source(SOURCE),
+        Err(SourceError::Runtime(RuntimeError::InputError))
+    );
+    assert!(m.output().is_empty());
+}
+
+#[test]
 fn cli_starts_and_exits_on_x_or_eof() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.vtl");
-    for input in [b"X\n".as_slice(), b""] {
+    for input in [b"0\nX\n".as_slice(), b"0\n"] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
             .arg(path)
             .stdin(Stdio::piped())
@@ -118,12 +136,12 @@ fn cli_cancel_and_committed_action_return_to_command() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.vtl");
     for (input, marker, stardate) in [
         (
-            b"P\n0\nR\nX\n".as_slice(),
+            b"0\nP\n0\nR\nX\n".as_slice(),
             "*PHASER*\nENERGY ? ",
             "*STARDATE : 3200\n",
         ),
         (
-            b"W\n1\n0\nR\nX\n",
+            b"0\nW\n1\n0\nR\nX\n",
             "* ION ENGINE START\n",
             "*STARDATE : 3201\n",
         ),
@@ -159,6 +177,7 @@ fn cli_replay_initializes_a_second_mission_without_reseeding() {
             .unwrap();
         let mut input = child.stdin.take().unwrap();
         let mut output = child.stdout.take().unwrap();
+        input.write_all(b"0\n").unwrap();
         let mut captured = Vec::new();
         let mut turns = 0;
         let mut replayed = false;
