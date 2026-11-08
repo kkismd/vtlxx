@@ -209,3 +209,49 @@ fn interactive_prompt_is_visible_before_input() {
     assert!(errors.join().unwrap().is_empty());
     assert_eq!(output, run(false, b"0\nX\n").stdout);
 }
+
+#[cfg(unix)]
+#[test]
+#[ignore = "requires ca65, ld65, and sim65"]
+fn launcher_6502_target_reports_seed_and_relays_command_bytes() {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_micro_trek"));
+    command
+        .args(["--target", "6502", "--seed", "0"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command.process_group(0);
+    let mut child = Guard(command.spawn().unwrap());
+    let deadline = Instant::now() + TIMEOUT;
+    let mut stdout = child.0.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        let mut byte = [0];
+        while let Ok(1) = stdout.read(&mut byte) {
+            if tx.send(byte[0]).is_err() {
+                break;
+            }
+        }
+    });
+    let mut stderr = child.0.stderr.take().unwrap();
+    let errors = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).unwrap();
+        bytes
+    });
+    let mut output = Vec::new();
+    while !output.ends_with(b"COMMAND :") {
+        output.push(
+            rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("launcher 6502 command prompt timeout"),
+        );
+    }
+    child.0.stdin.take().unwrap().write_all(b"X\n").unwrap();
+    assert!(wait(&mut child.0, deadline).success());
+    output.extend(rx.iter());
+    reader.join().unwrap();
+    assert!(errors.join().unwrap().is_empty());
+    let mut expected = b"SEED: 0\n".to_vec();
+    expected.extend_from_slice(&run(false, b"0\nX\n").stdout);
+    assert_eq!(output, expected);
+}
