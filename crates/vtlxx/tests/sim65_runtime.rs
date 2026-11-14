@@ -109,6 +109,9 @@ fn build_and_run_with_input(
         {
             args.extend([OsStr::new("-D"), case_define.as_os_str()]);
         }
+        if matches!(probe_case, Some(11 | 12)) && source.ends_with("6502/target/sim65_adapter.s") {
+            args.extend([OsStr::new("-D"), OsStr::new("ENTROPY16_TEST_VALUE=$0001")]);
+        }
         args.extend([source.as_os_str(), OsStr::new("-o"), object.as_os_str()]);
         let output = run_tool("ca65", "assemble", &args, &[])?;
         require_success("assemble", "ca65", &output)?;
@@ -227,7 +230,10 @@ fn fatal_helpers_preserve_committed_operands_and_depth() {
         (5, 1),
         (6, 1),
         (8, 2),
+        (10, 2),
         (9, 5),
+        (11, 0),
+        (12, 0),
     ] {
         expect_probe(case, status);
     }

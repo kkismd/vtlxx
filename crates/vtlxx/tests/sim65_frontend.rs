@@ -172,17 +172,18 @@ fn expect(source: &str, status: i32, output: &[u8]) {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn entropy_primary_read_returns_adapter_raw16_as_signed_cell() {
+fn entropy_primary_read_returns_the_xorshift16_sequence() {
     for (raw, expected) in [
-        (i16::MIN, b"-32768".as_slice()),
-        (-1, b"-1".as_slice()),
-        (0, b"0".as_slice()),
-        (1, b"1".as_slice()),
-        (i16::MAX, b"32767".as_slice()),
+        (0, [27015, 30930, 2970, 32697, 2984, 6343]),
+        (1, [16576, 12304, 29900, 5893, 23247, 27857]),
+        (-1, [16319, 12239, 25515, 18160, 4399, 27244]),
+        (i16::MIN, [24608, 26648, 20010, 23687, 22344, 753]),
+        (i16::MAX, [24479, 18391, 11649, 6775, 18023, 26781]),
+        (-21279, [27015, 30930, 2970, 32697, 2984, 6343]),
     ] {
-        let source = b"@=10,' ?=@(10) ?='";
+        let source = (0..6).map(|_| "?='").collect::<Vec<_>>().join(" ");
         let mut input = (source.len() as u16).to_le_bytes().to_vec();
-        input.extend_from_slice(source);
+        input.extend_from_slice(source.as_bytes());
         let result = build_and_run_custom(
             &input,
             "tests/fixtures/sim65/frontend_basic.s",
@@ -190,10 +191,21 @@ fn entropy_primary_read_returns_adapter_raw16_as_signed_cell() {
             Some(raw),
         );
         assert_eq!(result.status.code(), Some(0), "{raw}: {result:?}");
-        let mut twice = expected.to_vec();
-        twice.extend_from_slice(expected);
-        assert_eq!(result.stdout, twice, "{raw}: {result:?}");
+        let expected = expected.iter().map(i16::to_string).collect::<String>();
+        assert_eq!(result.stdout, expected.as_bytes(), "{raw}: {result:?}");
     }
+
+    let source = b"@=192,' ?=@(192)";
+    let mut input = (source.len() as u16).to_le_bytes().to_vec();
+    input.extend_from_slice(source);
+    let result = build_and_run_custom(
+        &input,
+        "tests/fixtures/sim65/frontend_basic.s",
+        None,
+        Some(1),
+    );
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+    assert_eq!(result.stdout, b"16576", "{result:?}");
 
     let source = b"?='+'";
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
@@ -205,7 +217,7 @@ fn entropy_primary_read_returns_adapter_raw16_as_signed_cell() {
         Some(1),
     );
     assert_eq!(result.status.code(), Some(0), "{result:?}");
-    assert_eq!(result.stdout, b"2", "{result:?}");
+    assert_eq!(result.stdout, b"28880", "{result:?}");
 }
 
 #[test]
@@ -222,7 +234,7 @@ fn each_entropy_evaluation_calls_the_adapter_once() {
         true,
     );
     assert_eq!(output.status.code(), Some(0), "{output:?}");
-    assert_eq!(output.stdout, b"12", "{output:?}");
+    assert_eq!(output.stdout, b"1657612304", "{output:?}");
 }
 
 #[test]

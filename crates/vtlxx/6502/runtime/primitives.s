@@ -5,6 +5,7 @@
 .import rt_need_one, rt_overflow, rt_push, rt_entropy_unavailable
 .import serial_in, serial_out, entropy16
 .importzp rt_depth, rt_stack, rt_input_eof
+.import rt_rng_state
 
 .importzp zp_phase
 number_low = zp_phase + 93
@@ -16,6 +17,7 @@ bytes_pointer = zp_phase + 98
 
 .segment "BSS"
 bytes_remaining: .res 1
+entropy_scratch: .res 2
 
 .segment "RODATA"
 decimal_low:  .byte <10000, <1000, <100, <10, <1
@@ -56,8 +58,74 @@ rt_read_entropy:
     bcc @capacity_ready
     jmp rt_overflow
 @capacity_ready:
+    lda rt_rng_state
+    ora rt_rng_state+1
+    bne @state_ready
     jsr entropy16
-    bcs @unavailable
+    bcc @provider_ready
+    jmp @unavailable
+@provider_ready:
+    sta rt_rng_state
+    stx rt_rng_state+1
+    lda rt_rng_state
+    ora rt_rng_state+1
+    bne @state_ready
+    lda #$e1
+    sta rt_rng_state
+    lda #$ac
+    sta rt_rng_state+1
+@state_ready:
+    ; Xorshift16: s ^= s<<7; s ^= s>>9; s ^= s<<8.
+    lda rt_rng_state
+    sta entropy_scratch
+    lda rt_rng_state+1
+    sta entropy_scratch+1
+.repeat 7
+    asl entropy_scratch
+    rol entropy_scratch+1
+.endrepeat
+    lda rt_rng_state
+    eor entropy_scratch
+    sta rt_rng_state
+    lda rt_rng_state+1
+    eor entropy_scratch+1
+    sta rt_rng_state+1
+
+    lda rt_rng_state
+    sta entropy_scratch
+    lda rt_rng_state+1
+    sta entropy_scratch+1
+.repeat 9
+    lsr entropy_scratch+1
+    ror entropy_scratch
+.endrepeat
+    lda rt_rng_state
+    eor entropy_scratch
+    sta rt_rng_state
+    lda rt_rng_state+1
+    eor entropy_scratch+1
+    sta rt_rng_state+1
+
+    lda rt_rng_state
+    sta entropy_scratch
+    lda rt_rng_state+1
+    sta entropy_scratch+1
+.repeat 8
+    asl entropy_scratch
+    rol entropy_scratch+1
+.endrepeat
+    lda rt_rng_state
+    eor entropy_scratch
+    sta rt_rng_state
+    lda rt_rng_state+1
+    eor entropy_scratch+1
+    sta rt_rng_state+1
+
+    lda rt_rng_state+1
+    lsr a
+    tax
+    lda rt_rng_state
+    ror a
     jmp rt_push
 @unavailable:
     jmp rt_entropy_unavailable
