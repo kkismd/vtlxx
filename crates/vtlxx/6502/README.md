@@ -39,6 +39,8 @@ sim65 の失敗時状態確認だけに `RT_TEST_PROBE` を指定すると、HAL
 
 `rt_read_entropy` は `'` PrimaryRead の固定runtime targetで、stack容量を先に検査し、`entropy16` を評価ごとに一度呼ぶ。成功はcarry clear / A=low / X=high、取得不可はcarry setで表す。成功値だけを1 Cellとしてpushし、取得不可はstatus 5でHALTする。初期sim65 adapterは取得不可を返すため、OS値供給と `--seed` を実装する後続#569以前は `'` を使うruntimeは失敗する。adapterを差し替えない既存fixtureはlinkできる。
 
+`ca65` object segment size を変更前の `main` と比較すると、frontend CODE は+17 B、runtime primitives CODE は+20 B、runtime state CODE は+5 B、sim65 adapter CODE は+2 B（合計+44 B）。ZP、BSS、RODATA は増加しない。実行時はadapter呼出しの間にJSR return addressを2 B使う。既存 `$` read も同様にruntime helperからadapterをJSRするため、最大のruntime呼出し段数は増えない。CPU stack高水位の実測・実機上限保証は行っていない。
+
 ```sh
 cargo test -p vtlxx --test sim65_runtime -- --ignored
 ```

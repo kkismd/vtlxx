@@ -2,7 +2,8 @@
 .setcpu "6502"
 
 .export rt_print_char, rt_print_number, rt_print_bytes, rt_read_char, rt_read_entropy
-.import rt_need_one, rt_overflow, rt_push, serial_in, serial_out, entropy16, halt
+.import rt_need_one, rt_overflow, rt_push, rt_entropy_unavailable
+.import serial_in, serial_out, entropy16
 .importzp rt_depth, rt_stack, rt_input_eof
 
 .importzp zp_phase
@@ -59,8 +60,7 @@ rt_read_entropy:
     bcs @unavailable
     jmp rt_push
 @unavailable:
-    lda #5
-    jmp halt
+    jmp rt_entropy_unavailable
 
 rt_print_char:
     jsr rt_need_one

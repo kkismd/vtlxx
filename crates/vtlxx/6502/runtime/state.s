@@ -4,10 +4,13 @@
 .export rt_init, rt_push, rt_pop_condition, rt_load_reg, rt_store_reg
 .export rt_load_storage, rt_store_storage
 .export rt_need_one, rt_need_two, rt_commit_binary
-.export rt_underflow, rt_overflow, rt_div_zero, rt_rem_zero
+.export rt_underflow, rt_overflow, rt_div_zero, rt_rem_zero, rt_entropy_unavailable
 .exportzp rt_depth, rt_stack, rt_lhs, rt_rhs, rt_result
 .exportzp rt_input_eof
 .import halt
+.ifdef ENTROPY16_TEST
+.import entropy_test_calls
+.endif
 .ifdef RT_TEST_PROBE
 .import rt_test_probe
 .endif
@@ -24,12 +27,19 @@ rt_input_eof = zp_phase + 92
 
 .segment "BSS"
 rt_storage: .res 512
+.ifdef RT_TEST_PROBE
+.export rt_storage
+.exportzp rt_regs
+.endif
 
 .segment "CODE"
 rt_init:
     lda #0
     sta rt_depth
     sta rt_input_eof
+.ifdef ENTROPY16_TEST
+    sta entropy_test_calls
+.endif
     ldx #51
 @clear_regs:
     sta rt_regs,x
@@ -218,4 +228,10 @@ rt_rem_zero:
     jsr rt_test_probe
 .endif
     lda #4
+    jmp halt
+rt_entropy_unavailable:
+.ifdef RT_TEST_PROBE
+    jsr rt_test_probe
+.endif
+    lda #5
     jmp halt

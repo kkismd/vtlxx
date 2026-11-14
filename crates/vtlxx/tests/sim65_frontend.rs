@@ -61,6 +61,16 @@ fn build_and_run_custom(
     basic: Option<&str>,
     entropy: Option<i16>,
 ) -> Output {
+    build_and_run_custom_configured(input, frontend_fixture, basic, entropy, false)
+}
+
+fn build_and_run_custom_configured(
+    input: &[u8],
+    frontend_fixture: &str,
+    basic: Option<&str>,
+    entropy: Option<i16>,
+    entropy_sequence: bool,
+) -> Output {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         frontend_fixture,
@@ -90,11 +100,19 @@ fn build_and_run_custom(
         };
         let mut args = vec![OsStr::new("-t"), OsStr::new("sim6502")];
         let entropy_define;
-        if entropy.is_some() && source_file.ends_with("6502/target/sim65_adapter.s") {
-            entropy_define = OsString::from(format!(
-                "ENTROPY16_TEST_VALUE=${:04X}",
-                entropy.unwrap() as u16
-            ));
+        if (entropy.is_some() || entropy_sequence)
+            && (source_file.ends_with("6502/target/sim65_adapter.s")
+                || source_file.ends_with("6502/runtime/state.s"))
+        {
+            args.extend([OsStr::new("-D"), OsStr::new("ENTROPY16_TEST")]);
+        }
+        if entropy_sequence {
+            args.extend([OsStr::new("-D"), OsStr::new("ENTROPY16_TEST_SEQUENCE")]);
+        } else if let Some(entropy) = entropy
+            && source_file.ends_with("6502/target/sim65_adapter.s")
+        {
+            entropy_define =
+                OsString::from(format!("ENTROPY16_TEST_VALUE=${:04X}", entropy as u16));
             args.extend([OsStr::new("-D"), entropy_define.as_os_str()]);
         }
         args.extend([
@@ -162,7 +180,7 @@ fn entropy_primary_read_returns_adapter_raw16_as_signed_cell() {
         (1, b"1".as_slice()),
         (i16::MAX, b"32767".as_slice()),
     ] {
-        let source = b"A=' ?=A ?='";
+        let source = b"@=10,' ?=@(10) ?='";
         let mut input = (source.len() as u16).to_le_bytes().to_vec();
         input.extend_from_slice(source);
         let result = build_and_run_custom(
@@ -188,6 +206,23 @@ fn entropy_primary_read_returns_adapter_raw16_as_signed_cell() {
     );
     assert_eq!(result.status.code(), Some(0), "{result:?}");
     assert_eq!(result.stdout, b"2", "{result:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn each_entropy_evaluation_calls_the_adapter_once() {
+    let source = b"?=' ?='";
+    let mut input = (source.len() as u16).to_le_bytes().to_vec();
+    input.extend_from_slice(source);
+    let output = build_and_run_custom_configured(
+        &input,
+        "tests/fixtures/sim65/frontend_basic.s",
+        None,
+        None,
+        true,
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"12", "{output:?}");
 }
 
 #[test]
