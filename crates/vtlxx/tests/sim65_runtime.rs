@@ -101,10 +101,16 @@ fn build_and_run_with_input(
         if probe_case.is_some() && source.ends_with("6502/runtime/state.s") {
             args.extend([OsStr::new("-D"), OsStr::new("RT_TEST_PROBE")]);
         }
+        if probe_case.is_some() && source.ends_with("6502/target/sim65_adapter.s") {
+            args.extend([OsStr::new("-D"), OsStr::new("ENTROPY16_TEST")]);
+        }
         if let Some(case_define) = &case_define
             && index == 0
         {
             args.extend([OsStr::new("-D"), case_define.as_os_str()]);
+        }
+        if matches!(probe_case, Some(11 | 12)) && source.ends_with("6502/target/sim65_adapter.s") {
+            args.extend([OsStr::new("-D"), OsStr::new("ENTROPY16_TEST_VALUE=$0001")]);
         }
         args.extend([source.as_os_str(), OsStr::new("-o"), object.as_os_str()]);
         let output = run_tool("ca65", "assemble", &args, &[])?;
@@ -216,7 +222,19 @@ fn fatal_errors_halt_with_distinct_status() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn fatal_helpers_preserve_committed_operands_and_depth() {
-    for (case, status) in [(1, 1), (2, 2), (3, 3), (4, 4), (5, 1), (6, 1)] {
+    for (case, status) in [
+        (1, 1),
+        (2, 2),
+        (3, 3),
+        (4, 4),
+        (5, 1),
+        (6, 1),
+        (8, 2),
+        (10, 2),
+        (9, 5),
+        (11, 0),
+        (12, 0),
+    ] {
         expect_probe(case, status);
     }
 }

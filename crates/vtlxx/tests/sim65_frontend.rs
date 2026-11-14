@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -52,10 +52,25 @@ fn build_and_run_input(input: &[u8]) -> Output {
 }
 
 fn build_and_run_input_with_frontend(input: &[u8], frontend_fixture: &str) -> Output {
-    build_and_run_custom(input, frontend_fixture, None)
+    build_and_run_custom(input, frontend_fixture, None, None)
 }
 
-fn build_and_run_custom(input: &[u8], frontend_fixture: &str, basic: Option<&str>) -> Output {
+fn build_and_run_custom(
+    input: &[u8],
+    frontend_fixture: &str,
+    basic: Option<&str>,
+    entropy: Option<i16>,
+) -> Output {
+    build_and_run_custom_configured(input, frontend_fixture, basic, entropy, false)
+}
+
+fn build_and_run_custom_configured(
+    input: &[u8],
+    frontend_fixture: &str,
+    basic: Option<&str>,
+    entropy: Option<i16>,
+    entropy_sequence: bool,
+) -> Output {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         frontend_fixture,
@@ -83,17 +98,29 @@ fn build_and_run_custom(input: &[u8], frontend_fixture: &str, basic: Option<&str
         } else {
             root.join(source_file)
         };
-        let output = run(
-            "ca65",
-            &[
-                OsStr::new("-t"),
-                OsStr::new("sim6502"),
-                source_file.as_os_str(),
-                OsStr::new("-o"),
-                object.as_os_str(),
-            ],
-            &[],
-        );
+        let mut args = vec![OsStr::new("-t"), OsStr::new("sim6502")];
+        let entropy_define;
+        if (entropy.is_some() || entropy_sequence)
+            && (source_file.ends_with("6502/target/sim65_adapter.s")
+                || source_file.ends_with("6502/runtime/state.s"))
+        {
+            args.extend([OsStr::new("-D"), OsStr::new("ENTROPY16_TEST")]);
+        }
+        if entropy_sequence {
+            args.extend([OsStr::new("-D"), OsStr::new("ENTROPY16_TEST_SEQUENCE")]);
+        } else if let Some(entropy) = entropy
+            && source_file.ends_with("6502/target/sim65_adapter.s")
+        {
+            entropy_define =
+                OsString::from(format!("ENTROPY16_TEST_VALUE=${:04X}", entropy as u16));
+            args.extend([OsStr::new("-D"), entropy_define.as_os_str()]);
+        }
+        args.extend([
+            source_file.as_os_str(),
+            OsStr::new("-o"),
+            object.as_os_str(),
+        ]);
+        let output = run("ca65", &args, &[]);
         assert!(
             output.status.success(),
             "assemble {source_file:?}: {output:?}"
@@ -141,6 +168,89 @@ fn expect(source: &str, status: i32, output: &[u8]) {
     let result = build_and_run(source.as_bytes(), b"Z");
     assert_eq!(result.status.code(), Some(status), "{source}: {result:?}");
     assert_eq!(result.stdout, output, "{source}: {result:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn entropy_primary_read_returns_the_xorshift16_sequence() {
+    for (raw, expected) in [
+        (0, [27015, 30930, 2970, 32697, 2984, 6343]),
+        (1, [16576, 12304, 29900, 5893, 23247, 27857]),
+        (-1, [16319, 12239, 25515, 18160, 4399, 27244]),
+        (i16::MIN, [24608, 26648, 20010, 23687, 22344, 753]),
+        (i16::MAX, [24479, 18391, 11649, 6775, 18023, 26781]),
+        (-21279, [27015, 30930, 2970, 32697, 2984, 6343]),
+    ] {
+        let source = (0..6).map(|_| "?='").collect::<Vec<_>>().join(" ");
+        let mut input = (source.len() as u16).to_le_bytes().to_vec();
+        input.extend_from_slice(source.as_bytes());
+        let result = build_and_run_custom(
+            &input,
+            "tests/fixtures/sim65/frontend_basic.s",
+            None,
+            Some(raw),
+        );
+        assert_eq!(result.status.code(), Some(0), "{raw}: {result:?}");
+        let expected = expected.iter().map(i16::to_string).collect::<String>();
+        assert_eq!(result.stdout, expected.as_bytes(), "{raw}: {result:?}");
+    }
+
+    let source = b"@=192,' ?=@(192)";
+    let mut input = (source.len() as u16).to_le_bytes().to_vec();
+    input.extend_from_slice(source);
+    let result = build_and_run_custom(
+        &input,
+        "tests/fixtures/sim65/frontend_basic.s",
+        None,
+        Some(1),
+    );
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+    assert_eq!(result.stdout, b"16576", "{result:?}");
+
+    let source = b"?='+'";
+    let mut input = (source.len() as u16).to_le_bytes().to_vec();
+    input.extend_from_slice(source);
+    let result = build_and_run_custom(
+        &input,
+        "tests/fixtures/sim65/frontend_basic.s",
+        None,
+        Some(1),
+    );
+    assert_eq!(result.status.code(), Some(0), "{result:?}");
+    assert_eq!(result.stdout, b"28880", "{result:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn each_entropy_evaluation_calls_the_adapter_once() {
+    let source = b"?=' ?='";
+    let mut input = (source.len() as u16).to_le_bytes().to_vec();
+    input.extend_from_slice(source);
+    let output = build_and_run_custom_configured(
+        &input,
+        "tests/fixtures/sim65/frontend_basic.s",
+        None,
+        None,
+        true,
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"1657612304", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn unavailable_entropy_is_fatal_and_apostrophe_rhs_forms_are_rejected() {
+    let mut input = (3u16).to_le_bytes().to_vec();
+    input.extend_from_slice(b"?='");
+    let result = build_and_run_input(&input);
+    assert_eq!(result.status.code(), Some(5), "{result:?}");
+    assert!(result.stdout.is_empty(), "{result:?}");
+
+    for source in ["?='=1", "?='(1)"] {
+        let result = build_and_run(source.as_bytes(), b"");
+        assert_eq!(result.status.code(), Some(2), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
 }
 
 #[test]
@@ -195,7 +305,7 @@ failed:
     );
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(source.as_bytes());
-    let result = build_and_run_custom(&input, fixture_path.to_str().unwrap(), Some(&basic));
+    let result = build_and_run_custom(&input, fixture_path.to_str().unwrap(), Some(&basic), None);
     assert_eq!(result.status.code(), Some(0), "{result:?}");
     assert_eq!(
         result.stdout, b"00000000000000000000000000-1-1-3276832767",
@@ -228,6 +338,7 @@ fn invalid_constant_does_not_publish_a_partial_entry() {
             &input,
             "tests/fixtures/sim65/frontend_basic.s",
             Some(&basic),
+            None,
         );
         assert!(
             matches!(result.status.code(), Some(2 | 3)),
@@ -266,6 +377,7 @@ fn full_constant_table_survives_failed_declarations_and_references() {
             &input,
             "tests/fixtures/sim65/frontend_basic.s",
             Some(&basic),
+            None,
         );
         assert!(
             matches!(result.status.code(), Some(2 | 3)),
@@ -282,6 +394,7 @@ fn micro_trek_passes_the_old_constant_limit() {
     let source = fs::read(root.join("examples/micro_trek.vtl")).unwrap();
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(&source);
+    input.extend_from_slice(b"0\n");
     let result = build_and_run_input(&input);
     assert_eq!(result.status.code(), Some(0), "{result:?}");
     assert!(result.stdout.starts_with(b"IT IS STARDATE"), "{result:?}");
@@ -691,7 +804,7 @@ fn stack_probe_basic() -> String {
 fn run_stack_probe(source: &str, basic: &str) -> Output {
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(source.as_bytes());
-    build_and_run_custom(&input, "6502/target/sim65_cli.s", Some(basic))
+    build_and_run_custom(&input, "6502/target/sim65_cli.s", Some(basic), None)
 }
 
 #[test]

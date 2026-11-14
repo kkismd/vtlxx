@@ -2,13 +2,20 @@
 ; immediately before the fatal entry passes its status to the #273 HALT.
 .setcpu "6502"
 .export _main, rt_test_probe
-.import rt_init, rt_push, rt_add, rt_div, rt_rem, rt_store_storage, rt_store_reg, rt_read_char
-.importzp rt_depth, rt_stack
+.import rt_init, rt_push, rt_add, rt_div, rt_rem, rt_store_storage, rt_store_reg, rt_read_char, rt_read_entropy
+.import entropy_test_calls
+.importzp rt_depth, rt_stack, rt_regs
+.import rt_storage
+.import rt_rng_state
 .import serial_in, serial_out, halt
 .include "runtime_macros.inc"
 
 .segment "CODE"
 _main:
+.if TEST_CASE = 11 .or TEST_CASE = 12
+    lda #0
+    sta entropy_test_calls
+.endif
     jsr rt_init
 .if TEST_CASE = 1
     ; Binary underflow with one pre-existing operand.
@@ -41,6 +48,65 @@ _main:
         PUSH i
     .endrepeat
     jsr rt_read_char
+.elseif TEST_CASE = 8
+    .repeat 16, i
+        PUSH i
+    .endrepeat
+    lda #$a5
+    sta rt_regs
+    sta rt_regs+2
+    sta rt_storage
+    sta rt_storage+2
+    lda #$5a
+    sta rt_regs+1
+    sta rt_regs+3
+    sta rt_storage+1
+    sta rt_storage+3
+    lda #0
+    sta entropy_test_calls
+    jsr rt_read_entropy
+.elseif TEST_CASE = 9
+    PUSH $1234
+    lda #$a5
+    sta rt_regs
+    sta rt_regs+2
+    sta rt_storage
+    sta rt_storage+2
+    lda #$5a
+    sta rt_regs+1
+    sta rt_regs+3
+    sta rt_storage+1
+    sta rt_storage+3
+    lda #0
+    sta entropy_test_calls
+    jsr rt_read_entropy
+.elseif TEST_CASE = 10
+    .repeat 16, i
+        PUSH i
+    .endrepeat
+    lda #$a5
+    sta rt_regs
+    sta rt_storage
+    lda #$80
+    sta rt_rng_state
+    lda #$81
+    sta rt_rng_state+1
+    lda #0
+    sta entropy_test_calls
+    jsr rt_read_entropy
+.elseif TEST_CASE = 11
+    PUSH $1234
+    lda #$a5
+    sta rt_regs
+    sta rt_storage
+    jsr rt_read_entropy
+    jsr rt_read_entropy
+    jsr rt_test_probe
+.elseif TEST_CASE = 12
+    jsr rt_read_entropy
+    jsr rt_init
+    jsr rt_read_entropy
+    jsr rt_test_probe
 .else
     .error "unknown probe case"
 .endif
@@ -119,6 +185,174 @@ rt_test_probe:
     jsr serial_in
     bcs @bad
     cmp #'Z'
+    bne @bad
+.elseif TEST_CASE = 8
+    lda rt_depth
+    cmp #16
+    bne @bad
+    lda entropy_test_calls
+    bne @bad
+    lda rt_regs
+    cmp #$a5
+    bne @bad
+    lda rt_storage
+    cmp #$a5
+    bne @bad
+    lda rt_regs+2
+    cmp #$a5
+    bne @bad
+    lda rt_storage+2
+    cmp #$a5
+    bne @bad
+    lda rt_regs+1
+    cmp #$5a
+    bne @bad
+    lda rt_regs+3
+    cmp #$5a
+    bne @bad
+    lda rt_storage+1
+    cmp #$5a
+    bne @bad
+    lda rt_storage+3
+    cmp #$5a
+    bne @bad
+    ldx #0
+@full:
+    txa
+    lsr a
+    cmp rt_stack,x
+    bne @bad
+    lda rt_stack+1,x
+    bne @bad
+    inx
+    inx
+    cpx #32
+    bne @full
+.elseif TEST_CASE = 9
+    lda rt_depth
+    cmp #1
+    bne @bad
+    lda rt_stack
+    cmp #$34
+    bne @bad
+    lda rt_stack+1
+    cmp #$12
+    bne @bad
+    lda entropy_test_calls
+    cmp #1
+    bne @bad
+    lda rt_rng_state
+    ora rt_rng_state+1
+    bne @bad
+    lda rt_regs
+    cmp #$a5
+    bne @bad
+    lda rt_storage
+    cmp #$a5
+    bne @bad
+    lda rt_regs+2
+    cmp #$a5
+    bne @bad
+    lda rt_storage+2
+    cmp #$a5
+    bne @bad
+    lda rt_regs+1
+    cmp #$5a
+    bne @bad
+    lda rt_regs+3
+    cmp #$5a
+    bne @bad
+    lda rt_storage+1
+    cmp #$5a
+    bne @bad
+    lda rt_storage+3
+    cmp #$5a
+    bne @bad
+.elseif TEST_CASE = 10
+    lda rt_depth
+    cmp #16
+    bne @bad
+    lda entropy_test_calls
+    bne @bad
+    lda rt_rng_state
+    cmp #$80
+    bne @bad
+    lda rt_rng_state+1
+    cmp #$81
+    bne @bad
+    lda rt_regs
+    cmp #$a5
+    bne @bad
+    lda rt_storage
+    cmp #$a5
+    bne @bad
+    ldx #0
+@full_initialized:
+    txa
+    lsr a
+    cmp rt_stack,x
+    bne @bad
+    lda rt_stack+1,x
+    bne @bad
+    inx
+    inx
+    cpx #32
+    bne @full_initialized
+.elseif TEST_CASE = 11
+    lda rt_depth
+    cmp #3
+    bne @bad
+    lda entropy_test_calls
+    cmp #1
+    bne @bad
+    lda rt_stack
+    cmp #$34
+    bne @bad
+    lda rt_stack+1
+    cmp #$12
+    bne @bad
+    lda rt_stack+2
+    cmp #$c0
+    bne @bad
+    lda rt_stack+3
+    cmp #$40
+    bne @bad
+    lda rt_stack+4
+    cmp #$10
+    bne @bad
+    lda rt_stack+5
+    cmp #$30
+    bne @bad
+    lda rt_rng_state
+    cmp #$21
+    bne @bad
+    lda rt_rng_state+1
+    cmp #$60
+    bne @bad
+    lda rt_regs
+    cmp #$a5
+    bne @bad
+    lda rt_storage
+    cmp #$a5
+    bne @bad
+.elseif TEST_CASE = 12
+    lda rt_depth
+    cmp #1
+    bne @bad
+    lda rt_stack
+    cmp #$c0
+    bne @bad
+    lda rt_stack+1
+    cmp #$40
+    bne @bad
+    lda entropy_test_calls
+    cmp #2
+    bne @bad
+    lda rt_rng_state
+    cmp #$81
+    bne @bad
+    lda rt_rng_state+1
+    cmp #$81
     bne @bad
 .endif
     lda #'K'

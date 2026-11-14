@@ -10,6 +10,8 @@ cargo test -p vtlxx --test sim65_6502 -- --ignored
 
 通常の `cargo test --workspace` は cc65 を必要としない。
 
+`entropy16` は target-private adapter symbol で、成功時は carry clear / A=low / X=high、取得不可は carry setを返す。初期 `sim65_adapter.s` は取得不可の既定実装を提供し、#569がOS由来値と固定seed注入を追加する。実機adapterは同じsymbol/ABIを実装して差し替える。
+
 ## Runtime helper（#274）
 
 `runtime/state.s`、`runtime/arithmetic.s`、`runtime/primitives.s` は現在の6502 target の実行状態と primitive を実装する。native emitter は `rt_init` を一度呼び、その後に以下の entry point を JSR で呼ぶ。いずれも target 内の link contract であり、portable VTLXX API ではない。
@@ -25,14 +27,19 @@ sim65 では、全 source の compile と driver 完成の後に `rt_init` へ�
 | `rt_eq`, `rt_ne`, `rt_lt`, `rt_le`, `rt_gt`, `rt_ge` | stack 上の operands | `( lhs rhs -- 0\|1 )` |
 | `rt_print_number`, `rt_print_char` | stack 上の value | `( value -- )` |
 | `rt_read_char` | — | `( -- char_or_eof )` |
+| `rt_read_entropy` | `entropy16` on first draw | `( -- random_value )` |
 
 helper は A/X/Y と processor flags を保存しない。`rt_push` の引数と register helper の X 以外に CPU register の入力契約はない。Cell は little-endian の signed 16-bit、stack は 16 Cell、A-Z は 26 Cell、storage は下位8 bitで選ぶ256 Cellの ring。A-Z と stack は zero page、storage は通常 RAM に置く。`rt_init` は register、storage、stack depth を初期化する。
 
-fatal status は underflow = 1、overflow = 2、division by zero = 3、remainder by zero = 4 とし、いずれも #273 の `halt` へ移る。これは sim65 fixture が success と runtime error を区別するための target 内の値である。error 検出前に stack operand を消費しない。
+fatal status は underflow = 1、overflow = 2、division by zero = 3、remainder by zero = 4、entropy unavailable = 5 とし、いずれも #273 の `halt` へ移る。これは sim65 fixture が success と runtime error を区別するための target 内の値である。error 検出前に stack operand を消費しない。
 
 sim65 の失敗時状態確認だけに `RT_TEST_PROBE` を指定すると、HALT 直前に fixture の `rt_test_probe` を呼ぶ。通常の target build にはこの hook は入らない。
 
 `rt_read_char` は `$` PrimaryRead の固定runtime targetである。stack空き容量をtransport readより先に検査し、NULを読み捨てて1..255またはEOF=-1を1 Cellとしてpushする。EOFはruntime session内で記憶し、後続readも-1を返す。sim65 adapterの `_getchar` はbyteとEOFだけを区別し、recoverable I/O failureを個別に表せないため、このtargetではそのerror分類を検証できない。
+
+`rt_read_entropy` は `'` PrimaryRead の固定runtime targetである。16 Cell容量を先に検査し、PRNG stateが未初期化の場合だけ `entropy16` からseedを一度取得する。seed 0は`$ACE1`へ正規化し、各評価で16bit xorshift `<<7, >>9, <<8` を順に適用して、更新後stateの上位15bitを1 Cell pushする。stateのゼロ値を未初期化sentinelとして使い、`rt_init`でクリアする。取得失敗はstatus 5でHALTし、sentinel、stack、他の言語stateを変更しない。初期sim65 adapterは取得不可を返すため、OS値供給と `--seed` を実装する後続#569以前は `'` 使用時に失敗する。adapterを差し替えない既存fixtureはlink/runできる。
+
+変更前の`main`と`ca65` object segment sizeを比較すると、frontend CODE +17 B、runtime primitives CODE +298 B、runtime state CODE +11 B、sim65 adapter CODE +2 B、合計CODE +328 B。runtime state BSS +2 B（16bit state）、primitives BSS +2 B（16bit scratch）、合計BSS +4 B。ZPとRODATAは増加せず、100 B phase shareも変更しない。初回adapter呼出しのJSR return addressは2 Bで、既存`$` readと同じruntime呼出し段数。追加のPHAやhardware-stack guard経路はない。CPU stack高水位の実測・実機上限保証は行っていない。サイズは変更前後の各module object segmentの差であり、リンク後の総配置比較ではない。
 
 ```sh
 cargo test -p vtlxx --test sim65_runtime -- --ignored
