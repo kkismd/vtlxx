@@ -59,8 +59,12 @@ impl Drop for SourceFile {
 }
 
 fn vtlxx(args: &[&std::ffi::OsStr]) -> Output {
+    vtlxx_args(args)
+}
+
+fn vtlxx_args(args: &[&std::ffi::OsStr]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_vtlxx"))
-        .args(args)
+        .args(args.iter().copied())
         .output()
         .unwrap()
 }
@@ -90,6 +94,48 @@ fn empty_machine_output_stays_empty() {
     assert!(output.status.success(), "{:?}", output.stderr);
     assert!(output.stdout.is_empty());
     assert!(output.stderr.is_empty());
+}
+
+#[test]
+fn fixed_seed_is_used_for_each_entropy_read() {
+    let source = SourceFile::new(b"A=' B=' ?=A ?=B");
+    for seed in [-32768, -1, 0, 1, 32767] {
+        let seed_arg = seed.to_string();
+        let output = vtlxx_args(&[
+            source.0.as_os_str(),
+            std::ffi::OsStr::new("--seed"),
+            std::ffi::OsStr::new(&seed_arg),
+        ]);
+        assert!(output.status.success(), "{seed}: {:?}", output.stderr);
+        assert_eq!(output.stdout, format!("{seed}{seed}").as_bytes());
+        assert!(output.stderr.is_empty());
+    }
+}
+
+#[test]
+fn invalid_seed_options_fail_before_running_source() {
+    let source = SourceFile::new(b"?=\"started\"");
+    let invalid: Vec<Vec<&std::ffi::OsStr>> = vec![
+        vec![source.0.as_os_str(), std::ffi::OsStr::new("--seed")],
+        vec![
+            source.0.as_os_str(),
+            std::ffi::OsStr::new("--seed"),
+            std::ffi::OsStr::new("1"),
+            std::ffi::OsStr::new("--seed"),
+            std::ffi::OsStr::new("2"),
+        ],
+        vec![
+            source.0.as_os_str(),
+            std::ffi::OsStr::new("--seed"),
+            std::ffi::OsStr::new("32768"),
+        ],
+        vec![source.0.as_os_str(), std::ffi::OsStr::new("--unknown")],
+    ];
+    for args in invalid {
+        let output = vtlxx_args(&args);
+        assert!(!output.status.success());
+        assert!(output.stdout.is_empty());
+    }
 }
 
 #[test]

@@ -32,6 +32,7 @@ pub struct Machine {
     pub(crate) output: Vec<u8>,
     input: Box<dyn Read>,
     input_eof: bool,
+    entropy_source: Box<dyn FnMut() -> io::Result<Cell>>,
     output_sink: Option<Box<dyn Write>>,
 }
 
@@ -58,6 +59,7 @@ impl Machine {
             output: Vec::new(),
             input: Box::new(io::empty()),
             input_eof: false,
+            entropy_source: Box::new(default_entropy),
             output_sink: None,
         };
         machine.seed_builtins();
@@ -68,6 +70,16 @@ impl Machine {
     pub fn set_input(&mut self, input: impl Read + 'static) {
         self.input = Box::new(input);
         self.input_eof = false;
+    }
+
+    /// Replace the environment source used by the `'` primary read.
+    /// The source is called once for each runtime evaluation.
+    pub fn set_entropy_source(&mut self, source: impl FnMut() -> io::Result<Cell> + 'static) {
+        self.entropy_source = Box::new(source);
+    }
+
+    pub(crate) fn read_entropy(&mut self) -> Result<Cell, RuntimeError> {
+        (self.entropy_source)().map_err(|_| RuntimeError::EntropyError)
     }
 
     /// Send runtime output to a sink as well as retaining it in the output buffer.
@@ -241,6 +253,10 @@ impl Machine {
             (Primitive::StoreStorage, Some(('@', SourceRole::Write))),
             (Primitive::PrintNumber, Some(('?', SourceRole::Write))),
             (Primitive::ReadChar, Some(('$', SourceRole::PrimaryRead))),
+            (
+                Primitive::ReadEntropy,
+                Some(('\'', SourceRole::PrimaryRead)),
+            ),
             (Primitive::PrintChar, Some(('$', SourceRole::Write))),
             (Primitive::Add, Some(('+', SourceRole::BinaryOperator))),
             (Primitive::Sub, Some(('-', SourceRole::BinaryOperator))),
@@ -341,6 +357,12 @@ impl Machine {
             }
         }
     }
+}
+
+fn default_entropy() -> io::Result<Cell> {
+    let mut bytes = [0_u8; 2];
+    getrandom::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(i16::from_le_bytes(bytes))
 }
 
 fn validate_target(code: &[Instruction], target: usize) -> Result<(), RuntimeError> {
