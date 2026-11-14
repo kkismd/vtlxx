@@ -120,6 +120,19 @@ fn fixed_seed_initializes_a_reproducible_xorshift_sequence() {
 }
 
 #[test]
+fn entropy_read_works_without_a_fixed_seed_and_stays_in_range() {
+    let source = SourceFile::new(b"A=' ?=A");
+    let output = vtlxx(&[source.0.as_os_str()]);
+    assert!(output.status.success(), "{:?}", output.stderr);
+    let value = std::str::from_utf8(&output.stdout)
+        .unwrap()
+        .parse::<i32>()
+        .unwrap();
+    assert!((0..=32767).contains(&value));
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn invalid_seed_options_fail_before_running_source() {
     let source = SourceFile::new(b"?=\"started\"");
     let invalid: Vec<Vec<&std::ffi::OsStr>> = vec![

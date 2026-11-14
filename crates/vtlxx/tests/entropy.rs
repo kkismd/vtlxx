@@ -30,7 +30,6 @@ fn apostrophe_is_a_runtime_primary_read_for_register_and_storage_expressions() {
 
 #[test]
 fn entropy_provider_is_lazy_and_failure_preserves_machine_state() {
-    let calls = Rc::new(RefCell::new(0));
     let mut machine = Machine::new();
     let attempts = Rc::new(RefCell::new(0));
     let observed_attempts = attempts.clone();
@@ -43,7 +42,7 @@ fn entropy_provider_is_lazy_and_failure_preserves_machine_state() {
     });
     machine.push(77);
     machine.execute_source("A=2").unwrap();
-    assert_eq!(*calls.borrow(), 0);
+    assert_eq!(*attempts.borrow(), 0);
 
     machine.execute_source("?=\"before\"").unwrap();
     assert_eq!(
@@ -57,6 +56,43 @@ fn entropy_provider_is_lazy_and_failure_preserves_machine_state() {
     machine.execute_source("B='").unwrap();
     assert_eq!(*attempts.borrow(), 2);
     assert_eq!(machine.register(1), Some(16576));
+}
+
+#[test]
+fn two_entropy_reads_in_one_nested_expression_consume_steps_left_to_right() {
+    let mut machine = Machine::new();
+    machine.set_entropy_source(|| Ok(1));
+
+    machine.execute_source("A=('+'*2)").unwrap();
+
+    assert_eq!(machine.register(0), Some(-7776));
+    assert_eq!(machine.stack(), &[]);
+}
+
+#[test]
+fn zero_seed_and_ace1_seed_produce_the_same_sequence() {
+    let mut zero = Machine::new();
+    zero.set_entropy_source(|| Ok(0));
+    zero.execute_source("A=' B=' C=' D=' E=' F='").unwrap();
+
+    let mut ace1 = Machine::new();
+    ace1.set_entropy_source(|| Ok(-21279));
+    ace1.execute_source("A=' B=' C=' D=' E=' F='").unwrap();
+
+    let zero_sequence: Vec<_> = (0..6).map(|index| zero.register(index)).collect();
+    let ace1_sequence: Vec<_> = (0..6).map(|index| ace1.register(index)).collect();
+    assert_eq!(
+        zero_sequence,
+        [
+            Some(27015),
+            Some(30930),
+            Some(2970),
+            Some(32697),
+            Some(2984),
+            Some(6343)
+        ]
+    );
+    assert_eq!(ace1_sequence, zero_sequence);
 }
 
 #[test]
@@ -127,6 +163,23 @@ fn compiling_uninvoked_procedure_does_not_call_entropy_provider() {
     );
     assert_eq!(*calls.borrow(), 1);
     assert_eq!(machine.register(0), Some(0));
+}
+
+#[test]
+fn compile_failure_does_not_call_entropy_provider() {
+    let calls = Rc::new(RefCell::new(0));
+    let observed = calls.clone();
+    let mut machine = Machine::new();
+    machine.set_entropy_source(move || {
+        *observed.borrow_mut() += 1;
+        Ok(1)
+    });
+
+    assert!(matches!(
+        machine.execute_source("A=' invalid"),
+        Err(SourceError::Compile(_))
+    ));
+    assert_eq!(*calls.borrow(), 0);
 }
 
 #[test]
