@@ -60,6 +60,48 @@ fn entropy_provider_is_lazy_and_failure_preserves_machine_state() {
 }
 
 #[test]
+fn apostrophe_can_supply_a_storage_write_without_changing_prefix_or_other_storage() {
+    let calls = Rc::new(RefCell::new(0));
+    let observed = calls.clone();
+    let mut machine = Machine::new();
+    machine.execute_source("@=193,8").unwrap();
+    machine.push(91);
+    machine.set_entropy_source(move || {
+        *observed.borrow_mut() += 1;
+        Ok(-1234)
+    });
+
+    machine.execute_source("@=192,'").unwrap();
+
+    assert_eq!(*calls.borrow(), 1);
+    assert_eq!(machine.storage(192), -1234);
+    assert_eq!(machine.storage(193), 8);
+    assert_eq!(machine.stack(), &[91]);
+}
+
+#[test]
+fn compiling_uninvoked_procedure_does_not_call_entropy_provider() {
+    let calls = Rc::new(RefCell::new(0));
+    let observed = calls.clone();
+    let mut machine = Machine::new();
+    machine.set_entropy_source(move || {
+        *observed.borrow_mut() += 1;
+        Err(io::Error::other("unavailable"))
+    });
+
+    machine.execute_source("&=p [ A=' ]").unwrap();
+    assert_eq!(*calls.borrow(), 0);
+    assert_eq!(machine.register(0), Some(0));
+
+    assert_eq!(
+        machine.execute_source("p=()"),
+        Err(SourceError::Runtime(RuntimeError::EntropyError))
+    );
+    assert_eq!(*calls.borrow(), 1);
+    assert_eq!(machine.register(0), Some(0));
+}
+
+#[test]
 fn apostrophe_cannot_be_written_or_applied() {
     for source in ["'=1", "A='(1)"] {
         assert!(matches!(
