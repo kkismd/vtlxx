@@ -117,6 +117,13 @@ cargo run -p vtlxx --bin vtlxx6502 -- \
   path/to/program.vtl --cycle-limit 256000000
 ```
 
+6502実行でも `--seed N`（signed 16bit十進数）で初期PRNG seedを固定できます。省略時はhost OSからraw16 seedを取得し、取得できない場合は`'`を実行した時点でruntime status 5になります。`'`を使わないsourceはそのまま実行できます。seedはsource/runtime入力へ追加されず、固定seedではRust CLIと同じ乱数系列になります。
+
+```sh
+cargo run -p vtlxx --bin vtlxx6502 -- \
+  path/to/program.vtl --seed -1
+```
+
 たとえば `program.vtl` に `A=$ ?=A`、`input.bin` に byte `0x41` を置くと、stdout に `65` が出ます。source-level の入力経路は次の ignored integration test でも実機相当の `sim65` 実行を通して確認できます。
 
 ```sh
