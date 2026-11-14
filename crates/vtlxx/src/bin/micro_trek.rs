@@ -370,7 +370,7 @@ fn exit_code(status: ExitStatus) -> ExitCode {
     }
     #[cfg(unix)]
     {
-        return ExitCode::from(status.signal().map_or(1, |signal| (128 + signal).min(255)) as u8);
+        ExitCode::from(status.signal().map_or(1, |signal| (128 + signal).min(255)) as u8)
     }
     #[cfg(not(unix))]
     ExitCode::FAILURE
