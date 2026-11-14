@@ -58,7 +58,7 @@ cargo test --workspace
 
 Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Read` を受け取ります。`$` の PrimaryRead は NUL を読み捨てて `1..255` または EOF の `-1` を返し、入力エラーは runtime error になります。入力位置は同じ Machine の手続きと top-level で共有されます。未設定時は空入力です。現在のRust対話CLIは、runtime stdinをMachine入力へ接続し、stdoutを逐次出力します（#313）。
 
-`'` は環境から16bit初期値を読む PrimaryRead です。各評価で環境providerを1回呼び、raw16bitsをsigned `Cell` として返します。取得できない場合は致命的な `EntropyError` になります。Rust `Machine` の `set_entropy_source` でテスト用providerへ差し替えられます。CLIはOSの乱数源を使い、再現実行には `--seed N`（signed 16bit十進数）を指定できます。指定値は `'` の参照ごとに返り、通常の stdin には追加されません。
+`'` はMachineごとのxorshift16 PRNGから値を読む PrimaryRead です。最初の評価時だけ環境providerからraw16初期値を取得し、各評価で状態を1 step更新して上位15bit（0..32767）を返します。同じMachineで続けて実行したsource間でも状態は継続します。seed 0は内部で`0xACE1`に正規化されます。取得できない場合は致命的な `EntropyError` になります。Rust `Machine` の `set_entropy_source` で初期値providerを差し替えられます。CLIはOSの乱数源を使い、再現実行には `--seed N`（signed 16bit十進数）を指定できます。指定値は初期seedとして一度だけ使われ、通常の stdin には追加されません。
 
 ```vtl
 A='
