@@ -97,9 +97,16 @@ fn empty_machine_output_stays_empty() {
 }
 
 #[test]
-fn fixed_seed_is_used_for_each_entropy_read() {
-    let source = SourceFile::new(b"A=' B=' ?=A ?=B");
-    for seed in [-32768, -1, 0, 1, 32767] {
+fn fixed_seed_initializes_a_reproducible_xorshift_sequence() {
+    let source = SourceFile::new(b"A=' B=' C=' D=' E=' F=' ?=A ?=B ?=C ?=D ?=E ?=F");
+    let expected = [
+        (-32768, "2460826648200102368722344753"),
+        (-1, "16319122392551518160439927244"),
+        (0, "270153093029703269729846343"),
+        (1, "16576123042990058932324727857"),
+        (32767, "24479183911164967751802326781"),
+    ];
+    for (seed, sequence) in expected {
         let seed_arg = seed.to_string();
         let output = vtlxx_args(&[
             source.0.as_os_str(),
@@ -107,7 +114,7 @@ fn fixed_seed_is_used_for_each_entropy_read() {
             std::ffi::OsStr::new(&seed_arg),
         ]);
         assert!(output.status.success(), "{seed}: {:?}", output.stderr);
-        assert_eq!(output.stdout, format!("{seed}{seed}").as_bytes());
+        assert_eq!(output.stdout, sequence.as_bytes());
         assert!(output.stderr.is_empty());
     }
 }

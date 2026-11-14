@@ -82,8 +82,7 @@ impl Primitive {
                 machine.value_stack.push(value);
             }
             Self::ReadEntropy => {
-                let value = machine.read_entropy()?;
-                machine.value_stack.push(value);
+                machine.read_entropy()?;
             }
             Self::PrintChar => {
                 let value = *machine

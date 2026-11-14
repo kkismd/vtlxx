@@ -33,6 +33,7 @@ pub struct Machine {
     input: Box<dyn Read>,
     input_eof: bool,
     entropy_source: Box<dyn FnMut() -> io::Result<Cell>>,
+    entropy_state: Option<u16>,
     output_sink: Option<Box<dyn Write>>,
 }
 
@@ -60,6 +61,7 @@ impl Machine {
             input: Box::new(io::empty()),
             input_eof: false,
             entropy_source: Box::new(default_entropy),
+            entropy_state: None,
             output_sink: None,
         };
         machine.seed_builtins();
@@ -72,14 +74,24 @@ impl Machine {
         self.input_eof = false;
     }
 
-    /// Replace the environment source used by the `'` primary read.
-    /// The source is called once for each runtime evaluation.
+    /// Replace the source used to initialize this machine's `'` sequence.
+    /// It is called only when the first runtime evaluation needs a seed.
     pub fn set_entropy_source(&mut self, source: impl FnMut() -> io::Result<Cell> + 'static) {
         self.entropy_source = Box::new(source);
     }
 
-    pub(crate) fn read_entropy(&mut self) -> Result<Cell, RuntimeError> {
-        (self.entropy_source)().map_err(|_| RuntimeError::EntropyError)
+    pub(crate) fn read_entropy(&mut self) -> Result<(), RuntimeError> {
+        let state = match self.entropy_state {
+            Some(state) => state,
+            None => {
+                let seed = (self.entropy_source)().map_err(|_| RuntimeError::EntropyError)? as u16;
+                if seed == 0 { 0xACE1 } else { seed }
+            }
+        };
+        let state = xorshift16(state);
+        self.value_stack.push((state >> 1) as Cell);
+        self.entropy_state = Some(state);
+        Ok(())
     }
 
     /// Send runtime output to a sink as well as retaining it in the output buffer.
@@ -357,6 +369,13 @@ impl Machine {
             }
         }
     }
+}
+
+fn xorshift16(mut state: u16) -> u16 {
+    state ^= state.wrapping_shl(7);
+    state ^= state >> 9;
+    state ^= state.wrapping_shl(8);
+    state
 }
 
 fn default_entropy() -> io::Result<Cell> {
