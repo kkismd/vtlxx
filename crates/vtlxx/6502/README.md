@@ -10,6 +10,8 @@ cargo test -p vtlxx --test sim65_6502 -- --ignored
 
 通常の `cargo test --workspace` は cc65 を必要としない。
 
+`entropy16` は target-private adapter symbol で、成功時は carry clear / A=low / X=high、取得不可は carry setを返す。初期 `sim65_adapter.s` は取得不可の既定実装を提供し、#569がOS由来値と固定seed注入を追加する。実機adapterは同じsymbol/ABIを実装して差し替える。
+
 ## Runtime helper（#274）
 
 `runtime/state.s`、`runtime/arithmetic.s`、`runtime/primitives.s` は現在の6502 target の実行状態と primitive を実装する。native emitter は `rt_init` を一度呼び、その後に以下の entry point を JSR で呼ぶ。いずれも target 内の link contract であり、portable VTLXX API ではない。
@@ -25,14 +27,17 @@ sim65 では、全 source の compile と driver 完成の後に `rt_init` へ�
 | `rt_eq`, `rt_ne`, `rt_lt`, `rt_le`, `rt_gt`, `rt_ge` | stack 上の operands | `( lhs rhs -- 0\|1 )` |
 | `rt_print_number`, `rt_print_char` | stack 上の value | `( value -- )` |
 | `rt_read_char` | — | `( -- char_or_eof )` |
+| `rt_read_entropy` | `entropy16` adapter | `( -- signed_raw16 )` |
 
 helper は A/X/Y と processor flags を保存しない。`rt_push` の引数と register helper の X 以外に CPU register の入力契約はない。Cell は little-endian の signed 16-bit、stack は 16 Cell、A-Z は 26 Cell、storage は下位8 bitで選ぶ256 Cellの ring。A-Z と stack は zero page、storage は通常 RAM に置く。`rt_init` は register、storage、stack depth を初期化する。
 
-fatal status は underflow = 1、overflow = 2、division by zero = 3、remainder by zero = 4 とし、いずれも #273 の `halt` へ移る。これは sim65 fixture が success と runtime error を区別するための target 内の値である。error 検出前に stack operand を消費しない。
+fatal status は underflow = 1、overflow = 2、division by zero = 3、remainder by zero = 4、entropy unavailable = 5 とし、いずれも #273 の `halt` へ移る。これは sim65 fixture が success と runtime error を区別するための target 内の値である。error 検出前に stack operand を消費しない。
 
 sim65 の失敗時状態確認だけに `RT_TEST_PROBE` を指定すると、HALT 直前に fixture の `rt_test_probe` を呼ぶ。通常の target build にはこの hook は入らない。
 
 `rt_read_char` は `$` PrimaryRead の固定runtime targetである。stack空き容量をtransport readより先に検査し、NULを読み捨てて1..255またはEOF=-1を1 Cellとしてpushする。EOFはruntime session内で記憶し、後続readも-1を返す。sim65 adapterの `_getchar` はbyteとEOFだけを区別し、recoverable I/O failureを個別に表せないため、このtargetではそのerror分類を検証できない。
+
+`rt_read_entropy` は `'` PrimaryRead の固定runtime targetで、stack容量を先に検査し、`entropy16` を評価ごとに一度呼ぶ。成功はcarry clear / A=low / X=high、取得不可はcarry setで表す。成功値だけを1 Cellとしてpushし、取得不可はstatus 5でHALTする。初期sim65 adapterは取得不可を返すため、OS値供給と `--seed` を実装する後続#569以前は `'` を使うruntimeは失敗する。adapterを差し替えない既存fixtureはlinkできる。
 
 ```sh
 cargo test -p vtlxx --test sim65_runtime -- --ignored

@@ -2,7 +2,7 @@
 ; and an 8-bit process status for HALT. This is not the ECVTL runtime ABI.
 .setcpu "6502"
 
-.export serial_in, serial_out, halt
+.export serial_in, serial_out, halt, entropy16
 .import _getchar, _putchar, exit
 
 .segment "CODE"
@@ -23,3 +23,15 @@ serial_out:
 
 halt:
     jmp exit                    ; sim6502.lib passes A to simulator status
+
+; Initial sim65 adapter is deliberately unavailable. #569 supplies OS
+; entropy; test adapters may replace this symbol with deterministic values.
+entropy16:
+.ifdef ENTROPY16_TEST_VALUE
+    lda #<ENTROPY16_TEST_VALUE
+    ldx #>ENTROPY16_TEST_VALUE
+    clc
+.else
+    sec
+.endif
+    rts

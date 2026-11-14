@@ -1,8 +1,8 @@
 ; Runtime I/O helpers use only the #273 serial adapters.
 .setcpu "6502"
 
-.export rt_print_char, rt_print_number, rt_print_bytes, rt_read_char
-.import rt_need_one, rt_overflow, rt_push, serial_in, serial_out
+.export rt_print_char, rt_print_number, rt_print_bytes, rt_read_char, rt_read_entropy
+.import rt_need_one, rt_overflow, rt_push, serial_in, serial_out, entropy16, halt
 .importzp rt_depth, rt_stack, rt_input_eof
 
 .importzp zp_phase
@@ -38,6 +38,7 @@ rt_read_char:
     beq @read
     ldx #0
     jmp rt_push
+
 @remember_eof:
     lda #1
     sta rt_input_eof
@@ -45,6 +46,21 @@ rt_read_char:
     lda #$ff
     ldx #$ff
     jmp rt_push
+
+; Read one target-provided raw16 Cell. Check capacity before calling the
+; provider, then commit only after it reports success (A=low, X=high, C=0).
+rt_read_entropy:
+    lda rt_depth
+    cmp #16
+    bcc @capacity_ready
+    jmp rt_overflow
+@capacity_ready:
+    jsr entropy16
+    bcs @unavailable
+    jmp rt_push
+@unavailable:
+    lda #5
+    jmp halt
 
 rt_print_char:
     jsr rt_need_one
