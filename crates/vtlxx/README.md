@@ -58,6 +58,16 @@ cargo test --workspace
 
 Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Read` を受け取ります。`$` の PrimaryRead は NUL を読み捨てて `1..255` または EOF の `-1` を返し、入力エラーは runtime error になります。入力位置は同じ Machine の手続きと top-level で共有されます。未設定時は空入力です。現在のRust対話CLIは、runtime stdinをMachine入力へ接続し、stdoutを逐次出力します（#313）。
 
+`'` は環境から16bit初期値を読む PrimaryRead です。各評価で環境providerを1回呼び、raw16bitsをsigned `Cell` として返します。取得できない場合は致命的な `EntropyError` になります。Rust `Machine` の `set_entropy_source` でテスト用providerへ差し替えられます。CLIはOSの乱数源を使い、再現実行には `--seed N`（signed 16bit十進数）を指定できます。指定値は `'` の参照ごとに返り、通常の stdin には追加されません。
+
+```vtl
+A='
+```
+
+```sh
+cargo run -p vtlxx --bin vtlxx -- path/to/program.vtl --seed 0
+```
+
 ## NMOS 6502 コンパイラの手動実行
 
 `vtlxx6502` は VTLXX source を既存の NMOS 6502 compiler で native code にし、`sim65` で実行します。Rust reference VMへのフォールバックはありません。実行には cc65 の `ca65`、`ld65`、`sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。
@@ -246,6 +256,7 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 | --- | --- |
 | `123`, `-7` | integer literal |
 | `A` .. `Z` | register read |
+| `'` | environment から16bit初期値を読む |
 | `@(expr)` | storage read |
 | `(expr)` | grouping |
 
