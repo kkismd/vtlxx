@@ -181,6 +181,7 @@ fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
         (-1, "16319122392551518160439927244"),
         (-32768, "2460826648200102368722344753"),
         (32767, "24479183911164967751802326781"),
+        (-21279, "270153093029703269729846343"),
     ];
     for (seed, expected) in cases {
         let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
@@ -201,6 +202,13 @@ fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
             .unwrap();
         assert!(rust.status.success(), "seed={seed}: {rust:?}");
         assert_eq!(output.stdout, rust.stdout, "Rust/sim65 seed={seed}");
+        let repeated = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .arg(&source)
+            .args(["--seed", &seed.to_string(), "--cycle-limit", "200000000"])
+            .output()
+            .unwrap();
+        assert!(repeated.status.success(), "seed={seed}: {repeated:?}");
+        assert_eq!(output.stdout, repeated.stdout, "sim65 repeat seed={seed}");
     }
 }
 
