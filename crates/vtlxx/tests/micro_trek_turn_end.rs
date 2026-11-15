@@ -6,6 +6,7 @@ const PREFIX: &[i16] = &[-32768, 123, 32767];
 
 fn machine(k: i16, energy: i16, days: i16, enemy_hp: i16, base: bool) -> Machine {
     let mut m = Machine::new();
+    m.set_entropy_source(|| Ok(42));
     m.execute_source(SOURCE.split_once("; EC08_TEST_DEFINITIONS_END").unwrap().0)
         .unwrap();
     m.execute_source(&format!(
@@ -78,7 +79,7 @@ fn actual_counterattack_can_cause_defeat() {
     run(&mut m, 2);
     assert_eq!(m.storage(161), 0);
     assert_eq!(m.storage(135), 1);
-    assert_eq!(m.storage(192), (42_i32 * 25173 + 13849) as i16);
+    assert_eq!(m.storage(192), 42);
     assert_eq!(
         m.output(),
         b"*KLINGON ATTACK\n1 UNITS HIT FROM KLINGON (44)\n"

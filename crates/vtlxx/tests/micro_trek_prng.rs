@@ -1,102 +1,72 @@
 use vtlxx::Machine;
 
-const PRNG: &str = include_str!("fixtures/micro_trek/prng.vtl");
+const SOURCE: &str = include_str!("../examples/micro_trek.vtl");
+const MARKER: &str = "; EC08_TEST_DEFINITIONS_END";
 const PREFIX: &[i16] = &[i16::MIN, 1234, -7, i16::MAX];
 
-fn next(state: i16, n: i16) -> (i16, i16) {
-    let state = ((i32::from(state) * 25173 + 13849) as u16) as i16;
-    let remainder = i32::from(state) % i32::from(n);
-    let value = (remainder + if remainder < 0 { i32::from(n) } else { 0 } + 1) as i16;
-    (state, value)
-}
-
-fn run(seed: i16, bounds: &[i16]) -> (Vec<i16>, i16) {
-    let mut machine = Machine::new();
-    machine
-        .execute_source("I=0 *=I<240 [ @=I,I+2000 I=I+1 ] @=-1,-123")
-        .unwrap();
-    machine
-        .execute_source(&format!("@=192,{seed} {PRNG}"))
-        .unwrap();
-    for &value in PREFIX {
-        machine.push(value);
-    }
-    let storage: Vec<_> = (0..=u16::MAX).map(|i| machine.storage(i)).collect();
-    let registers: Vec<_> = (0..26).map(|i| machine.register(i)).collect();
+fn x16(seed: u16) -> u16 {
     let mut state = seed;
-    let mut values = Vec::new();
-    for &n in bounds {
-        let (expected_state, expected_value) = next(state, n);
-        machine.execute_source(&format!("r={n}")).unwrap();
-        assert_eq!(machine.stack(), [PREFIX, &[expected_value]].concat());
-        assert_eq!(machine.pop().unwrap(), expected_value);
-        assert_eq!(machine.storage(192), expected_state);
-        assert!((1..=n).contains(&expected_value));
-        values.push(expected_value);
-        state = expected_state;
-    }
-    for (index, expected) in storage.into_iter().enumerate() {
-        if index != 192 {
-            assert_eq!(machine.storage(index as u16), expected, "storage[{index}]");
-        }
-    }
-    for (index, expected) in registers.into_iter().enumerate() {
-        if index > 1 {
-            assert_eq!(machine.register(index), expected, "register {index}");
-        }
-    }
-    assert!(machine.output().is_empty());
-    (values, state)
+    state ^= state.wrapping_shl(7);
+    state ^= state >> 9;
+    state ^= state.wrapping_shl(8);
+    state
 }
 
-#[test]
-fn fixed_stream_and_single_updates() {
-    let bounds = [1, 2, 3, 6, 8, 600, 999, 32767];
-    let states = [13849, -16794, 31223, 17180, 13925, -4190, -13597, 31096];
-    let values = [1, 1, 3, 3, 6, 11, 390, 31097];
-    let mut state = 0;
-    for ((n, expected_state), expected_value) in bounds.into_iter().zip(states).zip(values) {
-        assert_eq!(next(state, n), (expected_state, expected_value));
-        state = expected_state;
-    }
-    assert_eq!(run(0, &bounds), (values.to_vec(), 31096));
-}
-
-#[test]
-fn seeds_callers_and_replay_continue_one_stream() {
-    let bounds = [2, 8, 6, 3, 1, 600, 999, 32767, 8, 2];
-    for seed in [0, 1, -1, 32767, -32768] {
-        let full = run(seed, &bounds);
-        assert_eq!(full, run(seed, &bounds));
-        let first_mission = run(seed, &bounds[..4]);
-        let replay = run(first_mission.1, &bounds[4..]);
-        assert_eq!([first_mission.0, replay.0].concat(), full.0);
-        assert_eq!(replay.1, full.1);
-        assert!((0..=1).contains(&(full.0[0] - 1)));
-        assert!((1..=8).contains(&full.0[1]));
-        assert!((1..=6).contains(&full.0[2]));
-        assert!((1..=3).contains(&full.0[3]));
-    }
-}
-
-#[test]
-fn separate_source_callers_share_state_across_replay() {
+fn machine(seed: i16) -> Machine {
     let mut machine = Machine::new();
-    machine
-        .execute_source(&format!("@=192,0 {PRNG} &=p [ r=2 r=8 ] &=q [ r=6 r=3 ]"))
-        .unwrap();
-    for &value in PREFIX {
-        machine.push(value);
+    machine.set_entropy_source(move || Ok(seed));
+    let definitions = SOURCE.split(MARKER).next().unwrap();
+    machine.execute_source(definitions).unwrap();
+    for value in PREFIX {
+        machine.push(*value);
     }
-    machine.execute_source("p=() q=()").unwrap();
-    let mission_end = machine.storage(192);
-    machine.execute_source("q=() p=()").unwrap();
-    let (first, state) = run(0, &[2, 8, 6, 3]);
-    let (second, final_state) = run(state, &[6, 3, 2, 8]);
-    assert_eq!(mission_end, state);
-    assert_eq!(
-        machine.stack(),
-        [PREFIX, first.as_slice(), second.as_slice()].concat()
-    );
-    assert_eq!(machine.storage(192), final_state);
+    machine
+}
+
+#[test]
+fn bounded_random_uses_one_builtin_draw_and_does_not_own_storage_192() {
+    let seed = -21279_i16; // xorshift seed 0xACE1
+    let mut m = machine(seed);
+    m.execute_source("@=192,2468").unwrap();
+    let storage: Vec<_> = (0..=255).map(|address| m.storage(address)).collect();
+    let registers: Vec<_> = (2..26).map(|register| m.register(register)).collect();
+    let mut expected_state = seed as u16;
+    for n in [1_i16, 2, 3, 6, 8, 600, 999, 32767] {
+        expected_state = x16(expected_state);
+        let expected = (expected_state >> 1) as i16 % n + 1;
+        m.execute_source(&format!("random={n}")).unwrap();
+        assert_eq!(m.pop().unwrap(), expected);
+        assert_eq!(m.stack(), PREFIX);
+        assert_eq!(m.storage(192), 2468);
+    }
+    for (address, value) in storage.into_iter().enumerate() {
+        assert_eq!(m.storage(address as u16), value, "storage[{address}]");
+    }
+    for (offset, value) in registers.into_iter().enumerate() {
+        assert_eq!(m.register(offset + 2), value, "register {}", offset + 2);
+    }
+    assert!(m.output().is_empty());
+}
+
+#[test]
+fn repeated_calls_and_source_executions_continue_the_machine_stream() {
+    let mut m = machine(1);
+    m.execute_source("&=p [ random=8 ] &=q [ random=6 ] p=() q=()")
+        .unwrap();
+    let mut state = x16(1);
+    let a = (state >> 1) as i16 % 8 + 1;
+    state = x16(state);
+    let b = (state >> 1) as i16 % 6 + 1;
+    m.execute_source("random=8").unwrap();
+    state = x16(state);
+    let c = (state >> 1) as i16 % 8 + 1;
+    assert_eq!(m.stack(), [PREFIX, &[a, b, c]].concat());
+}
+
+#[test]
+fn canonical_source_contains_no_game_owned_prng_state() {
+    assert!(!SOURCE.contains("PRNG_STATE"));
+    assert!(!SOURCE.contains("25173"));
+    assert!(!SOURCE.contains("13849"));
+    assert!(!SOURCE.contains("INVALID SEED"));
 }

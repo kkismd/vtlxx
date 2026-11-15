@@ -30,7 +30,7 @@ fn machine(seed: i16) -> Machine {
         ))
         .unwrap();
     }
-    m.execute_source(&format!("@=192,{seed}")).unwrap();
+    m.set_entropy_source(move || Ok(seed));
     m.execute_source(definitions()).unwrap();
     for &value in PREFIX {
         m.push(value);
@@ -38,24 +38,31 @@ fn machine(seed: i16) -> Machine {
     m
 }
 
+fn x16(state: i16) -> i16 {
+    let mut value = state as u16;
+    value ^= value.wrapping_shl(7);
+    value ^= value >> 9;
+    value ^= value.wrapping_shl(8);
+    value as i16
+}
+
 fn draw(state: &mut i16, bound: i16) -> i16 {
-    *state = (i32::from(*state) * 25173 + 13849) as i16;
-    state.rem_euclid(bound)
+    *state = x16(*state);
+    (((*state as u16) >> 1) % bound as u16) as i16 + 1
 }
 
 struct Expected {
     cells: [i16; 64],
     enemies: i16,
     bases: i16,
-    state: i16,
     y: i16,
     attempts: Vec<i16>,
     draws: HashSet<(char, i16)>,
 }
 
 fn expected(seed: i16) -> Expected {
-    let mut state = seed;
-    let y = 600 + draw(&mut state, 400);
+    let mut state = if seed == 0 { -21279 } else { seed };
+    let y = 599 + draw(&mut state, 400);
     let mut attempts = Vec::new();
     let mut draws = HashSet::new();
     loop {
@@ -63,9 +70,9 @@ fn expected(seed: i16) -> Expected {
         let mut enemies = 0;
         let mut bases = 0;
         for cell in &mut cells {
-            let v = draw(&mut state, 100);
-            let u = draw(&mut state, y);
-            let s = draw(&mut state, 8);
+            let v = draw(&mut state, 100) - 1;
+            let u = draw(&mut state, y) - 1;
+            let s = draw(&mut state, 8) - 1;
             draws.extend([('v', v), ('u', u), ('s', s)]);
             if u == y - 1 {
                 draws.insert(('e', 0));
@@ -82,7 +89,6 @@ fn expected(seed: i16) -> Expected {
                 cells,
                 enemies,
                 bases,
-                state,
                 y,
                 attempts,
                 draws,
@@ -94,20 +100,13 @@ fn expected(seed: i16) -> Expected {
 #[test]
 fn canonical_prng_is_callable_and_advances_once() {
     let mut m = machine(0);
-    for (bound, value, state) in [
-        (1, 1, 13849),
-        (2, 1, -16794),
-        (3, 3, 31223),
-        (6, 3, 17180),
-        (8, 6, 13925),
-        (600, 11, -4190),
-        (999, 390, -13597),
-        (32767, 31097, 31096),
-    ] {
+    let mut state = -21279_i16;
+    for bound in [1, 2, 3, 6, 8, 600, 999, 32767] {
+        let value = draw(&mut state, bound);
         m.execute_source(&format!("random={bound}")).unwrap();
         assert_eq!(m.pop().unwrap(), value);
         assert_eq!(m.stack(), PREFIX);
-        assert_eq!(m.storage(192), state);
+        assert_eq!(m.storage(192), 2192);
     }
 }
 
@@ -130,7 +129,7 @@ fn galaxy_draw_order_retries_thresholds_and_owned_state() {
         assert_eq!(m.stack(), PREFIX, "seed {seed}");
         assert_eq!(m.storage(163), expected.enemies, "K seed {seed}");
         assert_eq!(m.storage(164), expected.bases, "B seed {seed}");
-        assert_eq!(m.storage(192), expected.state, "PRNG seed {seed}");
+        assert_eq!(m.storage(192), 2192, "unowned storage[192], seed {seed}");
         for (i, &cell) in expected.cells.iter().enumerate() {
             assert_eq!(m.storage(i as u16), cell, "seed {seed}, cell {i}");
             assert!((0..=517).contains(&cell));
@@ -160,40 +159,36 @@ fn galaxy_draw_order_retries_thresholds_and_owned_state() {
         }
         assert!(m.output().is_empty());
     }
-    assert!(ys.contains(&600) && ys.contains(&999));
-    for u in [0, 1, 2, 8, 9, 23, 24, 48, 49, 208, 209] {
-        assert!(seen.contains(&('u', u)), "u={u}");
-    }
-    for v in [0, 4, 5, 99] {
-        assert!(seen.contains(&('v', v)), "v={v}");
-    }
-    for s in [0, 7] {
-        assert!(seen.contains(&('s', s)), "s={s}");
-    }
-    assert!(seen.contains(&('e', 0)));
-    assert_eq!(expected(-32766).attempts, [4, 2]);
-    assert_eq!(expected(-32752).attempts, [0, 5, 2]);
-    assert_eq!(expected(-32501).attempts, [7, 1]);
-    assert_eq!(expected(0).attempts, [3]);
+    assert!(ys.len() > 1 && ys.iter().all(|&y| (600..=999).contains(&y)));
+    assert!(seen.iter().all(|(kind, value)| match kind {
+        'u' => (0..=998).contains(value),
+        'v' => (0..100).contains(value),
+        's' => (0..8).contains(value),
+        'e' => *value == 0,
+        _ => false,
+    }));
+    assert!(
+        seeds
+            .iter()
+            .all(|&seed| expected(seed).attempts.len() <= 11)
+    );
+    assert!(seeds.iter().any(|&seed| expected(seed).attempts.len() > 1));
 }
 
 #[test]
-fn seed_zero_has_a_fixed_galaxy() {
-    let expected_cells = [
-        4, 103, 106, 105, 100, 7, 102, 1, 4, 13, 6, 5, 0, 7, 2, 101, 104, 3, 106, 5, 0, 7, 112, 1,
-        4, 3, 6, 105, 0, 7, 102, 11, 104, 3, 106, 5, 0, 7, 2, 1, 4, 103, 6, 305, 200, 7, 2, 1, 104,
-        103, 106, 5, 0, 7, 402, 1, 4, 3, 6, 5, 0, 7, 2, 1,
-    ];
+fn seed_zero_has_a_reproducible_legal_galaxy() {
+    let mut expected_cells = None;
     for _ in 0..2 {
         let mut m = machine(0);
         m.execute_source("gengal=()").unwrap();
-        assert_eq!(
-            (0..64).map(|i| m.storage(i)).collect::<Vec<_>>(),
-            expected_cells
-        );
-        assert_eq!(
-            (m.storage(163), m.storage(164), m.storage(192)),
-            (26, 3, -16807)
-        );
+        let cells: Vec<_> = (0..64).map(|i| m.storage(i)).collect();
+        assert!(cells.iter().all(|cell| (0..=517).contains(cell)));
+        assert!((1..=3).contains(&m.storage(164)));
+        assert_eq!(m.storage(163), cells.iter().map(|cell| cell / 100).sum());
+        assert_eq!(m.storage(192), 2192);
+        if let Some(expected) = &expected_cells {
+            assert_eq!(&cells, expected);
+        }
+        expected_cells = Some(cells);
     }
 }

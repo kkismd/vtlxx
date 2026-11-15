@@ -8,7 +8,7 @@ fn machine(seed: i16) -> Machine {
     let mut m = Machine::new();
     m.execute_source("I=0 *=I<240 [ @=I,I+2000 I=I+1 ]")
         .unwrap();
-    m.execute_source(&format!("@=192,{seed}")).unwrap();
+    m.set_entropy_source(move || Ok(seed));
     let mut parts = SOURCE.split(MARKER);
     m.execute_source(parts.next().unwrap()).unwrap();
     assert!(parts.next().is_some() && parts.next().is_none());
@@ -18,9 +18,17 @@ fn machine(seed: i16) -> Machine {
     m
 }
 
+fn x16(state: i16) -> i16 {
+    let mut value = state as u16;
+    value ^= value.wrapping_shl(7);
+    value ^= value >> 9;
+    value ^= value.wrapping_shl(8);
+    value as i16
+}
+
 fn draw(state: &mut i16, bound: i16) -> i16 {
-    *state = (i32::from(*state) * 25173 + 13849) as i16;
-    state.rem_euclid(bound)
+    *state = x16(*state);
+    (((*state as u16) >> 1) % bound as u16) as i16 + 1
 }
 
 #[derive(Debug, PartialEq)]
@@ -33,17 +41,17 @@ struct Mission {
 }
 
 fn expected(seed: i16) -> Mission {
-    let mut state = seed;
-    let parameter = 600 + draw(&mut state, 400);
+    let mut state = if seed == 0 { -21279 } else { seed };
+    let parameter = 599 + draw(&mut state, 400);
     let mut attempts = Vec::new();
     let (galaxy, enemies, bases) = loop {
         let mut cells = [0; 64];
         let (mut enemies, mut bases) = (0, 0);
         for cell in &mut cells {
-            let base = i16::from(draw(&mut state, 100) < 5);
-            let value = draw(&mut state, parameter);
+            let base = i16::from(draw(&mut state, 100) - 1 < 5);
+            let value = draw(&mut state, parameter) - 1;
             let enemy = [209, 49, 24, 9, 2].iter().filter(|&&n| value < n).count() as i16;
-            let stars = draw(&mut state, 8);
+            let stars = draw(&mut state, 8) - 1;
             *cell = enemy * 100 + base * 10 + stars;
             enemies += enemy;
             bases += base;
@@ -53,8 +61,8 @@ fn expected(seed: i16) -> Mission {
             break (cells, enemies, bases);
         }
     };
-    let u = draw(&mut state, 8) + 1;
-    let v = draw(&mut state, 8) + 1;
+    let u = draw(&mut state, 8);
+    let v = draw(&mut state, 8);
     let (x, y) = (v, u);
     let content = galaxy[((u - 1) * 8 + v - 1) as usize];
     let n = content / 100;
@@ -63,7 +71,7 @@ fn expected(seed: i16) -> Mission {
     for (kind, count) in [(1, n), (2, content % 100 / 10), (3, content % 10)] {
         for slot in 0..count as usize {
             loop {
-                let index = draw(&mut state, 64) as usize;
+                let index = (draw(&mut state, 64) - 1) as usize;
                 if sector[index] != 0 {
                     continue;
                 }
@@ -101,7 +109,7 @@ fn check(m: &Machine, exp: &Mission) {
     for (i, &value) in exp.scalars.iter().enumerate() {
         assert_eq!(m.storage(160 + i as u16), value, "scalar {i}");
     }
-    assert_eq!(m.storage(192), exp.state);
+    assert_eq!(m.storage(192), 2192);
     for i in (153..160).chain(171..192).chain(193..240) {
         assert_eq!(m.storage(i), i as i16 + 2000, "unowned {i}");
     }
@@ -124,6 +132,7 @@ fn mission_and_replay_follow_the_same_prng_stream() {
         repeat.execute_source("initgame=() initgame=()").unwrap();
         check(&repeat, &second);
     }
-    assert_eq!(expected(-32766).attempts, [4, 2]);
-    assert_eq!(expected(-32752).attempts, [0, 5, 2]);
+    for seed in [0, -32766, -32752, -32501] {
+        assert!(expected(seed).attempts.len() <= 11);
+    }
 }

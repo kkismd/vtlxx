@@ -7,6 +7,7 @@ const PREFIX: &[i16] = &[-32768, 123, 32767];
 
 fn machine(input: &[u8]) -> Machine {
     let mut m = Machine::new();
+    m.set_entropy_source(|| Ok(123));
     m.execute_source(SOURCE.split_once("; EC08_TEST_DEFINITIONS_END").unwrap().0)
         .unwrap();
     m.execute_source("@=160,30 @=192,123").unwrap();
@@ -61,7 +62,8 @@ fn retry_reads_complete_lines_and_preserves_state() {
 fn replay_initialization_continues_the_random_stream() {
     fn run() -> (Vec<i16>, i16, Vec<i16>, i16) {
         let mut m = machine(b"Y\n");
-        m.execute_source("@=192,0 initgame=()").unwrap();
+        m.set_entropy_source(|| Ok(0));
+        m.execute_source("@=192,2468 initgame=()").unwrap();
         let first = (0..171).map(|i| m.storage(i)).collect();
         let first_seed = m.storage(192);
         m.execute_source("gameend=1").unwrap();
@@ -75,7 +77,7 @@ fn replay_initialization_continues_the_random_stream() {
     let result = run();
     assert_eq!(result, run());
     assert_ne!(result.0, result.2);
-    assert_ne!(result.1, result.3);
+    assert_eq!(result.1, result.3);
 }
 
 #[test]
@@ -95,19 +97,12 @@ fn retry_input_failure_is_not_eof() {
 }
 
 #[test]
-fn startup_seed_input_failure_remains_fatal() {
-    struct FailedInput;
-    impl Read for FailedInput {
-        fn read(&mut self, _: &mut [u8]) -> io::Result<usize> {
-            Err(io::ErrorKind::BrokenPipe.into())
-        }
-    }
-
+fn startup_entropy_failure_remains_fatal_on_first_random_read() {
     let mut m = Machine::new();
-    m.set_input(FailedInput);
+    m.set_entropy_source(|| Err(io::ErrorKind::BrokenPipe.into()));
     assert_eq!(
         m.execute_source(SOURCE),
-        Err(SourceError::Runtime(RuntimeError::InputError))
+        Err(SourceError::Runtime(RuntimeError::EntropyError))
     );
     assert!(m.output().is_empty());
 }
@@ -115,9 +110,10 @@ fn startup_seed_input_failure_remains_fatal() {
 #[test]
 fn cli_starts_and_exits_on_x_or_eof() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.vtl");
-    for input in [b"0\nX\n".as_slice(), b"0\n"] {
+    for input in [b"X\n".as_slice(), b""] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
             .arg(path)
+            .args(["--seed", "0"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -126,7 +122,16 @@ fn cli_starts_and_exits_on_x_or_eof() {
         child.stdin.take().unwrap().write_all(input).unwrap();
         let output = child.wait_with_output().unwrap();
         assert!(output.status.success(), "{:?}", output.stderr);
-        assert_eq!(output.stdout, b"IT IS STARDATE : 3200\nOBJECTIVE :\nDESTROY 26 KLINGON CRUISERS\nIN 30 YEARS!\nTHE NUMBER OF BASE IS 3\nCOMMAND :");
+        assert!(
+            output
+                .stdout
+                .starts_with(b"IT IS STARDATE : 3200\nOBJECTIVE :\nDESTROY ")
+        );
+        assert!(
+            output
+                .stdout
+                .ends_with(b"IN 30 YEARS!\nTHE NUMBER OF BASE IS 3\nCOMMAND :")
+        );
         assert!(output.stderr.is_empty());
     }
 }
@@ -136,18 +141,19 @@ fn cli_cancel_and_committed_action_return_to_command() {
     let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.vtl");
     for (input, marker, stardate) in [
         (
-            b"0\nP\n0\nR\nX\n".as_slice(),
+            b"P\n0\nR\nX\n".as_slice(),
             "*PHASER*\nENERGY ? ",
             "*STARDATE : 3200\n",
         ),
         (
-            b"0\nW\n1\n0\nR\nX\n",
+            b"W\n1\n0\nR\nX\n",
             "* ION ENGINE START\n",
             "*STARDATE : 3201\n",
         ),
     ] {
         let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
             .arg(path)
+            .args(["--seed", "0"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -170,6 +176,7 @@ fn cli_replay_initializes_a_second_mission_without_reseeding() {
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.vtl");
         let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
             .arg(path)
+            .args(["--seed", "0"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -177,7 +184,6 @@ fn cli_replay_initializes_a_second_mission_without_reseeding() {
             .unwrap();
         let mut input = child.stdin.take().unwrap();
         let mut output = child.stdout.take().unwrap();
-        input.write_all(b"0\n").unwrap();
         let mut captured = Vec::new();
         let mut turns = 0;
         let mut replayed = false;

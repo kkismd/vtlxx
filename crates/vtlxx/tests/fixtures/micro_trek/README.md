@@ -47,13 +47,8 @@ cargo test --workspace
 
 ## 範囲付き乱数
 
-`prng.vtl` は [#387](https://github.com/kkismd/vtlxx/issues/387) のゲーム専用手続き `r`。
-`( n -- value )`、caller は `n=1..32767` を保証し、結果は `1..n`。
-storage[192] を1回更新して signed remainder を正規化する。直接・間接の書込みは
-register A,B と storage[192] のみで、scratch storage と named callee は使わない。
-初回 seed の設定と再プレイ時の状態保持はゲーム側の後続 issue が担当する。
-STTR1 の #315 とは identity と storage を共有しない。
-
-`micro_trek_prng.rs` は固定期待値、各 seed の再現性、別 caller と再プレイを模した
-連続呼出し、全 storage、他 register、stack prefix と出力を検証する。
-現行 Machine に入力 API はなく、source に入力操作がないことを確認する。
+ゲーム本体の `random` は組み込み `'` から1値を読み、`1..n`へ変換する。
+ゲームsourceはPRNG stateを所有せず、storage[192]を書き換えない。
+固定seedはRust Machine providerまたは汎用CLIの `--seed N` で与える。
+`micro_trek_prng.rs` は独立したX16モデル、値域、1呼出し1 draw、Machine内の継続、
+value stack prefix、およびstorage[192]の非所有を検証する。

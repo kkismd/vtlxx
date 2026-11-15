@@ -8,9 +8,13 @@ const PREFIX: &[i16] = &[-32768, 123, 32767];
 
 fn machine(input: &str) -> Machine {
     let mut m = Machine::new();
+    m.set_entropy_source(|| Ok(1));
     m.execute_source(SOURCE.split_once("; EC08_TEST_DEFINITIONS_END").unwrap().0)
         .unwrap();
-    m.execute_source("@=160,19 @=161,4000 @=162,7 @=165,4 @=166,4 @=167,4 @=168,4 @=170,1 @=98,4 @=192,0 @=70,42").unwrap();
+    m.execute_source(
+        "@=160,19 @=161,4000 @=162,7 @=165,4 @=166,4 @=167,4 @=168,4 @=170,1 @=98,4 @=70,42",
+    )
+    .unwrap();
     m.set_input(Cursor::new(input.as_bytes().to_vec()));
     for &v in PREFIX {
         m.push(v);
@@ -39,20 +43,18 @@ fn direct_input_to_real_trajectory_commits_once() {
         (m.storage(64), m.storage(65), m.storage(66), m.storage(70)),
         (0, 0, 2, 42)
     );
-    assert_eq!(
-        (m.storage(98), m.storage(82), m.storage(192)),
-        (0, 4, 13849)
-    );
+    assert_eq!((m.storage(98), m.storage(82), m.storage(192)), (0, 4, 0));
     assert_eq!((71..135).filter(|&i| m.storage(i) == 4).count(), 1);
 }
 
 #[test]
 fn departure_crosses_multiple_quadrants_before_rebuilding_final_sector() {
     let mut m = machine("10\n0\n");
+    m.set_entropy_source(|| Ok(4));
     // The old sector's (8,4) is occupied, but belongs to neither intermediate
     // nor final quadrant. The middle quadrant has enemies; only the final
     // quadrant's one enemy and one star must be constructed.
-    m.execute_source("@=167,1 @=98,0 @=74,4 @=130,3 @=19,300 @=11,101 @=163,4 @=65,3 @=192,1")
+    m.execute_source("@=167,1 @=98,0 @=74,4 @=130,3 @=19,300 @=11,101 @=163,4 @=65,3")
         .unwrap();
     call(&mut m, 1);
     assert_eq!(
@@ -73,8 +75,8 @@ fn departure_crosses_multiple_quadrants_before_rebuilding_final_sector() {
         (18, 3950, 0)
     );
     assert_eq!((m.storage(65), m.storage(67), m.storage(70)), (2, 1, 42));
-    // seed 1: storm, j's two draws, then q's enemy and star draws.
-    assert_eq!(m.storage(192), 3882);
+    // Runtime-owned PRNG state never enters game storage.
+    assert_eq!(m.storage(192), 0);
     assert_eq!(
         (
             m.storage(169),
@@ -82,7 +84,7 @@ fn departure_crosses_multiple_quadrants_before_rebuilding_final_sector() {
             m.storage(141),
             m.storage(147)
         ),
-        (1, 300, 2, 6)
+        (1, 300, 8, 5)
     );
     assert_eq!((71..135).filter(|&i| m.storage(i) == 4).count(), 1);
     assert_eq!((71..135).filter(|&i| m.storage(i) == 1).count(), 1);

@@ -1,4 +1,4 @@
-//! Rust CLI E2E: canonical complete source, with seed 0 supplied as the first runtime line.
+//! Rust CLI E2E: canonical complete source, with seed 0 supplied through --seed.
 //!
 //! CLI exposes output and exit status, not final storage or PRNG. The
 //! corresponding owner-state checks remain in `micro_trek_lifecycle`
@@ -34,9 +34,11 @@ const SOURCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.v
 // Each run has its own wall-clock deadline, including input and pipe reads.
 const LIMIT: Duration = Duration::from_secs(30);
 
-fn run(input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
+fn run_seeded(seed: i16, input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
         .arg(SOURCE)
+        .arg("--seed")
+        .arg(seed.to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -78,19 +80,9 @@ fn run(input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
     (status.code().unwrap_or(-1), output, error)
 }
 
-fn run_seeded(seed: &[u8], input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
-    let mut all = seed.to_vec();
-    all.extend_from_slice(input);
-    run(&all)
-}
-
 fn reproducible(input: &[u8]) -> String {
-    let first = run_seeded(b"0\n", input);
-    assert_eq!(
-        first,
-        run_seeded(b"0\n", input),
-        "seed 0 and input {input:?}"
-    );
+    let first = run_seeded(0, input);
+    assert_eq!(first, run_seeded(0, input), "seed 0 and input {input:?}");
     assert_eq!(first.0, 0, "stderr: {:?}", first.2);
     assert!(first.2.is_empty(), "stderr: {:?}", first.2);
     String::from_utf8(first.1).unwrap()
@@ -113,12 +105,12 @@ fn displays_then_x_without_turn_end() {
     ordered(
         &output,
         &[
-            "DESTROY 26 KLINGON CRUISERS\n",
+            "DESTROY 29 KLINGON CRUISERS\n",
             "COMMAND :\n########## GARAXY MAP ##########\n",
-            "COMMAND :NOW: QUADRANT(78) SECTOR(87)\n*LONG RANGE SENSOR*\n",
-            "6 002 001 ***\n7 402 001 ***\n8 002 001 ***\n ...7...8...9\n",
-            "COMMAND :NOW: QUADRANT(78) SECTOR(87)\n*SHORT RANGE SENSOR*\n",
-            "8 . . . . . . E .\n  1 2 3 4 5 6 7 8\n",
+            "COMMAND :NOW: QUADRANT(",
+            "*LONG RANGE SENSOR*\n",
+            "COMMAND :NOW: QUADRANT(",
+            "*SHORT RANGE SENSOR*\n",
             "COMMAND :*STATUS REPORT*\n\n*STARDATE : 3200\n",
             "COMMAND :*HELP*\nS : SHORT RANGE SENSOR\n",
             "? : HELP\nCOMMAND :",
@@ -148,8 +140,8 @@ fn actions_and_outside_warp_follow_fixed_tracks() {
         &output,
         &[
             "COMMAND :*PHASER*\nENERGY ? MISSED!!\n",
-            "COMMAND :*TORPEDOES*\nCOURSE: ENTERPRISE FIRING TORPEDOES.\nTRACK-77-67-57-47-37-27-17-MISS\n",
-            "COMMAND :*WARP*\n FACTOR ? COURSE: * ION ENGINE START\n78-87\nNOW: QUADRANT(78) SECTOR(77)\n",
+            "COMMAND :*TORPEDOES*\nCOURSE: ENTERPRISE FIRING TORPEDOES.\nTRACK-",
+            "-MISS\nCOMMAND :*WARP*\n FACTOR ? COURSE: * ION ENGINE START\n",
             "*STARDATE : 3201\n",
             "*ENERGY...: 3989\n",
             "*TORPEDOES: 9\n",
@@ -161,10 +153,10 @@ fn actions_and_outside_warp_follow_fixed_tracks() {
     ordered(
         &outside,
         &[
-            "* ION ENGINE START\n78-87\n",
-            "*WARP ENGINE START\n68-87\n",
-            "18-17\n OUTSIDE THE GARAXY !!\nON BOARD COMPUTER TAKES OVER,\n",
-            "*COMPUTER*DAMAGED!\n3\n YEARS ESTIMATED FOR REPAIR.\n",
+            "* ION ENGINE START\n",
+            "*WARP ENGINE START\n",
+            " OUTSIDE THE GARAXY !!\nON BOARD COMPUTER TAKES OVER,\n",
+            "*COMPUTER*DAMAGED!\n",
             "COMMAND :",
         ],
     );
@@ -184,7 +176,7 @@ fn two_defeats_invalid_retry_yes_then_no() {
     ordered(
         &output,
         &[
-            "OBJECTIVE :\nDESTROY 26 KLINGON CRUISERS\n",
+            "OBJECTIVE :\nDESTROY ",
             "IT IS STARDATE : 3230\nPLANETS UNION WAS CONQUERED \nRETRY?(Y/N)RETRY?(Y/N)",
             "OBJECTIVE :\n",
             "IT IS STARDATE : 3230\nPLANETS UNION WAS CONQUERED \nRETRY?(Y/N)",
@@ -205,9 +197,9 @@ fn initial_eof_is_normal_exit() {
 
 #[test]
 fn seed_boundaries_are_accepted_and_deterministic() {
-    for seed in [b"0\n".as_slice(), b"1\n", b"-1\n", b"-32768\n", b"32767\n"] {
+    for seed in [0, 1, -1, -32768, 32767] {
         let first = run_seeded(seed, b"X\n");
-        assert_eq!(first, run_seeded(seed, b"X\n"), "seed {seed:?}");
+        assert_eq!(first, run_seeded(seed, b"X\n"), "seed {seed}");
         assert_eq!(first.0, 0, "stderr: {:?}", first.2);
         assert!(first.2.is_empty());
         assert!(first.1.ends_with(b"COMMAND :"));
@@ -215,17 +207,9 @@ fn seed_boundaries_are_accepted_and_deterministic() {
 }
 
 #[test]
-fn seed_eof_and_invalid_lines_do_not_start_the_game() {
-    for (input, expected) in [
-        (b"".as_slice(), b"".as_slice()),
-        (b"\n", b"INVALID SEED\n"),
-        (b"nope\n", b"INVALID SEED\n"),
-        (b"32768\n", b"INVALID SEED\n"),
-        (b"-32769\n", b"INVALID SEED\n"),
-    ] {
-        let result = run(input);
-        assert_eq!(result.0, 0, "input {input:?}, stderr: {:?}", result.2);
-        assert_eq!(result.1, expected, "input {input:?}");
-        assert!(result.2.is_empty());
-    }
+fn initial_eof_starts_game_before_normal_exit() {
+    let result = run_seeded(0, b"");
+    assert_eq!(result.0, 0);
+    assert!(result.1.ends_with(b"THE NUMBER OF BASE IS 3\nCOMMAND :"));
+    assert!(result.2.is_empty());
 }

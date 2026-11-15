@@ -16,8 +16,8 @@ fn machine(seed: i16) -> Machine {
     let mut m = Machine::new();
     m.execute_source("I=0 *=I<240 [ @=I,I+2000 I=I+1 ]")
         .unwrap();
-    m.execute_source(&format!("@=192,{seed} I=64 *=I<70 [ @=I,0 I=I+1 ]"))
-        .unwrap();
+    m.set_entropy_source(move || Ok(seed));
+    m.execute_source("I=64 *=I<70 [ @=I,0 I=I+1 ]").unwrap();
     let mut parts = SOURCE.split("; EC08_TEST_DEFINITIONS_END");
     m.execute_source(parts.next().unwrap()).unwrap();
     assert!(parts.next().is_some() && parts.next().is_none());
@@ -37,12 +37,20 @@ fn expected_output(id: usize, years: i16) -> String {
     }
 }
 
-fn draw(state: &mut i16, bound: i16) -> i16 {
-    *state = (i32::from(*state) * 25173 + 13849) as i16;
-    state.rem_euclid(bound) + 1
+fn x16(state: i16) -> i16 {
+    let mut value = state as u16;
+    value ^= value.wrapping_shl(7);
+    value ^= value >> 9;
+    value ^= value.wrapping_shl(8);
+    value as i16
 }
 
-fn check_unchanged(m: &Machine, seed: i16, devices: &[i16; 6]) {
+fn draw(state: &mut i16, bound: i16) -> i16 {
+    *state = x16(*state);
+    (((*state as u16) >> 1) % bound as u16) as i16 + 1
+}
+
+fn check_unchanged(m: &Machine, _seed: i16, devices: &[i16; 6]) {
     assert_eq!(m.stack(), PREFIX);
     for i in 2..26 {
         assert_eq!(m.register(i), Some(i as i16 + 101), "register {i}");
@@ -50,8 +58,6 @@ fn check_unchanged(m: &Machine, seed: i16, devices: &[i16; 6]) {
     for i in 0..240 {
         let expected = if (64..70).contains(&i) {
             devices[(i - 64) as usize]
-        } else if i == 192 {
-            seed
         } else {
             i as i16 + 2000
         };
@@ -100,7 +106,7 @@ fn damage_draw_order_and_accumulation() {
                 devices[device - 1] += amount;
                 output.push_str(&expected_output(device, devices[device - 1]));
                 m.execute_source("devdmg=()").unwrap();
-                check_unchanged(&m, state, &devices);
+                check_unchanged(&m, seed, &devices);
                 assert_eq!(m.output(), output.as_bytes());
             }
         }
@@ -129,7 +135,7 @@ fn output_error_preserves_committed_damage_and_draws() {
         m.execute_source("devdmg=()"),
         Err(SourceError::Runtime(RuntimeError::OutputError))
     );
-    assert_eq!(m.storage(192), state);
+    assert_eq!(m.storage(192), 2192);
     for id in 1..=6 {
         assert_eq!(
             m.storage(63 + id as u16),
