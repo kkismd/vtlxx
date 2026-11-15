@@ -34,11 +34,13 @@ const SOURCE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/micro_trek.v
 // Each run has its own wall-clock deadline, including input and pipe reads.
 const LIMIT: Duration = Duration::from_secs(30);
 
-fn run_seeded(seed: i16, input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
-        .arg(SOURCE)
-        .arg("--seed")
-        .arg(seed.to_string())
+fn run_with_seed(seed: Option<i16>, input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_vtlxx"));
+    command.arg(SOURCE);
+    if let Some(seed) = seed {
+        command.args(["--seed", &seed.to_string()]);
+    }
+    let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -80,6 +82,10 @@ fn run_seeded(seed: i16, input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
     (status.code().unwrap_or(-1), output, error)
 }
 
+fn run_seeded(seed: i16, input: &[u8]) -> (i32, Vec<u8>, Vec<u8>) {
+    run_with_seed(Some(seed), input)
+}
+
 fn reproducible(input: &[u8]) -> String {
     let first = run_seeded(0, input);
     assert_eq!(first, run_seeded(0, input), "seed 0 and input {input:?}");
@@ -107,10 +113,12 @@ fn displays_then_x_without_turn_end() {
         &[
             "DESTROY 29 KLINGON CRUISERS\n",
             "COMMAND :\n########## GARAXY MAP ##########\n",
-            "COMMAND :NOW: QUADRANT(",
-            "*LONG RANGE SENSOR*\n",
-            "COMMAND :NOW: QUADRANT(",
-            "*SHORT RANGE SENSOR*\n",
+            " *** *** *** *** *** *** *** ***\n",
+            " ..1...2...3...4...5...6...7...8\n",
+            "COMMAND :NOW: QUADRANT(22) SECTOR(22)\n*LONG RANGE SENSOR*\n",
+            "1 001 002 106\n2 106 003 101\n3 005 002 007\n ...1...2...3\n",
+            "COMMAND :NOW: QUADRANT(22) SECTOR(22)\n*SHORT RANGE SENSOR*\n",
+            "1 . . . . . . . .\n2 . E . . . . . .\n3 . . . . . . . .\n",
             "COMMAND :*STATUS REPORT*\n\n*STARDATE : 3200\n",
             "COMMAND :*HELP*\nS : SHORT RANGE SENSOR\n",
             "? : HELP\nCOMMAND :",
@@ -140,11 +148,11 @@ fn actions_and_outside_warp_follow_fixed_tracks() {
         &output,
         &[
             "COMMAND :*PHASER*\nENERGY ? MISSED!!\n",
-            "COMMAND :*TORPEDOES*\nCOURSE: ENTERPRISE FIRING TORPEDOES.\nTRACK-",
-            "-MISS\nCOMMAND :*WARP*\n FACTOR ? COURSE: * ION ENGINE START\n",
+            "COMMAND :*TORPEDOES*\nCOURSE: ENTERPRISE FIRING TORPEDOES.\nTRACK-12-MISS\n",
+            "COMMAND :*WARP*\n FACTOR ? COURSE: * ION ENGINE START\n22-22\nNOW: QUADRANT(22) SECTOR(12)\n",
             "*STARDATE : 3201\n",
             "*ENERGY...: 3989\n",
-            "*TORPEDOES: 9\n",
+            "*TORPEDOES: 9\n*KLINGON..: 29\n*BASE.....: 3\n",
             "COMMAND :",
         ],
     );
@@ -153,10 +161,10 @@ fn actions_and_outside_warp_follow_fixed_tracks() {
     ordered(
         &outside,
         &[
-            "* ION ENGINE START\n",
-            "*WARP ENGINE START\n",
+            "* ION ENGINE START\n22-22\n22-12\n",
+            "*WARP ENGINE START\n12-82\n12-72\n12-62\n12-52\n12-42\n12-32\n12-22\n12-12\n",
             " OUTSIDE THE GARAXY !!\nON BOARD COMPUTER TAKES OVER,\n",
-            "*COMPUTER*DAMAGED!\n",
+            "*COMPUTER*DAMAGED!\n1\n YEARS ESTIMATED FOR REPAIR.\n",
             "COMMAND :",
         ],
     );
@@ -212,4 +220,15 @@ fn initial_eof_starts_game_before_normal_exit() {
     assert_eq!(result.0, 0);
     assert!(result.1.ends_with(b"THE NUMBER OF BASE IS 3\nCOMMAND :"));
     assert!(result.2.is_empty());
+}
+
+#[test]
+fn normal_startup_without_seed_uses_first_byte_as_game_command() {
+    for input in [b"X\n".as_slice(), b""] {
+        let (status, output, error) = run_with_seed(None, input);
+        assert_eq!(status, 0, "stderr: {error:?}");
+        assert!(error.is_empty());
+        assert!(output.starts_with(b"IT IS STARDATE : 3200\nOBJECTIVE :\nDESTROY "));
+        assert!(output.ends_with(b"COMMAND :"));
+    }
 }

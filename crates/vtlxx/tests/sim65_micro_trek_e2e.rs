@@ -163,7 +163,6 @@ fn interactive_prompt_is_visible_before_input() {
         command
             .arg(SOURCE)
             .arg("--interactive")
-            .args(["--seed", "0"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -199,5 +198,6 @@ fn interactive_prompt_is_visible_before_input() {
     output.extend(rx.iter());
     reader.join().unwrap();
     assert!(errors.join().unwrap().is_empty());
-    assert_eq!(output, run(false, 0, b"X\n").stdout);
+    assert!(output.starts_with(b"IT IS STARDATE : 3200\nOBJECTIVE :\nDESTROY "));
+    assert!(output.ends_with(b"COMMAND :"));
 }

@@ -167,12 +167,16 @@ fn galaxy_draw_order_retries_thresholds_and_owned_state() {
         'e' => *value == 0,
         _ => false,
     }));
+    assert!(seen.contains(&('v', 4)) && seen.contains(&('v', 5)));
+    assert!(seen.contains(&('u', 1)) && seen.contains(&('u', 2)));
     assert!(
         seeds
             .iter()
             .all(|&seed| expected(seed).attempts.len() <= 11)
     );
-    assert!(seeds.iter().any(|&seed| expected(seed).attempts.len() > 1));
+    assert_eq!(expected(-32764).attempts, [6, 2]);
+    assert_eq!(expected(-32757).attempts, [4, 3]);
+    assert_eq!(expected(-32752).attempts, [5, 4, 4, 3]);
 }
 
 #[test]

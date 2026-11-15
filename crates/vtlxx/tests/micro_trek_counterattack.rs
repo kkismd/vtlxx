@@ -74,8 +74,8 @@ fn empty_and_docked_do_not_attack() {
 #[test]
 fn attack_slots_and_threshold_preserve_state_and_draw_order() {
     for (seed, hp, expected_total) in [
-        (-32376, [300, 0, 300, 0, 0, 300], None),
-        (-32753, [300, 0, 300, 0, 0, 300], None),
+        (-32725, [300, 0, 300, 0, 0, 300], Some(199)),
+        (-32349, [300, 0, 300, 0, 0, 300], Some(200)),
         (42, [1, 2, 0, 0, 0, 300], None),
         (51, [300; 6], None),
     ] {
