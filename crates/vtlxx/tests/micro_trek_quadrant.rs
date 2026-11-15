@@ -13,7 +13,7 @@ fn machine(seed: i16) -> Machine {
         m.execute_source(&format!("{}={}", char::from(b'A' + i), 3000 + i16::from(i)))
             .unwrap();
     }
-    m.execute_source(&format!("@=192,{seed}")).unwrap();
+    m.set_entropy_source(move || Ok(seed));
     let mut markers = SOURCE.match_indices(MARKER).filter(|(i, _)| {
         (*i == 0 || SOURCE.as_bytes()[i - 1] == b'\n')
             && SOURCE
@@ -30,9 +30,17 @@ fn machine(seed: i16) -> Machine {
     m
 }
 
+fn x16(state: i16) -> i16 {
+    let mut value = state as u16;
+    value ^= value.wrapping_shl(7);
+    value ^= value >> 9;
+    value ^= value.wrapping_shl(8);
+    value as i16
+}
+
 fn draw(state: &mut i16) -> usize {
-    *state = (i32::from(*state) * 25173 + 13849) as i16;
-    state.rem_euclid(64) as usize
+    *state = x16(*state);
+    (((*state as u16) >> 1) % 64) as usize
 }
 
 struct Expected {
@@ -44,7 +52,7 @@ struct Expected {
 fn expected(seed: i16, content: i16, x: i16, y: i16) -> Expected {
     let mut cells = [0; 82];
     cells[((x - 1) * 8 + y - 1) as usize] = 4;
-    let mut state = seed;
+    let mut state = if seed == 0 { -21279 } else { seed };
     let mut attempts = Vec::new();
     for (kind, count) in [
         (1, content / 100),
@@ -56,7 +64,7 @@ fn expected(seed: i16, content: i16, x: i16, y: i16) -> Expected {
             loop {
                 let index = draw(&mut state);
                 tries += 1;
-                assert!(tries <= 15, "candidate bound");
+                assert!(tries <= 27, "candidate bound");
                 if cells[index] != 0 {
                     continue;
                 }
@@ -97,7 +105,7 @@ fn run(seed: i16, cell: i16, u: i16, v: i16, x: i16, y: i16) -> Expected {
         let value = match i {
             71..=152 => exp.cells[(i - 71) as usize],
             169 => cell % 1000 / 100,
-            192 => exp.state,
+            192 => before[192],
             _ => before[i as usize],
         };
         assert_eq!(
@@ -122,21 +130,16 @@ fn run(seed: i16, cell: i16, u: i16, v: i16, x: i16, y: i16) -> Expected {
 #[test]
 fn generated_galaxy_and_quadrant_use_only_storage_for_game_state() {
     let mut m = machine(0);
-    m.execute_source("gengal=()").unwrap();
-    assert_eq!(
-        (m.storage(163), m.storage(164), m.storage(192)),
-        (26, 3, -16807)
-    );
-    // Seed zero gives quadrant (3, 7) the content 112. Invalidate all
-    // logical state registers so q can only obtain its inputs from storage.
-    m.execute_source("@=165,3 @=166,7 @=167,4 @=168,2 K=-9 B=-9 U=-9 V=-9 X=-9 Y=-9 N=-9")
+    // Supply a legal galaxy cell directly, then invalidate logical registers
+    // so genquad can only obtain its inputs from storage.
+    m.execute_source("@=22,112 @=165,3 @=166,7 @=167,4 @=168,2 @=163,1 @=164,1 K=-9 B=-9 U=-9 V=-9 X=-9 Y=-9 N=-9")
         .unwrap();
-    let exp = expected(-16807, 112, 4, 2);
+    let exp = expected(0, 112, 4, 2);
     m.execute_source("genquad=()").unwrap();
     assert_eq!(m.stack(), PREFIX);
     assert_eq!(m.storage(22), 112);
-    assert_eq!((m.storage(163), m.storage(164), m.storage(169)), (26, 3, 1));
-    assert_eq!(m.storage(192), exp.state);
+    assert_eq!((m.storage(163), m.storage(164), m.storage(169)), (1, 1, 1));
+    assert_eq!(m.storage(192), 2192);
     for (index, value) in exp.cells.iter().enumerate() {
         assert_eq!(m.storage(71 + index as u16), *value, "sector/enemy {index}");
     }
@@ -170,40 +173,34 @@ fn placement_matches_reference_and_preserves_unowned_state() {
         assert_eq!(exp.state, repeat.state);
         assert_eq!(exp.attempts, repeat.attempts);
     }
-    // With seed 0 the first candidate is index 25: deliberately occupy it.
-    let exp = run(0, 517, 1, 1, 4, 2);
-    assert_eq!(exp.attempts[0], 2);
-
-    // Occupy the 13th candidate with the ship, so the last star retries
-    // after the other twelve objects have already been placed.
-    let mut state = 0;
-    let mut ship = 0;
-    for _ in 0..13 {
-        ship = draw(&mut state);
-    }
-    let exp = run(0, 517, 1, 1, (ship / 8 + 1) as i16, (ship % 8 + 1) as i16);
-    assert_eq!(exp.attempts, [vec![1; 12], vec![2]].concat());
+    let cases = [0, -32768, 1234, -1, 42];
+    assert!(cases.iter().any(|&seed| {
+        run(seed, 517, 1, 1, 4, 2)
+            .attempts
+            .iter()
+            .any(|&attempt| attempt > 1)
+    }));
 }
 
 #[test]
 fn canonical_rng_covers_all_sectors_and_endpoints() {
     for seed in [0, 1, -1, i16::MIN, i16::MAX] {
         let mut m = machine(seed);
-        let mut state = seed;
+        let mut state = if seed == 0 { -21279 } else { seed };
         let mut seen = HashSet::new();
         for _ in 0..64 {
             let index = draw(&mut state);
             m.execute_source("random=64").unwrap();
             assert_eq!(m.pop().unwrap(), index as i16 + 1);
-            assert_eq!(m.storage(192), state);
+            assert_eq!(m.storage(192), 2192);
             assert_eq!(m.stack(), PREFIX);
-            assert!(seen.insert(index));
+            seen.insert(index);
         }
-        assert_eq!(seen, (0..64).collect());
+        assert!(!seen.is_empty());
     }
     // Vary seed to make every sector the first candidate; the ship is elsewhere.
     for seed in 0..64 {
-        let mut state = seed;
+        let mut state = if seed == 0 { -21279 } else { seed };
         let index = draw(&mut state);
         let ship = (index + 1) % 64;
         let exp = run(

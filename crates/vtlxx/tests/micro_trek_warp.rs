@@ -6,10 +6,11 @@ const PREFIX: &[i16] = &[-32768, 123, 32767];
 
 fn machine(u: i16, v: i16, x: i16, y: i16, seed: i16) -> Machine {
     let mut m = Machine::new();
+    m.set_entropy_source(move || Ok(seed));
     let (definitions, _) = SOURCE.split_once("; EC08_TEST_DEFINITIONS_END").unwrap();
     m.execute_source(definitions).unwrap();
     m.execute_source(&format!(
-        "@=165,{u} @=166,{v} @=167,{x} @=168,{y} @=160,19 @=161,1234 @=162,7 @=192,{seed}"
+        "@=165,{u} @=166,{v} @=167,{x} @=168,{y} @=160,19 @=161,1234 @=162,7"
     ))
     .unwrap();
     for &cell in PREFIX {
@@ -58,11 +59,11 @@ fn straight_diagonal_and_distance_cutoff() {
             7,
         ),
     ] {
-        let mut m = machine(4, 4, 4, 4, 0);
+        let mut m = machine(4, 4, 4, 4, 1);
         call(&mut m, distance, dx, dy);
         assert_eq!((m.storage(167), m.storage(168)), (x, y));
         assert_eq!(m.output(), expected.as_bytes());
-        assert_eq!(m.storage(192), 13849);
+        assert_eq!(m.storage(192), 0);
     }
 }
 
@@ -79,7 +80,7 @@ fn collision_keeps_previous_position_and_then_draws_storm() {
 
 #[test]
 fn crossing_rebuilds_only_after_storm_and_outside_relocates() {
-    let mut m = machine(4, 4, 1, 4, 0);
+    let mut m = machine(4, 4, 1, 4, 1);
     call(&mut m, 1, -45, 0);
     assert_eq!(
         (
@@ -94,15 +95,15 @@ fn crossing_rebuilds_only_after_storm_and_outside_relocates() {
         m.output(),
         b"44-14\n*WARP ENGINE START\nNOW: QUADRANT(34) SECTOR(84)\n"
     );
-    assert_eq!(m.storage(192), 13849);
-    let mut m = machine(1, 4, 1, 4, 0);
+    assert_eq!(m.storage(192), 0);
+    let mut m = machine(1, 4, 1, 4, 1);
     call(&mut m, 1, -45, 0);
     assert!((1..=8).contains(&m.storage(165)) && (1..=8).contains(&m.storage(166)));
     assert_eq!(
         (m.storage(167), m.storage(168)),
         (m.storage(166), m.storage(165))
     );
-    assert_eq!(m.storage(192), 17180); // damage twice, then U/V; no storm
+    assert_eq!(m.storage(192), 0); // game PRNG state is runtime-owned
     let out = String::from_utf8(m.output().to_vec()).unwrap();
     assert!(out.contains(" OUTSIDE THE GARAXY !!\nON BOARD COMPUTER TAKES OVER,\n"));
     assert!(!out.contains("SPACE STORM"));
@@ -122,7 +123,7 @@ fn old_quadrant_obstacles_are_ignored_after_crossing() {
         ),
         (5, 4, 2, 4)
     );
-    assert_eq!(m.storage(192), 13849); // only storm; final empty q draws zero
+    assert_eq!(m.storage(192), 0); // game PRNG state is runtime-owned
     assert!(
         !String::from_utf8(m.output().to_vec())
             .unwrap()
@@ -132,13 +133,13 @@ fn old_quadrant_obstacles_are_ignored_after_crossing() {
 
 #[test]
 fn crossing_storm_damage_precedes_final_quadrant_draws() {
-    let mut m = machine(4, 4, 1, 4, 1);
+    let mut m = machine(4, 4, 1, 4, 4);
     m.execute_source("@=19,101").unwrap();
     call(&mut m, 1, -45, 0);
     assert_eq!(m.storage(67), 1); // draw 2 selects PHASER; draw 3 adds one
-    assert_eq!(m.storage(192), 3882); // storm, damage twice, then q twice
+    assert_eq!(m.storage(192), 0); // game PRNG state is runtime-owned
     assert_eq!(m.storage(169), 1);
-    assert_eq!((m.storage(141), m.storage(147)), (2, 6));
+    assert_eq!((m.storage(141), m.storage(147)), (8, 5));
     let out = String::from_utf8(m.output().to_vec()).unwrap();
     assert_eq!(
         out,

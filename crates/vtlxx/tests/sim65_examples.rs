@@ -72,7 +72,7 @@ const EXAMPLES: &[ExampleCase] = &[
         disposition: Disposition::Portable {
             expected_stdout: None,
             cycle_limit: Some(4_000_000_000),
-            runtime_input: Some(include_bytes!("fixtures/micro_trek_seed0_exit.txt")),
+            runtime_input: Some(include_bytes!("fixtures/micro_trek_exit.txt")),
         },
     },
     ExampleCase {
@@ -242,22 +242,27 @@ fn run(
 ) -> Result<Output, String> {
     let mut command = Command::new(binary);
     command.arg(source);
+    if source
+        .file_name()
+        .is_some_and(|name| name == "micro_trek.vtl")
+    {
+        command.args(["--seed", "0"]);
+    }
     if let Some(cycle_limit) = cycle_limit {
         command.arg("--cycle-limit").arg(cycle_limit.to_string());
     }
     if target && runtime_input.is_some() {
-        let fixture =
-            if runtime_input == Some(include_bytes!("fixtures/interactive_input.txt").as_slice()) {
-                "interactive_input.txt"
-            } else if runtime_input == Some(include_bytes!("fixtures/1024_quit.txt").as_slice()) {
-                "1024_quit.txt"
-            } else if runtime_input
-                == Some(include_bytes!("fixtures/micro_trek_seed0_exit.txt").as_slice())
-            {
-                "micro_trek_seed0_exit.txt"
-            } else {
-                return Err("unknown runtime input fixture".to_owned());
-            };
+        let fixture = if runtime_input
+            == Some(include_bytes!("fixtures/interactive_input.txt").as_slice())
+        {
+            "interactive_input.txt"
+        } else if runtime_input == Some(include_bytes!("fixtures/1024_quit.txt").as_slice()) {
+            "1024_quit.txt"
+        } else if runtime_input == Some(include_bytes!("fixtures/micro_trek_exit.txt").as_slice()) {
+            "micro_trek_exit.txt"
+        } else {
+            return Err("unknown runtime input fixture".to_owned());
+        };
         command.arg("--runtime-input").arg(
             Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("tests/fixtures")

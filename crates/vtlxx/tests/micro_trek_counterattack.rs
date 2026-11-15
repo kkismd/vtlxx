@@ -14,10 +14,11 @@ const NAMES: [&str; 6] = [
 
 fn machine(seed: i16, hp: [i16; 6], docked: i16) -> Machine {
     let mut m = Machine::new();
+    m.set_entropy_source(move || Ok(seed));
     m.execute_source(SOURCE.split_once("; EC08_TEST_DEFINITIONS_END").unwrap().0)
         .unwrap();
     m.execute_source(&format!(
-        "@=192,{seed} @=169,{} @=170,{docked} @=161,4000 @=167,1 @=168,1",
+        "@=169,{} @=170,{docked} @=161,4000 @=167,1 @=168,1",
         hp.iter().filter(|&&h| h > 0).count()
     ))
     .unwrap();
@@ -37,9 +38,17 @@ fn machine(seed: i16, hp: [i16; 6], docked: i16) -> Machine {
     m
 }
 
+fn x16(state: i16) -> i16 {
+    let mut value = state as u16;
+    value ^= value.wrapping_shl(7);
+    value ^= value >> 9;
+    value ^= value.wrapping_shl(8);
+    value as i16
+}
+
 fn draw(s: &mut i16, bound: i16) -> i16 {
-    *s = (i32::from(*s) * 25173 + 13849) as i16;
-    s.rem_euclid(bound) + 1
+    *s = x16(*s);
+    (((*s as u16) >> 1) % bound as u16) as i16 + 1
 }
 
 #[test]
@@ -55,7 +64,7 @@ fn empty_and_docked_do_not_attack() {
         let mut m = machine(42, hp, docked);
         m.execute_source("enemyatk=()").unwrap();
         assert_eq!(m.output(), output.as_bytes());
-        assert_eq!(m.storage(192), 42);
+        assert_eq!(m.storage(192), 0);
         assert_eq!(m.storage(161), 4000);
         assert_eq!(m.storage(135), hp[0]);
         assert_eq!(m.stack(), PREFIX);
@@ -65,8 +74,8 @@ fn empty_and_docked_do_not_attack() {
 #[test]
 fn attack_slots_and_threshold_preserve_state_and_draw_order() {
     for (seed, hp, expected_total) in [
-        (-32376, [300, 0, 300, 0, 0, 300], Some(199)),
-        (-32753, [300, 0, 300, 0, 0, 300], Some(200)),
+        (-32725, [300, 0, 300, 0, 0, 300], Some(199)),
+        (-32349, [300, 0, 300, 0, 0, 300], Some(200)),
         (42, [1, 2, 0, 0, 0, 300], None),
         (51, [300; 6], None),
     ] {
@@ -101,7 +110,6 @@ fn attack_slots_and_threshold_preserve_state_and_draw_order() {
                 expected[63 + device]
             ));
         }
-        expected[192] = state;
         m.execute_source("enemyatk=()").unwrap();
         assert_eq!(m.output(), output.as_bytes());
         assert_eq!(m.stack(), PREFIX);
@@ -129,7 +137,7 @@ fn output_error_is_fatal() {
         m.execute_source("enemyatk=()"),
         Err(SourceError::Runtime(RuntimeError::OutputError))
     ));
-    assert_eq!(m.storage(192), 42);
+    assert_eq!(m.storage(192), 0);
     assert_eq!(m.storage(135), 300);
     assert_eq!(m.storage(161), 4000);
     assert!(m.stack().starts_with(PREFIX));

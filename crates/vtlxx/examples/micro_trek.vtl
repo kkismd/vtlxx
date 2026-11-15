@@ -17,9 +17,6 @@
 .SHIP_Y := 168
 .QUADRANT_ENEMIES := 169
 .DOCKED := 170
-.PRNG_STATE := 192
-.PRNG_MULTIPLIER := 25173
-.PRNG_INCREMENT := 13849
 .OBSERVED_FLAG := 1000
 .ENEMY_HP := 300
 .ASCII_TAB := 9
@@ -93,13 +90,11 @@
 .CMD_X := 88
 
 ; Bounded PRNG ( n -- value ). Caller supplies 1..32767.
-; Writes A, B and storage[192].
+; Writes A and B; the runtime owns PRNG state.
   &=random [
     A=~
-    B=(@(.PRNG_STATE)*.PRNG_MULTIPLIER)+.PRNG_INCREMENT
-    @=.PRNG_STATE,B
+    B='
     B=B%A
-    %=B<0 [ B=B+A ]
     ~=B+1
   ]
 
@@ -210,7 +205,7 @@
     ?="*BASE.....: " ?=@(.GALAXY_BASES) ?=()
   ]
 
-; Random damage event ( -- ). Writes the selected device and PRNG state;
+; Random damage event ( -- ). Writes the selected device;
 ; random and devinfo clobber A and B. The first draw is protected on the value stack.
   &=devdmg [
     random=6
@@ -233,7 +228,7 @@
 
 ; Counterattack ( -- ). I and T hold the slot and total across random/hitcalc;
 ; direct scratch H, I, S, T, U, and transitive scratch A..F.
-; Writes live enemy HP, ship energy, PRNG, and optionally one device.
+; Writes live enemy HP, ship energy, and optionally one device.
   &=enemyatk [
     %=@(.QUADRANT_ENEMIES)>0 [
       ?="*KLINGON ATTACK" ?=()
@@ -323,7 +318,7 @@
   ]
 
 ; Generate a complete galaxy ( -- ). Writes galaxy[0..63],
-; GALAXY_ENEMIES, GALAXY_BASES, PRNG state and scratch A, B, C,
+; GALAXY_ENEMIES, GALAXY_BASES and scratch A, B, C,
 ; H, I, J, L, M, T. T is the current attempt's enemy total.
 ; H holds the enemy distribution parameter across calls and retries.
   &=gengal [
@@ -351,7 +346,7 @@
 
 ; Expand the current quadrant ( -- ). Reads quadrant/ship coordinates
 ; and galaxy from storage; writes QUADRANT_ENEMIES, sector[71..134],
-; enemy[135..152] and PRNG state.
+; enemy[135..152].
 ; Scratch C, H, I, J, L, M, P, R; random clobbers A and B.
   &=genquad [
     I=.SECTOR_BASE
@@ -445,8 +440,8 @@
     ]
   ]
 
-; Initialize a mission ( -- ). The caller seeds PRNG once at startup.
-; Writes the game state, PRNG via gengal/genquad/random, and scratch A, B, C,
+; Initialize a mission ( -- ).
+; Writes the game state via gengal/genquad/random, and scratch A, B, C,
 ; H, I, J, L, M, P, R, T.
   &=initgame [
     @=.MISSION_DAYS,30 @=.SHIP_ENERGY,4000 @=.SHIP_TORPEDOES,10 @=.DOCKED,0
@@ -720,14 +715,6 @@
 
 ; EC08_TEST_DEFINITIONS_END
 
-; The first runtime line supplies the signed seed before any game state is built.
-readnum=() B=~ A=~
-%=B==.PARSE_VALID [
-  @=.PRNG_STATE,A
-] [
-  %=B==.PARSE_INVALID [ ?="INVALID SEED" ?=() ]
-  #=()
-]
 ^=1
 initgame=()
 ?="IT IS STARDATE : 3200" ?=() ?="OBJECTIVE :" ?=()

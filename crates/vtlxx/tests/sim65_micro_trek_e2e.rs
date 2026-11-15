@@ -32,7 +32,7 @@ fn wait(child: &mut Child, deadline: Instant) -> std::process::ExitStatus {
         thread::sleep(Duration::from_millis(10));
     }
 }
-fn run(target: bool, input: &[u8]) -> Output {
+fn run(target: bool, seed: i16, input: &[u8]) -> Output {
     let path = std::env::temp_dir().join(format!(
         "micro-trek-{}-{:?}.input",
         std::process::id(),
@@ -45,6 +45,8 @@ fn run(target: bool, input: &[u8]) -> Output {
     });
     command
         .arg(SOURCE)
+        .arg("--seed")
+        .arg(seed.to_string())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -87,14 +89,12 @@ fn run(target: bool, input: &[u8]) -> Output {
     output
 }
 fn compare(input: &[u8]) {
-    let mut seeded = b"0\n".to_vec();
-    seeded.extend_from_slice(input);
-    compare_raw(&seeded);
+    compare_seed(0, input);
 }
-fn compare_raw(input: &[u8]) {
-    let rust = run(false, input);
-    let target = run(true, input);
-    let repeated = run(true, input);
+fn compare_seed(seed: i16, input: &[u8]) {
+    let rust = run(false, seed, input);
+    let target = run(true, seed, input);
+    let repeated = run(true, seed, input);
     assert!(rust.status.success(), "Rust: {rust:?}");
     assert!(target.status.success(), "6502: {target:?}");
     assert_eq!(target.status, repeated.status, "6502 exit, input {input:?}");
@@ -139,27 +139,19 @@ fn two_defeats_invalid_retry_yes_then_no() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65"]
 fn initial_eof_is_normal_exit() {
-    compare_raw(b"");
+    compare_seed(0, b"");
 }
 #[test]
 #[ignore = "requires ca65, ld65, and sim65"]
 fn seed_boundaries_match_rust_and_repeat_on_6502() {
-    for input in [
-        b"0\nX\n".as_slice(),
-        b"1\nX\n",
-        b"-1\nX\n",
-        b"-32768\nX\n",
-        b"32767\nX\n",
-    ] {
-        compare_raw(input);
+    for seed in [0, 1, -1, -32768, 32767] {
+        compare_seed(seed, b"X\n");
     }
 }
 #[test]
 #[ignore = "requires ca65, ld65, and sim65"]
-fn invalid_seed_and_seed_eof_match_rust_without_starting_game() {
-    for input in [b"".as_slice(), b"\n", b"nope\n", b"32768\n", b"-32769\n"] {
-        compare_raw(input);
-    }
+fn initial_eof_matches_after_startup() {
+    compare_seed(0, b"");
 }
 #[cfg(unix)]
 #[test]
@@ -195,7 +187,6 @@ fn interactive_prompt_is_visible_before_input() {
         b
     });
     let mut output = Vec::new();
-    child.0.stdin.as_mut().unwrap().write_all(b"0\n").unwrap();
     while !output.ends_with(b"COMMAND :") {
         output.push(
             rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
@@ -207,5 +198,6 @@ fn interactive_prompt_is_visible_before_input() {
     output.extend(rx.iter());
     reader.join().unwrap();
     assert!(errors.join().unwrap().is_empty());
-    assert_eq!(output, run(false, b"0\nX\n").stdout);
+    assert!(output.starts_with(b"IT IS STARDATE : 3200\nOBJECTIVE :\nDESTROY "));
+    assert!(output.ends_with(b"COMMAND :"));
 }

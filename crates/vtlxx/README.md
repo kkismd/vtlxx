@@ -747,14 +747,14 @@ cargo run -p vtlxx --bin vtlxx6502 -- \
 
 ## Example: Micro Trek
 
-`micro_trek.vtl` はゲーム開始前に、runtime 入力の先頭行から符号付き16bit seed（`-32768..32767`）を読みます。直接実行する場合は seed 行を最初に渡し、その後に `X` などのゲーム操作を続けてください。空行、不正値、範囲外の値ではゲームを開始せず、seed入力前のEOFでは何も表示せず正常終了します。
+`micro_trek.vtl` は通常起動時にseed入力を求めず、ゲーム操作を直接受け取ります。再現実行では汎用CLIの `--seed N` を指定してください。
 
 ```sh
-printf '0\nX\n' | cargo run -p vtlxx --bin vtlxx -- \
-  crates/vtlxx/examples/micro_trek.vtl
+printf 'X\n' | cargo run -p vtlxx --bin vtlxx -- \
+  crates/vtlxx/examples/micro_trek.vtl --seed 0
 ```
 
-6502/sim65 の一括実行では同じ先頭 seed 行を `--runtime-input` のファイルに含めます。通常プレイ向けの自動seed生成と `--seed` 指定は、後続のゲーム専用ランチャーが提供します。
+6502/sim65 でも同じ `--seed N` を指定でき、seed行をruntime入力へ含めません。stdinの先頭byteが最初のゲームコマンドになります。入力がEOFの場合もゲーム初期化と `COMMAND :` 表示の後に正常終了します。
 
 ## Example: Eight Queens
 
