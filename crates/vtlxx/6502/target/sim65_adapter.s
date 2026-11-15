@@ -29,12 +29,20 @@ serial_out:
 halt:
     jmp exit                    ; sim6502.lib passes A to simulator status
 
-; Initial sim65 adapter is deliberately unavailable. #569 supplies OS
-; entropy; test adapters may replace this symbol with deterministic values.
+; The host selects either an available private raw16 constant or an
+; unavailable provider. PRNG state and stepping remain in common runtime.
 entropy16:
 .ifdef ENTROPY16_TEST
     inc entropy_test_calls
 .endif
+.ifdef SIM65_ENTROPY_SEED
+    lda #<SIM65_ENTROPY_SEED
+    ldx #>SIM65_ENTROPY_SEED
+    clc
+.else
+.ifdef SIM65_ENTROPY_UNAVAILABLE
+    sec
+.else
 .ifdef ENTROPY16_TEST_SEQUENCE
     lda entropy_test_calls
     ldx #0
@@ -46,6 +54,8 @@ entropy16:
     clc
 .else
     sec
+.endif
+.endif
 .endif
 .endif
     rts

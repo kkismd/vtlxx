@@ -113,6 +113,23 @@ fn invalid_cycle_limits_are_rejected_before_toolchain_start() {
 }
 
 #[test]
+fn invalid_seed_arguments_are_rejected_before_reading_source_or_starting_cc65() {
+    for args in [
+        vec!["missing.vtl", "--seed", ""],
+        vec!["missing.vtl", "--seed", "32768"],
+        vec!["missing.vtl", "--seed", "-32769"],
+        vec!["missing.vtl", "--seed", "1", "--seed", "2"],
+        vec!["missing.vtl", "--seed"],
+    ] {
+        let output = run_cli(&args);
+        assert_eq!(output.status.code(), Some(2), "args={args:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("--seed"), "args={args:?}: {stderr}");
+        assert!(!stderr.contains("read source"), "args={args:?}: {stderr}");
+    }
+}
+
+#[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn compiles_native_source_and_reads_binary_runtime_input() {
     let temp = TestDir::new();
@@ -150,6 +167,71 @@ fn cycle_limit_option_is_passed_to_sim65() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("cycle limit"));
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
+    let temp = TestDir::new();
+    let source = temp.0.join("random.vtl");
+    fs::write(&source, b"A=' B=' C=' D=' E=' F=' ?=A ?=B ?=C ?=D ?=E ?=F").unwrap();
+    let cases = [
+        (0, "270153093029703269729846343"),
+        (1, "16576123042990058932324727857"),
+        (-1, "16319122392551518160439927244"),
+        (-32768, "2460826648200102368722344753"),
+        (32767, "24479183911164967751802326781"),
+        (-21279, "270153093029703269729846343"),
+    ];
+    for (seed, expected) in cases {
+        let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .arg(&source)
+            .args(["--seed", &seed.to_string(), "--cycle-limit", "200000000"])
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "seed={seed}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(output.stdout, expected.as_bytes(), "seed={seed}");
+        let rust = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            .arg(&source)
+            .args(["--seed", &seed.to_string()])
+            .output()
+            .unwrap();
+        assert!(rust.status.success(), "seed={seed}: {rust:?}");
+        assert_eq!(output.stdout, rust.stdout, "Rust/sim65 seed={seed}");
+        let repeated = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .arg(&source)
+            .args(["--seed", &seed.to_string(), "--cycle-limit", "200000000"])
+            .output()
+            .unwrap();
+        assert!(repeated.status.success(), "seed={seed}: {repeated:?}");
+        assert_eq!(output.stdout, repeated.stdout, "sim65 repeat seed={seed}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn cli_without_seed_uses_os_entropy_for_apostrophe() {
+    let temp = TestDir::new();
+    let source = temp.0.join("os-entropy.vtl");
+    fs::write(&source, b"A=' ?=A").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .arg(&source)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value = std::str::from_utf8(&output.stdout)
+        .unwrap()
+        .parse::<u16>()
+        .unwrap();
+    assert!(value <= 32767);
 }
 
 #[test]

@@ -14,12 +14,13 @@ const DEFAULT_CYCLE_LIMIT: u32 = 4_000_000;
 const MAX_SOURCE_LEN: usize = u16::MAX as usize;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
-const USAGE: &str = "Usage: vtlxx6502 <source.vtl> [--runtime-input <path> | --interactive] [--cycle-limit <cycles>]\n\
+const USAGE: &str = "Usage: vtlxx6502 <source.vtl> [--runtime-input <path> | --interactive] [--cycle-limit <cycles>] [--seed <signed16>]\n\
 Compile VTLXX source with the NMOS 6502 target and run it with sim65.\n\
 Options:\n\
   --runtime-input <path>  Supply raw runtime input bytes\n\
   --interactive           Connect runtime input and output to standard I/O\n\
   --cycle-limit <cycles>  Set sim65 cycle limit (default: 4000000; unlimited in interactive mode)\n\
+  --seed <signed16>       Set the initial PRNG seed (default: OS entropy)\n\
   -h, --help              Show this help\n";
 
 struct TempDir(PathBuf);
@@ -56,6 +57,7 @@ struct Arguments {
     source: PathBuf,
     runtime_input: Option<PathBuf>,
     cycle_limit: Option<u32>,
+    seed: Option<i16>,
     interactive: bool,
 }
 
@@ -72,6 +74,8 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
     let mut cycle_limit = None;
     let mut interactive = false;
     let mut cycle_limit_seen = false;
+    let mut seed = None;
+    let mut seed_seen = false;
     while let Some(arg) = args.next() {
         if arg == "-h" || arg == "--help" {
             return Ok(ParsedArguments::Help);
@@ -110,6 +114,29 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
                 return Err("--cycle-limit must be greater than zero".into());
             }
             cycle_limit = Some(parsed_limit);
+        } else if arg == "--seed" {
+            if seed_seen {
+                return Err("--seed may be specified only once".into());
+            }
+            seed_seen = true;
+            let value = args
+                .next()
+                .ok_or_else(|| "--seed requires a signed 16-bit decimal integer".to_string())?;
+            let value = value
+                .to_str()
+                .ok_or_else(|| "--seed requires a signed 16-bit decimal integer".to_string())?;
+            let digits = value
+                .strip_prefix('-')
+                .or_else(|| value.strip_prefix('+'))
+                .unwrap_or(value);
+            if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+                return Err("--seed requires a signed 16-bit decimal integer".into());
+            }
+            seed = Some(
+                value
+                    .parse::<i16>()
+                    .map_err(|_| "--seed is outside the signed 16-bit range".to_string())?,
+            );
         } else if arg.to_string_lossy().starts_with('-') {
             return Err(format!("unknown option: {}", arg.to_string_lossy()));
         } else if source.replace(PathBuf::from(arg)).is_some() {
@@ -127,6 +154,7 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
         source,
         runtime_input,
         cycle_limit,
+        seed,
         interactive,
     }))
 }
@@ -238,6 +266,7 @@ fn build_and_run(
     input: &[u8],
     cycle_limit: Option<u32>,
     interactive: bool,
+    entropy_seed: Option<u16>,
 ) -> Result<Output, String> {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
@@ -259,18 +288,18 @@ fn build_and_run(
     for (index, source) in sources.iter().enumerate() {
         let source = crate_root.join(source);
         let object = temp.0.join(format!("{index}.o"));
-        let output = run_tool(
-            "ca65",
-            "assemble",
-            &[
-                OsStr::new("-t"),
-                OsStr::new("sim6502"),
-                source.as_os_str(),
-                OsStr::new("-o"),
-                object.as_os_str(),
-            ],
-            &[],
-        )?;
+        let mut assemble_args = vec![OsStr::new("-t"), OsStr::new("sim6502")];
+        let entropy_define =
+            entropy_seed.map(|seed| OsString::from(format!("SIM65_ENTROPY_SEED=${seed:04X}")));
+        if source.ends_with("6502/target/sim65_adapter.s") {
+            if let Some(define) = &entropy_define {
+                assemble_args.extend([OsStr::new("-D"), define.as_os_str()]);
+            } else {
+                assemble_args.extend([OsStr::new("-D"), OsStr::new("SIM65_ENTROPY_UNAVAILABLE")]);
+            }
+        }
+        assemble_args.extend([source.as_os_str(), OsStr::new("-o"), object.as_os_str()]);
+        let output = run_tool("ca65", "assemble", &assemble_args, &[])?;
         require_success("assemble", "ca65", &output)?;
         objects.push(object);
     }
@@ -350,7 +379,30 @@ fn build_and_run(
     }
 }
 
+fn os_entropy16() -> io::Result<u16> {
+    let mut bytes = [0; 2];
+    getrandom::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
+    Ok(u16::from_le_bytes(bytes))
+}
+
 fn execute(arguments: Arguments) -> Result<Output, String> {
+    execute_with_provider(arguments, os_entropy16)
+}
+
+fn select_entropy_seed(
+    seed: Option<i16>,
+    provider: impl FnOnce() -> io::Result<u16>,
+) -> Option<u16> {
+    seed.map(|seed| seed as u16).or_else(|| provider().ok())
+}
+
+fn execute_with_provider(
+    arguments: Arguments,
+    provider: impl FnOnce() -> io::Result<u16>,
+) -> Result<Output, String> {
+    // Explicit seeds bypass the host entropy provider entirely. For OS entropy
+    // failure, link an unavailable adapter so unused `'` programs still run.
+    let entropy_seed = select_entropy_seed(arguments.seed, provider);
     let source = fs::read(&arguments.source)
         .map_err(|error| format!("read source {}: {error}", arguments.source.display()))?;
     let runtime_input = match arguments.runtime_input {
@@ -359,7 +411,12 @@ fn execute(arguments: Arguments) -> Result<Output, String> {
         None => Vec::new(),
     };
     let input = frame_input(&source, &runtime_input)?;
-    build_and_run(&input, arguments.cycle_limit, arguments.interactive)
+    build_and_run(
+        &input,
+        arguments.cycle_limit,
+        arguments.interactive,
+        entropy_seed,
+    )
 }
 
 fn report_simulation_failure(output: &Output) -> (i32, String) {
@@ -524,6 +581,46 @@ mod tests {
                 .unwrap_err()
                 .contains("requires a path")
         );
+        for value in ["", "+", "1x", "32768", "-32769"] {
+            assert!(
+                parse_arguments(["source.vtl".into(), "--seed".into(), value.into()]).is_err(),
+                "accepted invalid seed {value:?}"
+            );
+        }
+        for seed in ["0", "1", "+1", "-1", "-32768", "32767"] {
+            assert!(matches!(
+                parse_arguments(["source.vtl".into(), "--seed".into(), seed.into()]),
+                Ok(ParsedArguments::Run(Arguments { seed: Some(_), .. }))
+            ));
+        }
+        assert!(parse_arguments(["source.vtl".into(), "--seed".into()]).is_err());
+        assert!(
+            parse_arguments([
+                "source.vtl".into(),
+                "--seed".into(),
+                "1".into(),
+                "--seed".into(),
+                "2".into()
+            ])
+            .is_err()
+        );
+        match parse_arguments([
+            "source.vtl".into(),
+            "--seed".into(),
+            "-32768".into(),
+            "--interactive".into(),
+            "--cycle-limit".into(),
+            "12".into(),
+        ])
+        .unwrap()
+        {
+            ParsedArguments::Run(arguments) => {
+                assert_eq!(arguments.seed, Some(i16::MIN));
+                assert!(arguments.interactive);
+                assert_eq!(arguments.cycle_limit, Some(12));
+            }
+            ParsedArguments::Help => panic!("expected run arguments"),
+        }
         for value in ["0", "-1", "", "12x", "4294967296"] {
             assert!(
                 parse_arguments(["source.vtl".into(), "--cycle-limit".into(), value.into()])
@@ -592,6 +689,48 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    fn explicit_seed_bypasses_entropy_provider() {
+        let mut called = false;
+        assert_eq!(
+            select_entropy_seed(Some(-1), || {
+                called = true;
+                Err(io::Error::other("must not be called"))
+            }),
+            Some(u16::MAX)
+        );
+        assert!(!called);
+        assert_eq!(select_entropy_seed(None, || Ok(0x80ff)), Some(0x80ff));
+        assert_eq!(
+            select_entropy_seed(None, || Err(io::Error::other("no entropy"))),
+            None
+        );
+    }
+
+    #[test]
+    #[ignore = "requires ca65, ld65, and sim65"]
+    fn failed_os_entropy_only_fails_when_apostrophe_executes() {
+        let temp = TempDir::new().unwrap();
+        let run = |name: &str, source: &[u8]| {
+            let path = temp.0.join(name);
+            fs::write(&path, source).unwrap();
+            execute_with_provider(
+                Arguments {
+                    source: path,
+                    runtime_input: None,
+                    cycle_limit: Some(200_000_000),
+                    seed: None,
+                    interactive: false,
+                },
+                || Err(io::Error::other("injected entropy failure")),
+            )
+            .unwrap()
+        };
+        assert!(run("unused.vtl", b"A=1").status.success());
+        assert_eq!(run("used.vtl", b"A=' ?=A").status.code(), Some(5));
+        assert_eq!(run("compile-error.vtl", b"A=").status.code(), Some(130));
     }
 
     #[test]
