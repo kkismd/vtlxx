@@ -52,6 +52,188 @@ fn empty_stdin_reports_eof() {
     assert_eq!(output.stdout, b"-1");
 }
 
+#[cfg(unix)]
+#[test]
+fn nonblocking_read_and_waiting_read_share_pipe_bytes_and_eof() {
+    let source = SourceFile::new(b"A=` ?=A B=$ ?=B C=$ ?=C D=` ?=D");
+    let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+        .arg(&source.0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdout = child.stdout.take().unwrap();
+    let mut first = [0; 1];
+    stdout.read_exact(&mut first).unwrap();
+    assert_eq!(first, *b"0");
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"Q").unwrap();
+    let mut consumed = [0; 2];
+    stdout.read_exact(&mut consumed).unwrap();
+    assert_eq!(&consumed, b"81");
+    drop(stdin);
+    let mut rest = Vec::new();
+    stdout.read_to_end(&mut rest).unwrap();
+    assert!(child.wait().unwrap().success());
+    assert_eq!(rest, b"-1-1");
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_tty_requires_a_terminal_and_seed_can_be_combined_with_it() {
+    let source = SourceFile::new(b"?=1");
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+        .arg(&source.0)
+        .arg("--raw-tty")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires stdin to be a terminal"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+        .arg(&source.0)
+        .arg("--seed")
+        .arg("2")
+        .arg("--seed")
+        .arg("3")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_tty_reads_a_character_and_restores_terminal_settings() {
+    use std::{
+        fs::File,
+        os::fd::FromRawFd,
+        time::{Duration, Instant},
+    };
+
+    let source = SourceFile::new(b"A=$ ?=A");
+    let (mut master, mut slave) = (0, 0);
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        },
+        0
+    );
+    let mut original = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(slave, original.as_mut_ptr()) }, 0);
+    let original = unsafe { original.assume_init() };
+    let child_stdin = unsafe { File::from_raw_fd(libc::dup(slave)) };
+    let child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+        .arg(&source.0)
+        .arg("--raw-tty")
+        .stdin(child_stdin)
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    unsafe {
+        libc::close(slave);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut active = false;
+    while Instant::now() < deadline {
+        let mut current = std::mem::MaybeUninit::<libc::termios>::uninit();
+        assert_eq!(unsafe { libc::tcgetattr(master, current.as_mut_ptr()) }, 0);
+        let current = unsafe { current.assume_init() };
+        if current.c_lflag & libc::ICANON == 0 && current.c_lflag & libc::ECHO == 0 {
+            active = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(active, "child did not enter raw terminal mode");
+    assert_eq!(unsafe { libc::write(master, b"R".as_ptr().cast(), 1) }, 1);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"82");
+
+    let mut restored = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(master, restored.as_mut_ptr()) }, 0);
+    let restored = unsafe { restored.assume_init() };
+    assert_eq!(restored.c_lflag, original.c_lflag);
+    assert_eq!(restored.c_cc, original.c_cc);
+    unsafe {
+        libc::close(master);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_tty_sigint_interrupts_wait_and_restores_terminal_settings() {
+    use std::{
+        fs::File,
+        os::fd::FromRawFd,
+        time::{Duration, Instant},
+    };
+
+    let source = SourceFile::new(b"A=$");
+    let (mut master, mut slave) = (0, 0);
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        },
+        0
+    );
+    let mut original = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(slave, original.as_mut_ptr()) }, 0);
+    let original = unsafe { original.assume_init() };
+    let child_stdin = unsafe { File::from_raw_fd(libc::dup(slave)) };
+    let mut child = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+        .arg(&source.0)
+        .arg("--raw-tty")
+        .stdin(child_stdin)
+        .stdout(Stdio::null())
+        .spawn()
+        .unwrap();
+    unsafe {
+        libc::close(slave);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut active = false;
+    while Instant::now() < deadline {
+        let mut current = std::mem::MaybeUninit::<libc::termios>::uninit();
+        assert_eq!(unsafe { libc::tcgetattr(master, current.as_mut_ptr()) }, 0);
+        if unsafe { current.assume_init() }.c_lflag & libc::ICANON == 0 {
+            active = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(active, "child did not enter raw terminal mode");
+    assert_eq!(
+        unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGINT) },
+        0
+    );
+    assert!(!child.wait().unwrap().success());
+
+    let mut restored = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(master, restored.as_mut_ptr()) }, 0);
+    assert_eq!(unsafe { restored.assume_init() }.c_lflag, original.c_lflag);
+    unsafe {
+        libc::close(master);
+    }
+}
+
 impl Drop for SourceFile {
     fn drop(&mut self) {
         fs::remove_file(&self.0).unwrap();
