@@ -6,9 +6,105 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+#[cfg(unix)]
+use std::process::{Child, ExitStatus};
+
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
 struct SourceFile(PathBuf);
+
+#[cfg(unix)]
+struct ChildGuard(Child);
+
+#[cfg(unix)]
+impl std::ops::Deref for ChildGuard {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.0
+    }
+}
+
+#[cfg(unix)]
+impl std::ops::DerefMut for ChildGuard {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.0
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(unix)]
+fn wait_timeout(child: &mut ChildGuard, timeout: std::time::Duration) -> ExitStatus {
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "child process timed out"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+#[cfg(unix)]
+fn read_timeout<R: Read + std::os::fd::AsRawFd>(
+    reader: &mut R,
+    output: &mut [u8],
+    timeout: std::time::Duration,
+) {
+    let deadline = std::time::Instant::now() + timeout;
+    let mut offset = 0;
+    while offset < output.len() {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(!remaining.is_zero(), "child stdout read timed out");
+        let mut descriptor = libc::pollfd {
+            fd: reader.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ms = remaining.as_millis().min(i32::MAX as u128) as i32;
+        let ready = unsafe { libc::poll(&mut descriptor, 1, ms.max(1)) };
+        assert!(ready > 0, "child stdout read timed out");
+        let count = reader.read(&mut output[offset..]).unwrap();
+        assert_ne!(count, 0, "child stdout closed before expected output");
+        offset += count;
+    }
+}
+
+#[cfg(unix)]
+fn read_to_end_timeout<R: Read + std::os::fd::AsRawFd>(
+    reader: &mut R,
+    timeout: std::time::Duration,
+) -> Vec<u8> {
+    let deadline = std::time::Instant::now() + timeout;
+    let mut output = Vec::new();
+    loop {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        assert!(!remaining.is_zero(), "child stdout read timed out");
+        let mut descriptor = libc::pollfd {
+            fd: reader.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let ms = remaining.as_millis().min(i32::MAX as u128) as i32;
+        let ready = unsafe { libc::poll(&mut descriptor, 1, ms.max(1)) };
+        assert!(ready > 0, "child stdout read timed out");
+        let mut chunk = [0; 1024];
+        let count = reader.read(&mut chunk).unwrap();
+        if count == 0 {
+            return output;
+        }
+        output.extend_from_slice(&chunk[..count]);
+    }
+}
 
 impl SourceFile {
     fn new(contents: &[u8]) -> Self {
@@ -50,6 +146,292 @@ fn empty_stdin_reports_eof() {
     let output = vtlxx(&[source.0.as_os_str()]);
     assert!(output.status.success());
     assert_eq!(output.stdout, b"-1");
+}
+
+#[cfg(unix)]
+#[test]
+fn regular_file_input_preserves_nul_ff_and_sticky_eof() {
+    use std::fs::File;
+
+    let source = SourceFile::new(b"A=$ B=$ C=$ ?=A ?=B ?=C");
+    let input = SourceFile::new(&[0x00, 0xff]);
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+        .arg(&source.0)
+        .stdin(Stdio::from(File::open(&input.0).unwrap()))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"255-1-1");
+
+    let empty = SourceFile::new(b"");
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+        .arg(&source.0)
+        .stdin(Stdio::from(File::open(&empty.0).unwrap()))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert_eq!(output.stdout, b"-1-1-1");
+}
+
+#[cfg(unix)]
+#[test]
+fn nonblocking_read_and_waiting_read_share_pipe_bytes_and_eof() {
+    let source = SourceFile::new(b"A=` ?=A B=$ ?=B C=$ ?=C D=` ?=D");
+    let mut child = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            .arg(&source.0)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stdout = child.stdout.take().unwrap();
+    let mut first = [0; 1];
+    read_timeout(&mut stdout, &mut first, std::time::Duration::from_secs(3));
+    assert_eq!(first, *b"0");
+    let mut stdin = child.stdin.take().unwrap();
+    stdin.write_all(b"Q").unwrap();
+    let mut consumed = [0; 2];
+    read_timeout(
+        &mut stdout,
+        &mut consumed,
+        std::time::Duration::from_secs(3),
+    );
+    assert_eq!(&consumed, b"81");
+    drop(stdin);
+    let rest = read_to_end_timeout(&mut stdout, std::time::Duration::from_secs(3));
+    assert!(wait_timeout(&mut child, std::time::Duration::from_secs(3)).success());
+    assert_eq!(rest, b"-1-1");
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_tty_requires_a_terminal_and_seed_can_be_combined_with_it() {
+    let source = SourceFile::new(b"?=1");
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+        .arg(&source.0)
+        .arg("--raw-tty")
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("requires stdin to be a terminal"));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+        .arg(&source.0)
+        .arg("--seed")
+        .arg("2")
+        .arg("--seed")
+        .arg("3")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_tty_reads_a_character_and_restores_terminal_settings() {
+    use std::{
+        fs::File,
+        os::fd::FromRawFd,
+        time::{Duration, Instant},
+    };
+
+    let source = SourceFile::new(b"A=$ ?=A");
+    let (mut master, mut slave) = (0, 0);
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        },
+        0
+    );
+    let mut original = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(slave, original.as_mut_ptr()) }, 0);
+    let original = unsafe { original.assume_init() };
+    let child_stdin = unsafe { File::from_raw_fd(libc::dup(slave)) };
+    let mut child = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            .arg(&source.0)
+            .arg("--raw-tty")
+            .stdin(child_stdin)
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    unsafe {
+        libc::close(slave);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut active = false;
+    while Instant::now() < deadline {
+        let mut current = std::mem::MaybeUninit::<libc::termios>::uninit();
+        assert_eq!(unsafe { libc::tcgetattr(master, current.as_mut_ptr()) }, 0);
+        let current = unsafe { current.assume_init() };
+        if current.c_lflag & libc::ICANON == 0 && current.c_lflag & libc::ECHO == 0 {
+            active = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(active, "child did not enter raw terminal mode");
+    assert_eq!(unsafe { libc::write(master, b"R".as_ptr().cast(), 1) }, 1);
+    let mut stdout = child.stdout.take().unwrap();
+    let output = read_to_end_timeout(&mut stdout, Duration::from_secs(3));
+    assert!(wait_timeout(&mut child, Duration::from_secs(3)).success());
+    assert_eq!(output, b"82");
+
+    let mut restored = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(master, restored.as_mut_ptr()) }, 0);
+    let restored = unsafe { restored.assume_init() };
+    assert_eq!(restored.c_lflag, original.c_lflag);
+    assert_eq!(restored.c_cc, original.c_cc);
+    unsafe {
+        libc::close(master);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_tty_restores_terminal_settings_after_runtime_error() {
+    use std::{
+        fs::File,
+        os::fd::FromRawFd,
+        time::{Duration, Instant},
+    };
+
+    let source = SourceFile::new(b"A=$ ?=A B=1/0");
+    let (mut master, mut slave) = (0, 0);
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        },
+        0
+    );
+    let mut original = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(slave, original.as_mut_ptr()) }, 0);
+    let original = unsafe { original.assume_init() };
+    let child_stdin = unsafe { File::from_raw_fd(libc::dup(slave)) };
+    let mut child = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            .arg(&source.0)
+            .arg("--raw-tty")
+            .stdin(child_stdin)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    unsafe {
+        libc::close(slave);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut active = false;
+    while Instant::now() < deadline {
+        let mut current = std::mem::MaybeUninit::<libc::termios>::uninit();
+        assert_eq!(unsafe { libc::tcgetattr(master, current.as_mut_ptr()) }, 0);
+        if unsafe { current.assume_init() }.c_lflag & libc::ICANON == 0 {
+            active = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(active, "child did not enter raw terminal mode");
+    assert_eq!(unsafe { libc::write(master, b"R".as_ptr().cast(), 1) }, 1);
+    let mut stdout = child.stdout.take().unwrap();
+    let output = read_to_end_timeout(&mut stdout, Duration::from_secs(3));
+    assert_eq!(output, b"82");
+    assert!(!wait_timeout(&mut child, Duration::from_secs(3)).success());
+
+    let mut restored = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(master, restored.as_mut_ptr()) }, 0);
+    let restored = unsafe { restored.assume_init() };
+    assert_eq!(restored.c_lflag, original.c_lflag);
+    assert_eq!(restored.c_cc, original.c_cc);
+    unsafe {
+        libc::close(master);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn raw_tty_sigint_interrupts_wait_and_restores_terminal_settings() {
+    use std::{
+        fs::File,
+        os::fd::FromRawFd,
+        time::{Duration, Instant},
+    };
+
+    let source = SourceFile::new(b"A=$");
+    let (mut master, mut slave) = (0, 0);
+    assert_eq!(
+        unsafe {
+            libc::openpty(
+                &mut master,
+                &mut slave,
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                std::ptr::null(),
+            )
+        },
+        0
+    );
+    let mut original = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(slave, original.as_mut_ptr()) }, 0);
+    let original = unsafe { original.assume_init() };
+    let child_stdin = unsafe { File::from_raw_fd(libc::dup(slave)) };
+    let mut child = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            .arg(&source.0)
+            .arg("--raw-tty")
+            .stdin(child_stdin)
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    unsafe {
+        libc::close(slave);
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    let mut active = false;
+    while Instant::now() < deadline {
+        let mut current = std::mem::MaybeUninit::<libc::termios>::uninit();
+        assert_eq!(unsafe { libc::tcgetattr(master, current.as_mut_ptr()) }, 0);
+        if unsafe { current.assume_init() }.c_lflag & libc::ICANON == 0 {
+            active = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(active, "child did not enter raw terminal mode");
+    assert_eq!(
+        unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGINT) },
+        0
+    );
+    assert!(!wait_timeout(&mut child, Duration::from_secs(3)).success());
+
+    let mut restored = std::mem::MaybeUninit::<libc::termios>::uninit();
+    assert_eq!(unsafe { libc::tcgetattr(master, restored.as_mut_ptr()) }, 0);
+    assert_eq!(unsafe { restored.assume_init() }.c_lflag, original.c_lflag);
+    unsafe {
+        libc::close(master);
+    }
 }
 
 impl Drop for SourceFile {
