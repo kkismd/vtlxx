@@ -15,6 +15,59 @@ use crate::{
 const REGISTER_COUNT: usize = 26;
 const STORAGE_SIZE: usize = 1 << 16;
 
+/// Whether runtime input should wait for a byte or make one immediate attempt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ReadMode {
+    Wait,
+    Try,
+}
+
+/// The result of one runtime input operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InputEvent {
+    Byte(u8),
+    NotReady,
+    Eof,
+}
+
+/// A single runtime input session shared by waiting and non-blocking reads.
+///
+/// `Wait` must return a byte or EOF, waiting inside the provider as needed.
+/// `Try` performs one non-blocking attempt and may return `NotReady`.
+pub trait RuntimeInput {
+    fn read_event(&mut self, mode: ReadMode) -> io::Result<InputEvent>;
+}
+
+struct ReadInput<R>(R);
+
+impl<R: Read> RuntimeInput for ReadInput<R> {
+    fn read_event(&mut self, mode: ReadMode) -> io::Result<InputEvent> {
+        if mode == ReadMode::Try {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "blocking Read cannot provide non-blocking input",
+            ));
+        }
+        let mut byte = [0];
+        loop {
+            match self.0.read(&mut byte) {
+                Ok(0) => return Ok(InputEvent::Eof),
+                Ok(_) => return Ok(InputEvent::Byte(byte[0])),
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error),
+            }
+        }
+    }
+}
+
+struct EmptyInput;
+
+impl RuntimeInput for EmptyInput {
+    fn read_event(&mut self, _: ReadMode) -> io::Result<InputEvent> {
+        Ok(InputEvent::Eof)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct Continuation {
     executable: ExecutableId,
@@ -30,7 +83,7 @@ pub struct Machine {
     long_writes: HashMap<String, ExecutableId>,
     builtins: Vec<(Primitive, ExecutableId)>,
     pub(crate) output: Vec<u8>,
-    input: Box<dyn Read>,
+    input: Box<dyn RuntimeInput>,
     input_eof: bool,
     entropy_source: Box<dyn FnMut() -> io::Result<Cell>>,
     entropy_state: Option<u16>,
@@ -58,8 +111,8 @@ impl Machine {
             long_writes: HashMap::new(),
             builtins: Vec::new(),
             output: Vec::new(),
-            input: Box::new(io::empty()),
-            input_eof: false,
+            input: Box::new(EmptyInput),
+            input_eof: true,
             entropy_source: Box::new(default_entropy),
             entropy_state: None,
             output_sink: None,
@@ -70,6 +123,12 @@ impl Machine {
 
     /// Replace the runtime input stream for this machine session.
     pub fn set_input(&mut self, input: impl Read + 'static) {
+        self.input = Box::new(ReadInput(input));
+        self.input_eof = false;
+    }
+
+    /// Replace the shared runtime input session with a provider for both modes.
+    pub fn set_runtime_input(&mut self, input: impl RuntimeInput + 'static) {
         self.input = Box::new(input);
         self.input_eof = false;
     }
@@ -123,17 +182,37 @@ impl Machine {
         if self.input_eof {
             return Ok(-1);
         }
-        let mut byte = [0];
         loop {
-            match self.input.read(&mut byte) {
-                Ok(0) => {
+            match self
+                .input
+                .read_event(ReadMode::Wait)
+                .map_err(|_| RuntimeError::InputError)?
+            {
+                InputEvent::Eof => {
                     self.input_eof = true;
                     return Ok(-1);
                 }
-                Ok(_) if byte[0] != 0 => return Ok(byte[0] as Cell),
-                Ok(_) => {}
-                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => return Err(RuntimeError::InputError),
+                InputEvent::Byte(byte) if byte != 0 => return Ok(byte as Cell),
+                InputEvent::Byte(_) => {}
+                InputEvent::NotReady => return Err(RuntimeError::InputError),
+            }
+        }
+    }
+
+    pub(crate) fn try_read_char(&mut self) -> Result<Cell, RuntimeError> {
+        if self.input_eof {
+            return Ok(-1);
+        }
+        match self
+            .input
+            .read_event(ReadMode::Try)
+            .map_err(|_| RuntimeError::InputError)?
+        {
+            InputEvent::Byte(byte) => Ok(byte as Cell),
+            InputEvent::NotReady => Ok(0),
+            InputEvent::Eof => {
+                self.input_eof = true;
+                Ok(-1)
             }
         }
     }
@@ -265,6 +344,7 @@ impl Machine {
             (Primitive::StoreStorage, Some(('@', SourceRole::Write))),
             (Primitive::PrintNumber, Some(('?', SourceRole::Write))),
             (Primitive::ReadChar, Some(('$', SourceRole::PrimaryRead))),
+            (Primitive::TryReadChar, Some(('`', SourceRole::PrimaryRead))),
             (
                 Primitive::ReadEntropy,
                 Some(('\'', SourceRole::PrimaryRead)),

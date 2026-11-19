@@ -20,6 +20,7 @@ pub(crate) enum Primitive {
     PrintNumber,
     PrintChar,
     ReadChar,
+    TryReadChar,
     ReadEntropy,
 }
 
@@ -79,6 +80,10 @@ impl Primitive {
             }
             Self::ReadChar => {
                 let value = machine.read_char()?;
+                machine.value_stack.push(value);
+            }
+            Self::TryReadChar => {
+                let value = machine.try_read_char()?;
                 machine.value_stack.push(value);
             }
             Self::ReadEntropy => {
