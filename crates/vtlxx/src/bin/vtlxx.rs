@@ -1,5 +1,5 @@
 use std::{env, ffi::OsString, fmt, fs, io, process::ExitCode};
-use vtlxx::SourceError;
+use vtlxx::{Machine, SourceError};
 
 #[derive(Debug)]
 enum CliError {
@@ -62,7 +62,6 @@ fn arguments() -> Result<Arguments, CliError> {
 
 #[cfg(unix)]
 fn run() -> Result<(), CliError> {
-    use vtlxx::Machine;
     let args = arguments()?;
     let source = fs::read_to_string(args.path).map_err(CliError::Input)?;
     let input = unix_input::UnixInput::new(args.raw_tty).map_err(CliError::Input)?;
@@ -97,13 +96,21 @@ mod unix_input {
         io,
         mem::MaybeUninit,
         os::fd::RawFd,
-        sync::atomic::{AtomicBool, Ordering},
+        sync::atomic::{AtomicBool, AtomicI32, Ordering},
     };
     use vtlxx::{InputEvent, ReadMode, RuntimeInput};
 
     static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+    static SIGNAL_WRITE_FD: AtomicI32 = AtomicI32::new(-1);
     extern "C" fn on_sigint(_: libc::c_int) {
         INTERRUPTED.store(true, Ordering::Relaxed);
+        let fd = SIGNAL_WRITE_FD.load(Ordering::Relaxed);
+        if fd >= 0 {
+            let byte = 1u8;
+            unsafe {
+                libc::write(fd, (&byte as *const u8).cast(), 1);
+            }
+        }
     }
 
     pub struct UnixInput {
@@ -111,6 +118,8 @@ mod unix_input {
         original_flags: libc::c_int,
         original_termios: Option<libc::termios>,
         old_sigint: Option<libc::sigaction>,
+        wake_read: Option<RawFd>,
+        wake_write: Option<RawFd>,
         tty: bool,
         raw: bool,
     }
@@ -131,10 +140,36 @@ mod unix_input {
                 original_flags,
                 original_termios: None,
                 old_sigint: None,
+                wake_read: None,
+                wake_write: None,
                 tty,
                 raw,
             };
             if raw {
+                let mut pipe_fds = [-1; 2];
+                cvt(unsafe { libc::pipe(pipe_fds.as_mut_ptr()) })?;
+                input.wake_read = Some(pipe_fds[0]);
+                input.wake_write = Some(pipe_fds[1]);
+                for pipe_fd in pipe_fds {
+                    let flags = cvt(unsafe { libc::fcntl(pipe_fd, libc::F_GETFL) })?;
+                    cvt(unsafe { libc::fcntl(pipe_fd, libc::F_SETFL, flags | libc::O_NONBLOCK) })?;
+                    let flags = cvt(unsafe { libc::fcntl(pipe_fd, libc::F_GETFD) })?;
+                    cvt(unsafe { libc::fcntl(pipe_fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) })?;
+                }
+                INTERRUPTED.store(false, Ordering::Relaxed);
+                SIGNAL_WRITE_FD.store(pipe_fds[1], Ordering::Relaxed);
+                let mut action = unsafe { MaybeUninit::<libc::sigaction>::zeroed().assume_init() };
+                action.sa_sigaction = on_sigint as *const () as libc::sighandler_t;
+                unsafe {
+                    libc::sigemptyset(&mut action.sa_mask);
+                }
+                action.sa_flags = 0;
+                let mut previous = MaybeUninit::<libc::sigaction>::uninit();
+                if unsafe { libc::sigaction(libc::SIGINT, &action, previous.as_mut_ptr()) } == -1 {
+                    SIGNAL_WRITE_FD.store(-1, Ordering::Relaxed);
+                    return Err(io::Error::last_os_error());
+                }
+                input.old_sigint = Some(unsafe { previous.assume_init() });
                 let mut term = MaybeUninit::<libc::termios>::uninit();
                 cvt(unsafe { libc::tcgetattr(fd, term.as_mut_ptr()) })?;
                 let original = unsafe { term.assume_init() };
@@ -144,20 +179,9 @@ mod unix_input {
                 changed.c_cc[libc::VTIME] = 0;
                 input.original_termios = Some(original);
                 cvt(unsafe { libc::tcsetattr(fd, libc::TCSANOW, &changed) })?;
-                INTERRUPTED.store(false, Ordering::Relaxed);
-                let mut action = unsafe { MaybeUninit::<libc::sigaction>::zeroed().assume_init() };
-                action.sa_sigaction = on_sigint as *const () as libc::sighandler_t;
-                unsafe {
-                    libc::sigemptyset(&mut action.sa_mask);
-                }
-                action.sa_flags = 0;
-                let mut previous = MaybeUninit::<libc::sigaction>::uninit();
-                if unsafe { libc::sigaction(libc::SIGINT, &action, previous.as_mut_ptr()) } == -1 {
-                    return Err(io::Error::last_os_error());
-                }
-                input.old_sigint = Some(unsafe { previous.assume_init() });
             }
             cvt(unsafe { libc::fcntl(fd, libc::F_SETFL, original_flags | libc::O_NONBLOCK) })?;
+            input.interrupted()?;
             Ok(input)
         }
 
@@ -173,22 +197,63 @@ mod unix_input {
         }
 
         fn poll(&self, wait: bool) -> io::Result<libc::c_short> {
-            let mut descriptor = libc::pollfd {
-                fd: self.fd,
-                events: libc::POLLIN,
-                revents: 0,
-            };
+            let mut descriptors = [
+                libc::pollfd {
+                    fd: self.fd,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: self.wake_read.unwrap_or(-1),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
             loop {
                 self.interrupted()?;
-                let result = unsafe { libc::poll(&mut descriptor, 1, if wait { -1 } else { 0 }) };
+                let result = unsafe {
+                    libc::poll(
+                        descriptors.as_mut_ptr(),
+                        descriptors.len() as _,
+                        if wait { -1 } else { 0 },
+                    )
+                };
                 if result >= 0 {
-                    return Ok(descriptor.revents);
+                    if descriptors[1].revents != 0 {
+                        self.drain_wakeup()?;
+                        self.interrupted()?;
+                    }
+                    return Ok(descriptors[0].revents);
                 }
                 let error = io::Error::last_os_error();
                 if error.kind() != io::ErrorKind::Interrupted {
                     return Err(error);
                 }
                 self.interrupted()?;
+            }
+        }
+
+        fn drain_wakeup(&self) -> io::Result<()> {
+            let Some(fd) = self.wake_read else {
+                return Ok(());
+            };
+            let mut bytes = [0u8; 64];
+            loop {
+                let count = unsafe { libc::read(fd, bytes.as_mut_ptr().cast(), bytes.len()) };
+                if count >= 0 {
+                    if count == 0 {
+                        return Ok(());
+                    }
+                    continue;
+                }
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                if error.kind() == io::ErrorKind::WouldBlock {
+                    return Ok(());
+                }
+                return Err(error);
             }
         }
 
@@ -242,6 +307,13 @@ mod unix_input {
                 }
                 if let Some(action) = self.old_sigint.as_ref() {
                     libc::sigaction(libc::SIGINT, action, std::ptr::null_mut());
+                }
+                SIGNAL_WRITE_FD.store(-1, Ordering::Relaxed);
+                if let Some(fd) = self.wake_read {
+                    libc::close(fd);
+                }
+                if let Some(fd) = self.wake_write {
+                    libc::close(fd);
                 }
             }
         }
