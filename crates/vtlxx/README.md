@@ -56,7 +56,7 @@ cargo test --manifest-path crates/vtlxx/Cargo.toml
 cargo test --workspace
 ```
 
-Rust reference の `Machine` は `set_input` で実行時入力の `std::io::Read` を受け取ります。`$` の PrimaryRead は NUL を読み捨てて `1..255` または EOF の `-1` を返し、入力エラーは runtime error になります。入力位置は同じ Machine の手続きと top-level で共有されます。未設定時は空入力です。現在のRust対話CLIは、runtime stdinをMachine入力へ接続し、stdoutを逐次出力します（#313）。
+Rust reference の `Machine` は `set_input` で待機入力用の `std::io::Read` を受け取り、`set_runtime_input` で待機・非ブロッキング両方に対応する `RuntimeInput` を受け取ります。`$` は NUL を読み捨てて `1..255` または EOF の `-1` を返します。バッククォートは一度だけ入力を試し、文字は `1..255`、物理 NUL と未入力は `0`、EOF は `-1` を返します。両者は同じ入力位置とEOF状態を共有し、入力エラーは runtime error になります。未設定時は両方とも EOF です。通常の `set_input(Read)` は待機入力専用で、バッククォートを実行すると入力を読まず runtime error になります。Rust CLI の非ブロッキング OS入力は後続 #582 の対象です。現在のRust対話CLIは、runtime stdinをMachine入力へ接続し、stdoutを逐次出力します（#313）。
 
 `'` はMachineごとのxorshift16 PRNGから値を読む PrimaryRead です。最初の評価時だけ環境providerからraw16初期値を取得し、各評価で状態を1 step更新して上位15bit（0..32767）を返します。同じMachineで続けて実行したsource間でも状態は継続します。seed 0は内部で`0xACE1`に正規化されます。取得できない場合は致命的な `EntropyError` になります。Rust `Machine` の `set_entropy_source` で初期値providerを差し替えられます。CLIはOSの乱数源を使い、再現実行には `--seed N`（signed 16bit十進数）を指定できます。指定値は初期seedとして一度だけ使われ、通常の stdin には追加されません。
 

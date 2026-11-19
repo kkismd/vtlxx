@@ -15,5 +15,5 @@ mod source;
 
 pub use cell::Cell;
 pub use executable::RuntimeError;
-pub use machine::Machine;
+pub use machine::{InputEvent, Machine, ReadMode, RuntimeInput};
 pub use source::{CompileError, SourceError};
