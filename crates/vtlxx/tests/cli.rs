@@ -2,9 +2,12 @@ use std::{
     fs::{self, OpenOptions},
     io::{Read, Write},
     path::PathBuf,
-    process::{Child, Command, ExitStatus, Output, Stdio},
+    process::{Command, Output, Stdio},
     sync::atomic::{AtomicU64, Ordering},
 };
+
+#[cfg(unix)]
+use std::process::{Child, ExitStatus};
 
 static NEXT_FILE: AtomicU64 = AtomicU64::new(0);
 
