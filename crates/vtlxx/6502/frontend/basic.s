@@ -16,7 +16,7 @@
 .import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
-.import rt_print_number, rt_print_char, rt_read_char, rt_read_entropy
+.import rt_print_number, rt_print_char, rt_read_char, rt_try_read_char, rt_read_entropy
 .importzp fe_status, cc_status, cc_arg
 .import halt
 
@@ -1379,6 +1379,8 @@ value:
     jeq @group
     cmp #'$'
     jeq @read_char
+    cmp #$60
+    jeq @try_read_char
     cmp #$27
     jeq @read_entropy
     cmp #'0'
@@ -1468,6 +1470,11 @@ value:
     jsr take
     lda #<rt_read_char
     ldx #>rt_read_char
+    jmp cc_call
+@try_read_char:
+    jsr take
+    lda #<rt_try_read_char
+    ldx #>rt_try_read_char
     jmp cc_call
 @read_entropy:
     jsr take

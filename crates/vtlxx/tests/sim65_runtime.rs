@@ -76,6 +76,15 @@ fn build_and_run_with_input(
     probe_case: Option<u8>,
     input: &[u8],
 ) -> Result<Output, String> {
+    build_and_run_configured(fixture, probe_case, input, false)
+}
+
+fn build_and_run_configured(
+    fixture: &str,
+    probe_case: Option<u8>,
+    input: &[u8],
+    scripted: bool,
+) -> Result<Output, String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         root.join("tests/fixtures/sim65")
@@ -84,7 +93,11 @@ fn build_and_run_with_input(
         root.join("6502/runtime/state.s"),
         root.join("6502/runtime/primitives.s"),
         root.join("6502/runtime/arithmetic.s"),
-        root.join("6502/target/sim65_adapter.s"),
+        root.join(if scripted {
+            "6502/target/sim65_scripted_adapter.s"
+        } else {
+            "6502/target/sim65_adapter.s"
+        }),
     ];
     let fixture_include = root.join("tests/fixtures/sim65");
     let case_define = probe_case.map(|case| OsString::from(format!("TEST_CASE={case}")));
@@ -245,4 +258,49 @@ fn read_char_overflow_does_not_consume_transport_input() {
     let output = build_and_run_with_input("runtime_probe", Some(7), b"Z").unwrap();
     assert_eq!(output.status.code(), Some(2), "{output:?}");
     assert_eq!(output.stdout, b"K", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn try_read_char_overflow_precedes_unsupported_provider() {
+    expect_probe(13, 2);
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn try_read_char_commits_each_event_once_and_shares_sticky_eof() {
+    let output = build_and_run_configured("runtime_try_sequence", None, &[], true).unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"K", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn try_read_char_fatal_preserves_stack_and_eof_state() {
+    let output = build_and_run_configured("runtime_try_fatal", Some(1), &[], true).unwrap();
+    assert_eq!(output.status.code(), Some(6), "{output:?}");
+    assert_eq!(output.stdout, b"K", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn wait_and_try_share_order_nul_and_eof_session() {
+    let output = build_and_run_configured("runtime_try_mixed", None, &[], true).unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"K", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_try_capacity_checks_depth_before_eof_or_provider() {
+    for (case, status) in [(15, 0), (16, 2), (17, 2)] {
+        let output =
+            build_and_run_configured("runtime_try_capacity", Some(case), &[], true).unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(status),
+            "case {case}: {output:?}"
+        );
+        assert_eq!(output.stdout, b"K", "case {case}: {output:?}");
+    }
 }

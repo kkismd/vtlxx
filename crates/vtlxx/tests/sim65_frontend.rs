@@ -71,6 +71,24 @@ fn build_and_run_custom_configured(
     entropy: Option<i16>,
     entropy_sequence: bool,
 ) -> Output {
+    build_and_run_custom_with_adapter(
+        input,
+        frontend_fixture,
+        basic,
+        entropy,
+        entropy_sequence,
+        false,
+    )
+}
+
+fn build_and_run_custom_with_adapter(
+    input: &[u8],
+    frontend_fixture: &str,
+    basic: Option<&str>,
+    entropy: Option<i16>,
+    entropy_sequence: bool,
+    scripted_adapter: bool,
+) -> Output {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         frontend_fixture,
@@ -84,7 +102,11 @@ fn build_and_run_custom_configured(
         "6502/runtime/state.s",
         "6502/runtime/primitives.s",
         "6502/runtime/arithmetic.s",
-        "6502/target/sim65_adapter.s",
+        if scripted_adapter {
+            "6502/target/sim65_scripted_adapter.s"
+        } else {
+            "6502/target/sim65_adapter.s"
+        },
     ];
     let temp = TempDir::new();
     if let Some(basic) = basic {
@@ -155,6 +177,43 @@ fn build_and_run(source: &[u8], runtime_input: &[u8]) -> Output {
     input.extend_from_slice(source);
     input.extend_from_slice(runtime_input);
     build_and_run_input(&input)
+}
+
+fn run_scripted_frontend(source: &[u8], runtime_events: &[(u8, u8)], mode: u8) -> Output {
+    let temp = TempDir::new();
+    let declared_len = source.len() + usize::from(mode == 2);
+    let fixture_path = temp.0.join("frontend_scripted_try.s");
+    let mut fixture = String::from(
+        ".setcpu \"6502\"\n.export _main, test_input_events, test_input_end\n.import fe_compile_run, halt, script_try_calls, script_read_calls, script_cursor\n.segment \"DATA\"\ntest_input_events:\n",
+    );
+    fixture.push_str(&format!(
+        "    .byte 0, {}, 0, {}\n",
+        declared_len & 255,
+        declared_len >> 8
+    ));
+    for byte in source {
+        fixture.push_str(&format!("    .byte 0, {byte}\n"));
+    }
+    if mode == 2 {
+        fixture.push_str("    .byte 2, 0\n");
+    }
+    fixture.push_str("runtime_start:\n");
+    for (tag, byte) in runtime_events {
+        fixture.push_str(&format!("    .byte {tag}, {byte}\n"));
+    }
+    fixture.push_str("test_input_end:\n.segment \"CODE\"\n_main:\n    jsr fe_compile_run\n");
+    if mode == 0 {
+        fixture.push_str(
+            "    bcs @bad\n    lda script_try_calls\n    sec\n    sbc script_read_calls\n    cmp #7\n    bne @bad\n    lda script_cursor\n    cmp #<test_input_end\n    bne @bad\n    lda script_cursor+1\n    cmp #>test_input_end\n    bne @bad\n    lda #0\n    jmp halt\n",
+        );
+    } else {
+        fixture.push_str(
+            "    bcc @bad\n    lda script_try_calls\n    cmp script_read_calls\n    bne @bad\n    lda script_cursor\n    cmp #<runtime_start\n    bne @bad\n    lda script_cursor+1\n    cmp #>runtime_start\n    bne @bad\n    lda #0\n    jmp halt\n",
+        );
+    }
+    fixture.push_str("@bad:\n    lda #91\n    jmp halt\n");
+    fs::write(&fixture_path, fixture).unwrap();
+    build_and_run_custom_with_adapter(&[], fixture_path.to_str().unwrap(), None, None, false, true)
 }
 
 fn build_and_run_read_char(source: &[u8], runtime_input: &[u8]) -> Output {
@@ -251,6 +310,45 @@ fn unavailable_entropy_is_fatal_and_apostrophe_rhs_forms_are_rejected() {
         assert_eq!(result.status.code(), Some(2), "{source}: {result:?}");
         assert!(result.stdout.is_empty(), "{source}: {result:?}");
     }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn backtick_primary_read_binds_in_value_positions_and_fails_closed_on_sim65() {
+    for source in ["A=`", "A=1+`", "A=(`)", "A=@(`)", "?=`", "&=p [ A=` ] p=()"] {
+        let result = build_and_run(source.as_bytes(), b"Z");
+        assert_eq!(result.status.code(), Some(6), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+
+    for source in ["A=`=1", "A=`(1)"] {
+        let result = build_and_run(source.as_bytes(), b"Z");
+        assert_eq!(result.status.code(), Some(2), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_frontend_executes_backtick_primary_reads_after_complete_compile() {
+    let source = b"&=p [ ?=` ] p=() ?=(`) A=` ?=A @=127,127 ?=@(`) ?=`+0 &=q [ ?=` ] q=() ?=` ?=`";
+    let events = [(1, 0), (0, 0), (0, 1), (0, 127), (0, 128), (0, 255), (2, 0)];
+    let output = run_scripted_frontend(source, &events, 0);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"001127128255-1-1", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_frontend_compile_errors_leave_runtime_events_unread() {
+    let events = [(0, 65), (0, 66), (2, 0)];
+    let compile_error = run_scripted_frontend(b"?=1 A=", &events, 1);
+    assert_eq!(compile_error.status.code(), Some(0), "{compile_error:?}");
+    assert!(compile_error.stdout.is_empty(), "{compile_error:?}");
+
+    let truncated = run_scripted_frontend(b"?=1", &events, 2);
+    assert_eq!(truncated.status.code(), Some(0), "{truncated:?}");
+    assert!(truncated.stdout.is_empty(), "{truncated:?}");
 }
 
 #[test]

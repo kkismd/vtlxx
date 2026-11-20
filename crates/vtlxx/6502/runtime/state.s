@@ -4,7 +4,7 @@
 .export rt_init, rt_push, rt_pop_condition, rt_load_reg, rt_store_reg
 .export rt_load_storage, rt_store_storage
 .export rt_need_one, rt_need_two, rt_commit_binary
-.export rt_underflow, rt_overflow, rt_div_zero, rt_rem_zero, rt_entropy_unavailable
+.export rt_underflow, rt_overflow, rt_div_zero, rt_rem_zero, rt_entropy_unavailable, rt_input_failure
 .export rt_rng_state
 .exportzp rt_depth, rt_stack, rt_lhs, rt_rhs, rt_result
 .exportzp rt_input_eof
@@ -238,4 +238,10 @@ rt_entropy_unavailable:
     jsr rt_test_probe
 .endif
     lda #5
+    jmp halt
+rt_input_failure:
+.ifdef RT_TEST_PROBE
+    jsr rt_test_probe
+.endif
+    lda #6
     jmp halt

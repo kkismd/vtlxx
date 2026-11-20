@@ -1,9 +1,9 @@
 ; Runtime I/O helpers use only the #273 serial adapters.
 .setcpu "6502"
 
-.export rt_print_char, rt_print_number, rt_print_bytes, rt_read_char, rt_read_entropy
-.import rt_need_one, rt_overflow, rt_push, rt_entropy_unavailable
-.import serial_in, serial_out, entropy16
+.export rt_print_char, rt_print_number, rt_print_bytes, rt_read_char, rt_try_read_char, rt_read_entropy
+.import rt_need_one, rt_overflow, rt_input_failure, rt_push, rt_entropy_unavailable
+.import serial_in, serial_try_in, serial_out, entropy16
 .importzp rt_depth, rt_stack, rt_input_eof
 .import rt_rng_state
 
@@ -41,7 +41,39 @@ rt_read_char:
     beq @read
     ldx #0
     jmp rt_push
+@remember_eof:
+    lda #1
+    sta rt_input_eof
+@eof:
+    lda #$ff
+    ldx #$ff
+    jmp rt_push
 
+; Nonblocking PrimaryRead: inspect the provider once and commit one Cell only
+; after Byte, NotReady, or EOF is known. Fatal leaves runtime state untouched.
+rt_try_read_char:
+    lda rt_depth
+    cmp #16
+    bcc @capacity_ready
+    jmp rt_overflow
+@capacity_ready:
+    lda rt_input_eof
+    bne @eof
+    jsr serial_try_in
+    cpx #0
+    beq @byte
+    cpx #1
+    beq @not_ready
+    cpx #2
+    beq @remember_eof
+    jmp rt_input_failure
+@byte:
+    ldx #0
+    jmp rt_push
+@not_ready:
+    lda #0
+    tax
+    jmp rt_push
 @remember_eof:
     lda #1
     sta rt_input_eof

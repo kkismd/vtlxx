@@ -4,6 +4,7 @@
 .export serial_in, serial_try_in, serial_out, halt, entropy16
 .exportzp script_cursor
 .export script_read_calls
+.export script_try_calls
 .import _putchar, exit
 .import test_input_events, test_input_end
 
@@ -15,9 +16,11 @@ script_range_low: .res 1
 script_eof: .byte 0
 script_initialized: .byte 0
 script_read_calls: .byte 0
+script_try_calls: .byte 0
 
 .segment "CODE"
 serial_try_in:
+    inc script_try_calls
     lda script_initialized
     bne @initialized
     lda #<test_input_events
