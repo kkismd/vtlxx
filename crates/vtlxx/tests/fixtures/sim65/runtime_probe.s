@@ -2,7 +2,7 @@
 ; immediately before the fatal entry passes its status to the #273 HALT.
 .setcpu "6502"
 .export _main, rt_test_probe
-.import rt_init, rt_push, rt_add, rt_div, rt_rem, rt_store_storage, rt_store_reg, rt_read_char, rt_read_entropy
+.import rt_init, rt_push, rt_add, rt_div, rt_rem, rt_store_storage, rt_store_reg, rt_read_char, rt_try_read_char, rt_read_entropy
 .import entropy_test_calls
 .importzp rt_depth, rt_stack, rt_regs
 .import rt_storage
@@ -48,6 +48,11 @@ _main:
         PUSH i
     .endrepeat
     jsr rt_read_char
+.elseif TEST_CASE = 13
+    .repeat 16, i
+        PUSH i
+    .endrepeat
+    jsr rt_try_read_char
 .elseif TEST_CASE = 8
     .repeat 16, i
         PUSH i
@@ -166,7 +171,7 @@ rt_test_probe:
 .elseif TEST_CASE = 6
     lda rt_depth
     bne @bad
-.elseif TEST_CASE = 7
+.elseif TEST_CASE = 7 .or TEST_CASE = 13
     lda rt_depth
     cmp #16
     bne @bad
@@ -182,10 +187,12 @@ rt_test_probe:
     inx
     cpx #32
     bne @input_stack
+.if TEST_CASE = 7
     jsr serial_in
     bcs @bad
     cmp #'Z'
     bne @bad
+.endif
 .elseif TEST_CASE = 8
     lda rt_depth
     cmp #16

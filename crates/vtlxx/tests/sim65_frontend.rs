@@ -255,6 +255,21 @@ fn unavailable_entropy_is_fatal_and_apostrophe_rhs_forms_are_rejected() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn backtick_primary_read_binds_in_value_positions_and_fails_closed_on_sim65() {
+    for source in ["A=`", "A=1+`", "A=(`)", "A=@(`)", "?=`", "&=p [ A=` ] p=()"] {
+        let result = build_and_run(source.as_bytes(), b"Z");
+        assert_eq!(result.status.code(), Some(6), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+
+    for source in ["A=`=1", "A=`(1)"] {
+        let result = build_and_run(source.as_bytes(), b"Z");
+        assert_ne!(result.status.code(), Some(6), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn phase_transition_initializes_runtime_and_preserves_return_state() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let basic = fs::read_to_string(root.join("6502/frontend/basic.s")).unwrap();

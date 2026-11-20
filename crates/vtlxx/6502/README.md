@@ -29,15 +29,20 @@ sim65 では、全 source の compile と driver 完成の後に `rt_init` へ�
 | `rt_eq`, `rt_ne`, `rt_lt`, `rt_le`, `rt_gt`, `rt_ge` | stack 上の operands | `( lhs rhs -- 0\|1 )` |
 | `rt_print_number`, `rt_print_char` | stack 上の value | `( value -- )` |
 | `rt_read_char` | — | `( -- char_or_eof )` |
+| `rt_try_read_char` | — | `( -- char_or_status )` |
 | `rt_read_entropy` | `entropy16` on first draw | `( -- random_value )` |
 
 helper は A/X/Y と processor flags を保存しない。`rt_push` の引数と register helper の X 以外に CPU register の入力契約はない。Cell は little-endian の signed 16-bit、stack は 16 Cell、A-Z は 26 Cell、storage は下位8 bitで選ぶ256 Cellの ring。A-Z と stack は zero page、storage は通常 RAM に置く。`rt_init` は register、storage、stack depth を初期化する。
 
-fatal status は underflow = 1、overflow = 2、division by zero = 3、remainder by zero = 4、entropy unavailable = 5 とし、いずれも #273 の `halt` へ移る。これは sim65 fixture が success と runtime error を区別するための target 内の値である。error 検出前に stack operand を消費しない。
+fatal status は underflow = 1、overflow = 2、division by zero = 3、remainder by zero = 4、entropy unavailable = 5、input failure = 6 とし、いずれも #273 の `halt` へ移る。これは sim65 fixture が success と runtime error を区別するための target 内の値である。error 検出前に stack operand を消費しない。
 
 sim65 の失敗時状態確認だけに `RT_TEST_PROBE` を指定すると、HALT 直前に fixture の `rt_test_probe` を呼ぶ。通常の target build にはこの hook は入らない。
 
 `rt_read_char` は `$` PrimaryRead の固定runtime targetである。stack空き容量をtransport readより先に検査し、NULを読み捨てて1..255またはEOF=-1を1 Cellとしてpushする。EOFはruntime session内で記憶し、後続readも-1を返す。sim65 adapterの `_getchar` はbyteとEOFだけを区別し、recoverable I/O failureを個別に表せないため、このtargetではそのerror分類を検証できない。
+
+`rt_try_read_char` はバッククォート PrimaryRead の固定runtime targetである。stack容量を先に確認してから `serial_try_in` を1回だけ呼び、ByteはNULを含めてその値、NotReadyは0、EOFはstickyな-1として1 Cell pushする。Fatalはstatus 6で停止し、CellやEOF状態を変更しない。通常sim65 adapterはreadinessを提供しないため、入力を消費せずstatus 6を返す。NotReady・NUL・共有EOFのnative検証には通常adapterと別リンクするscripted adapterを使う。
+
+#336変更前後の`ca65` object比較ではfrontend CODE +17 B、runtime primitives CODE +53 B、runtime state CODE +5 B。合計production CODE +75 Bで、Zero Page、BSS、RODATAは増加しない。scripted adapterの呼出回数probeはCODE +3 B、DATA +1 B。`rt_try_read_char`は常駐Zero Page scratchを使わず、provider callのJSR段数は既存`rt_read_char`と同じ。追加PHAやhardware-stack guardはない。
 
 `rt_read_entropy` は `'` PrimaryRead の固定runtime targetである。16 Cell容量を先に検査し、PRNG stateが未初期化の場合だけ `entropy16` からseedを一度取得する。seed 0は`$ACE1`へ正規化し、各評価で16bit xorshift `<<7, >>9, <<8` を順に適用して、更新後stateの上位15bitを1 Cell pushする。stateのゼロ値を未初期化sentinelとして使い、`rt_init`でクリアする。取得失敗はstatus 5でHALTし、sentinel、stack、他の言語stateを変更しない。adapterを差し替えない共通runtime fixtureは引き続き取得不可を返す。
 
