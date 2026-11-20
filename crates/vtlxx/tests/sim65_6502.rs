@@ -71,9 +71,17 @@ fn require_success(stage: &str, tool: &str, output: &Output) -> Result<(), Strin
     ))
 }
 
-fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
+fn build_and_run_with_adapter(
+    fixture: &str,
+    input: &[u8],
+    scripted: bool,
+) -> Result<Output, String> {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let adapter = crate_root.join("6502/target/sim65_adapter.s");
+    let adapter = crate_root.join(if scripted {
+        "6502/target/sim65_scripted_adapter.s"
+    } else {
+        "6502/target/sim65_adapter.s"
+    });
     let fixture = crate_root
         .join("tests/fixtures/sim65")
         .join(format!("{fixture}.s"));
@@ -103,7 +111,10 @@ fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
     }
 
     let mut objects = vec![fixture_object.as_os_str(), adapter_object.as_os_str()];
-    if fixture.file_stem().and_then(|name| name.to_str()) == Some("frontend_framing") {
+    if matches!(
+        fixture.file_stem().and_then(|name| name.to_str()),
+        Some("frontend_framing" | "frontend_scripted_framing" | "frontend_scripted_fatal")
+    ) {
         let output = run_tool(
             "ca65",
             "assemble layout",
@@ -157,6 +168,10 @@ fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
     )
 }
 
+fn build_and_run(fixture: &str, input: &[u8]) -> Result<Output, String> {
+    build_and_run_with_adapter(fixture, input, false)
+}
+
 fn validate_run(output: &Output, status: i32, stdout: &[u8]) -> Result<(), String> {
     if output.status.code() != Some(status) || output.stdout != stdout {
         return Err(format!(
@@ -203,11 +218,53 @@ fn serial_input_round_trips() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_try_and_wait_share_native_event_stream() {
+    let output = build_and_run_with_adapter("serial_try_probe", &[], true).unwrap();
+    validate_run(&output, 0, b"OK").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_try_fatal_is_distinct_and_nonfatal_to_adapter() {
+    let output = build_and_run_with_adapter("serial_try_fatal_probe", &[], true).unwrap();
+    validate_run(&output, 0, b"").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_wait_fatal_halts_with_input_failure_status() {
+    let output = build_and_run_with_adapter("serial_in_fatal_probe", &[], true).unwrap();
+    validate_run(&output, 6, b"").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn standard_adapter_fails_try_without_reading_stdin() {
+    let output = build_and_run("serial_try_unsupported", b"must remain unread").unwrap();
+    validate_run(&output, 0, b"").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn source_framing_stops_before_runtime_input() {
     let output = build_and_run("frontend_framing", &[3, 0, b'A', b'B', b'C', b'Z']).unwrap();
     validate_run(&output, 0, b"ABCZ").unwrap();
     let output = build_and_run("frontend_framing", &[0, 0, b'Z']).unwrap();
     validate_run(&output, 0, b"Z").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_source_framing_preserves_binary_bytes_and_runtime_position() {
+    let output = build_and_run_with_adapter("frontend_scripted_framing", &[], true).unwrap();
+    validate_run(&output, 0, &[0, 255, b'Z']).unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_source_framing_fatal_does_not_become_eof() {
+    let output = build_and_run_with_adapter("frontend_scripted_fatal", &[], true).unwrap();
+    validate_run(&output, 6, b"").unwrap();
 }
 
 #[test]

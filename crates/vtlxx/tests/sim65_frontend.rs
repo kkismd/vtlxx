@@ -395,7 +395,12 @@ fn micro_trek_passes_the_old_constant_limit() {
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(&source);
     input.extend_from_slice(b"0\n");
-    let result = build_and_run_input(&input);
+    let result = build_and_run_custom(
+        &input,
+        "tests/fixtures/sim65/frontend_basic.s",
+        None,
+        Some(0),
+    );
     assert_eq!(result.status.code(), Some(0), "{result:?}");
     assert!(result.stdout.starts_with(b"IT IS STARDATE"), "{result:?}");
 }

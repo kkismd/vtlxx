@@ -2,7 +2,7 @@
 ; and an 8-bit process status for HALT. This is not the ECVTL runtime ABI.
 .setcpu "6502"
 
-.export serial_in, serial_out, halt, entropy16
+.export serial_in, serial_try_in, serial_out, halt, entropy16
 .ifdef ENTROPY16_TEST
 .export entropy_test_calls
 .segment "DATA"
@@ -20,6 +20,12 @@ serial_in:
     rts
 @eof:
     sec                          ; carry set: transport ended, A is not a byte
+    rts
+
+; The standard sim65 stdin adapter cannot observe readiness. Fail closed
+; without touching stdin; callers may distinguish unsupported input from EOF.
+serial_try_in:
+    ldx #3                       ; Fatal / unsupported
     rts
 
 serial_out:
