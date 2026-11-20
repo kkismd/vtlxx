@@ -1,6 +1,6 @@
 .setcpu "6502"
 .export _main, test_input_events, test_input_end
-.import rt_init, rt_try_read_char
+.import rt_init, rt_read_char, rt_try_read_char
 .import script_try_calls, script_cursor
 .import serial_out, halt
 .importzp rt_depth, rt_stack, rt_input_eof
@@ -23,8 +23,9 @@ _main:
     jsr rt_try_read_char
     jsr rt_try_read_char
     jsr rt_try_read_char      ; sticky EOF must not call provider again
+    jsr rt_read_char          ; Wait uses the Try-owned EOF latch
     lda rt_depth
-    cmp #6
+    cmp #7
     bne @bad
     lda rt_stack
     ora rt_stack+1
@@ -49,6 +50,12 @@ _main:
     cmp #$ff
     bne @bad
     lda rt_stack+11
+    cmp #$ff
+    bne @bad
+    lda rt_stack+12
+    cmp #$ff
+    bne @bad
+    lda rt_stack+13
     cmp #$ff
     bne @bad
     lda rt_input_eof

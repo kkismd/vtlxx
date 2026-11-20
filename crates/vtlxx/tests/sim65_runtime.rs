@@ -281,3 +281,26 @@ fn try_read_char_fatal_preserves_stack_and_eof_state() {
     assert_eq!(output.status.code(), Some(6), "{output:?}");
     assert_eq!(output.stdout, b"K", "{output:?}");
 }
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn wait_and_try_share_order_nul_and_eof_session() {
+    let output = build_and_run_configured("runtime_try_mixed", None, &[], true).unwrap();
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"K", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_try_capacity_checks_depth_before_eof_or_provider() {
+    for (case, status) in [(15, 0), (16, 2), (17, 2)] {
+        let output =
+            build_and_run_configured("runtime_try_capacity", Some(case), &[], true).unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(status),
+            "case {case}: {output:?}"
+        );
+        assert_eq!(output.stdout, b"K", "case {case}: {output:?}");
+    }
+}
