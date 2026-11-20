@@ -2,7 +2,7 @@
 
 このディレクトリは VTLXX の sim65 固有コードを置く。`target/sim65_adapter.s` が byte と EOF を carry flag で区別する `serial_in`、readinessを提供できない場合に Fatal statusを返す `serial_try_in`、1 byte の `serial_out`、8-bit status の `halt` を提供する。`serial_in` は A に任意の byte（`$ff` を含む）を返し carry clear、EOF は carry setで返す。`serial_try_in` はsim65 stdinを読まず X=3 (Fatal/unsupported) を返す。A register を受け渡しに使う呼び出し規約と `sim6502.lib` への接続はこの target 内だけの取り決めであり、portable VTLXX runtime ABI ではない。
 
-`target/sim65_scripted_adapter.s` はnative試験専用で、通常adapterと同時にはlinkしない。fixtureが所有するタグ付きイベント列を `serial_in` と `serial_try_in` で共有し、TryのNotReady/Byte/EOF/FatalとWait入力の順序を再現する。イベント列の終端前にEOF/Fatalがなければfixture失敗として扱う。この経路はCLI optionや標準sim65 stdinのreadinessを提供しない。
+`target/sim65_scripted_adapter.s` はnative試験専用で、通常adapterと同時にはlinkしない。fixtureが所有するタグ付きイベント列を `serial_in` と `serial_try_in` で共有し、TryのNotReady/Byte/EOF/FatalとWait入力の順序を再現する。2-byte eventの範囲外・不完全event・tag 0..3以外はfixture破損としてsim65 status 64で終了する。これは入力FatalのX=3や同期入力失敗status 6とは別である。明示EOFのみstickyになり、明示FatalはTryでX=3、Waitでstatus 6となる。この経路はCLI optionや標準sim65 stdinのreadinessを提供しない。
 
 host 側の `tests/sim65_6502.rs` が `ca65 -t sim6502`、`ld65 -t sim6502`、`sim65 -x` を起動する。生成物は OS の一時ディレクトリに作られ、テスト終了時に削除される。
 

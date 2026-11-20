@@ -2,15 +2,19 @@
 .setcpu "6502"
 
 .export serial_in, serial_try_in, serial_out, halt, entropy16
+.exportzp script_cursor
+.export script_read_calls
 .import _putchar, exit
 .import test_input_events, test_input_end
 
 .segment "ZEROPAGE"
 script_cursor: .res 2
+script_range_low: .res 1
 
 .segment "DATA"
 script_eof: .byte 0
 script_initialized: .byte 0
+script_read_calls: .byte 0
 
 .segment "CODE"
 serial_try_in:
@@ -50,6 +54,7 @@ serial_try_in:
 
 ; Wait input ignores NotReady events but preserves their event ordering.
 serial_in:
+    inc script_read_calls
 @again:
     jsr serial_try_in
     cpx #1
@@ -70,19 +75,33 @@ serial_in:
 ; @next returns event tag in A, and event payload in X for tag 0.
 ; Events are pairs: tag, byte. Tag 0=Byte, 1=NotReady, 2=EOF, 3=Fatal.
 script_next:
+    ; Require cursor >= start before calculating the number of bytes left.
     lda script_cursor+1
-    cmp #>test_input_end
-    bne @read_event
+    cmp #>test_input_events
+    bcc @fixture_bad
+    bne @remaining
     lda script_cursor
-    cmp #<test_input_end
+    cmp #<test_input_events
+    bcc @fixture_bad
+@remaining:
+    ; Compute end - cursor. A complete pair requires at least two bytes.
+    lda #<test_input_end
+    sec
+    sbc script_cursor
+    sta script_range_low
+    lda #>test_input_end
+    sbc script_cursor+1
+    bcc @fixture_bad
     bne @read_event
-    lda #3                       ; Exhausted fixture is failure, never EOF.
-    ldx #0
-    rts
+    lda script_range_low
+    cmp #2
+    bcc @fixture_bad
 @read_event:
     ldy #0
     lda (script_cursor),y
     pha
+    cmp #4
+    bcs @bad_tag
     iny
     lda (script_cursor),y
     tax
@@ -95,6 +114,11 @@ script_next:
 @no_carry:
     pla
     rts
+@bad_tag:
+    pla
+@fixture_bad:
+    lda #$40                     ; Malformed fixture, distinct from I/O Fatal.
+    jmp halt
 
 
 serial_out:

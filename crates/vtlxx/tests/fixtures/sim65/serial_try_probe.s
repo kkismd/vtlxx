@@ -3,9 +3,9 @@
 .import serial_try_in, serial_in, serial_out, halt
 
 .segment "DATA"
-; NotReady, A, NUL, FF, EOF, then a deliberately unreachable Fatal.
+; Try NotReady, Try A, Wait NotReady + NUL, Try FF, Wait B, then EOF.
 test_input_events:
-    .byte 1,0, 0,65, 0,0, 0,255, 2,0, 3,0
+    .byte 1,0, 0,65, 1,0, 0,0, 0,255, 0,66, 2,0, 3,0
 test_input_end:
 
 .segment "CODE"
@@ -21,18 +21,24 @@ _main:
     jsr serial_in
     bcs @fail8
     cmp #0
-    bne @fail9
+    bne @fail9                  ; Wait skipped NotReady and consumed NUL.
     jsr serial_try_in
     cpx #0
-    bne @fail4
+    bne @fail12
     cmp #255
-    bne @fail5
+    bne @fail13
+    jsr serial_in               ; Wait follows Try on the same event cursor.
+    bcs @fail14
+    cmp #66
+    bne @fail15
     jsr serial_try_in
     cpx #2
-    bne @fail6
+    bne @fail16
+    jsr serial_in               ; EOF is sticky across both entry points.
+    bcc @fail17
     jsr serial_try_in
     cpx #2
-    bne @fail7
+    bne @fail18
     lda #'O'
     jsr serial_out
     lda #'K'
@@ -65,4 +71,28 @@ _main:
     jmp halt
 @fail9:
     lda #17
+    jmp halt
+@fail10:
+    lda #18
+    jmp halt
+@fail12:
+    lda #20
+    jmp halt
+@fail13:
+    lda #21
+    jmp halt
+@fail14:
+    lda #22
+    jmp halt
+@fail15:
+    lda #23
+    jmp halt
+@fail16:
+    lda #24
+    jmp halt
+@fail17:
+    lda #25
+    jmp halt
+@fail18:
+    lda #26
     jmp halt

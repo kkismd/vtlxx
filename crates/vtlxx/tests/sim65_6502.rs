@@ -113,7 +113,13 @@ fn build_and_run_with_adapter(
     let mut objects = vec![fixture_object.as_os_str(), adapter_object.as_os_str()];
     if matches!(
         fixture.file_stem().and_then(|name| name.to_str()),
-        Some("frontend_framing" | "frontend_scripted_framing" | "frontend_scripted_fatal")
+        Some(
+            "frontend_framing"
+                | "frontend_scripted_framing"
+                | "frontend_scripted_fatal"
+                | "frontend_scripted_header_eof"
+                | "frontend_scripted_payload_eof"
+        )
     ) {
         let output = run_tool(
             "ca65",
@@ -240,8 +246,22 @@ fn scripted_wait_fatal_halts_with_input_failure_status() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn standard_adapter_fails_try_without_reading_stdin() {
-    let output = build_and_run("serial_try_unsupported", b"must remain unread").unwrap();
-    validate_run(&output, 0, b"").unwrap();
+    let output = build_and_run("serial_try_unsupported", b"Z").unwrap();
+    validate_run(&output, 0, b"Z").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_fixture_exhaustion_is_distinct_from_transport_fatal() {
+    for fixture in [
+        "serial_try_empty_events",
+        "serial_try_partial_event",
+        "serial_try_invalid_tag",
+        "serial_in_not_ready_only",
+    ] {
+        let output = build_and_run_with_adapter(fixture, &[], true).unwrap();
+        validate_run(&output, 64, b"").unwrap();
+    }
 }
 
 #[test]
@@ -265,6 +285,16 @@ fn scripted_source_framing_preserves_binary_bytes_and_runtime_position() {
 fn scripted_source_framing_fatal_does_not_become_eof() {
     let output = build_and_run_with_adapter("frontend_scripted_fatal", &[], true).unwrap();
     validate_run(&output, 6, b"").unwrap();
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn scripted_source_eof_truncates_header_and_payload() {
+    let output = build_and_run_with_adapter("frontend_scripted_header_eof", &[], true).unwrap();
+    validate_run(&output, 0, b"").unwrap();
+
+    let output = build_and_run_with_adapter("frontend_scripted_payload_eof", &[], true).unwrap();
+    validate_run(&output, 0, b"A").unwrap();
 }
 
 #[test]
