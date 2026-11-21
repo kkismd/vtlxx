@@ -1,0 +1,30 @@
+end-ffef.bin stock-sim65 status 42 stderr=<empty>
+end-ffef.bin cc65-v218/bin/sim65 status 42 stderr=<empty>
+end-ffef.bin cc65-master/bin/sim65 status 42 stderr=<empty>
+end-ffef.bin v218-reserved-sim65 status 42 stderr=<empty>
+end-ffef.bin master-reserved-sim65 status 42 stderr=<empty>
+end-fff0.bin stock-sim65 status 42 stderr=<empty>
+end-fff0.bin cc65-v218/bin/sim65 status 42 stderr=<empty>
+end-fff0.bin cc65-master/bin/sim65 status 42 stderr=<empty>
+end-fff0.bin v218-reserved-sim65 status 0 stderr Error: 'loader-fixture/end-fff0.bin': To large to fit into $FFF0-$FFF0
+end-fff0.bin master-reserved-sim65 status 255 stderr Error: 'loader-fixture/end-fff0.bin': To large to fit into $FFF0-$FFF1
+end-fff1.bin stock-sim65 status 42 stderr=<empty>
+end-fff1.bin cc65-v218/bin/sim65 status 42 stderr=<empty>
+end-fff1.bin cc65-master/bin/sim65 status 255 stderr Error: 'loader-fixture/end-fff1.bin': To large to fit into $FFF1-$FFF1
+end-fff1.bin v218-reserved-sim65 status 0 stderr Error: 'loader-fixture/end-fff1.bin': To large to fit into $FFF0-$FFF0
+end-fff1.bin master-reserved-sim65 status 255 stderr Error: 'loader-fixture/end-fff1.bin': To large to fit into $FFF0-$FFF1
+end-fff3.bin stock-sim65 status 42 stderr=<empty>
+end-fff3.bin cc65-v218/bin/sim65 status 42 stderr=<empty>
+end-fff3.bin cc65-master/bin/sim65 status 255 stderr Error: 'loader-fixture/end-fff3.bin': To large to fit into $FFF1-$FFF1
+end-fff3.bin v218-reserved-sim65 status 0 stderr Error: 'loader-fixture/end-fff3.bin': To large to fit into $FFF0-$FFF0
+end-fff3.bin master-reserved-sim65 status 255 stderr Error: 'loader-fixture/end-fff3.bin': To large to fit into $FFF0-$FFF1
+end-fff4.bin stock-sim65 status 127 stderr Error: 'loader-fixture/end-fff4.bin': To large to fit into $FFF4-$FFF4
+end-fff4.bin cc65-v218/bin/sim65 status 42 stderr=<empty>
+end-fff4.bin cc65-master/bin/sim65 status 255 stderr Error: 'loader-fixture/end-fff4.bin': To large to fit into $FFF1-$FFF1
+end-fff4.bin v218-reserved-sim65 status 0 stderr Error: 'loader-fixture/end-fff4.bin': To large to fit into $FFF0-$FFF0
+end-fff4.bin master-reserved-sim65 status 255 stderr Error: 'loader-fixture/end-fff4.bin': To large to fit into $FFF0-$FFF1
+collision.bin stock-sim65 status 42 stderr=<empty>
+collision.bin cc65-v218/bin/sim65 status 66 stderr=<empty>
+collision.bin cc65-master/bin/sim65 status 66 stderr=<empty>
+collision.bin v218-reserved-sim65 status 0 stderr Error: 'loader-fixture/collision.bin': To large to fit into $FFF0-$FFF0
+collision.bin master-reserved-sim65 status 255 stderr Error: 'loader-fixture/collision.bin': To large to fit into $FFF0-$FFF1

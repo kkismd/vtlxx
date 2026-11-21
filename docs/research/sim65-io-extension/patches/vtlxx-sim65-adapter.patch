@@ -1,0 +1,17 @@
+--- a/crates/vtlxx/6502/target/sim65_adapter.s
++++ b/crates/vtlxx/6502/target/sim65_adapter.s
+@@ -11 +11 @@
+-.import _getchar, _putchar, exit
++.import _getchar, _putchar, _stdin, _ferror, exit
+@@ -21,0 +22,8 @@
++    lda _stdin                   ; cc65 records read errors separately from EOF
++    ldx _stdin+1
++    jsr _ferror
++    cmp #0                        ; cc65 return flags are not ABI results
++    beq @clean_eof
++    lda #6                       ; input failure, shared with runtime Fatal
++    jmp halt
++@clean_eof:
+@@ -28 +36 @@
+-    ldx #3                       ; Fatal / unsupported
++    jsr $fff0                    ; Experimental sim65-only hook; scratch only

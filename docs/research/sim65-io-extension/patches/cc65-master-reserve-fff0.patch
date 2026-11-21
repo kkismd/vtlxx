@@ -1,0 +1,11 @@
+--- a/src/sim65/main.c
++++ b/src/sim65/main.c
+@@ -253,7 +253,7 @@
+     /* Read the file body into memory */
+     Addr = Load;
+     while ((Val = fgetc(F)) != EOF) {
+-        if (Addr >= PARAVIRT_BASE) {
++        if (Addr >= 0xFFF0) {
+             Error ("'%s': To large to fit into $%04X-$%04X", ProgramFile, Addr, PARAVIRT_BASE);
+         }
+         MemWriteByte (Addr++, (unsigned char) Val);

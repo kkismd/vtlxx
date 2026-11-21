@@ -1,0 +1,3 @@
+v218 status 0 stdout b'6590' stderr b''
+master status 0 stdout b'6590' stderr b''
+stock status 125 stdout b'' stderr b"capability rejected: probe exit 127; stderr=b'Error: Illegal opcode $FF at address $FFF0\\n'\n"

@@ -1,0 +1,8 @@
+EOF status 0 stdout b'-1' stderr b''
+header-low status 6 stdout b'' stderr b'vtlxx6502: 6502 target halted with status 6 (sim65 exit status exit status: 6)\n'
+header-high status 6 stdout b'' stderr b'vtlxx6502: 6502 target halted with status 6 (sim65 exit status exit status: 6)\n'
+payload-first status 6 stdout b'' stderr b'vtlxx6502: 6502 target halted with status 6 (sim65 exit status exit status: 6)\n'
+payload-last status 6 stdout b'' stderr b'vtlxx6502: 6502 target halted with status 6 (sim65 exit status exit status: 6)\n'
+runtime status 6 stdout b'' stderr b'vtlxx6502: 6502 target halted with status 6 (sim65 exit status exit status: 6)\n'
+probe fail_after None status 99 stdout b'' stderr b'' remaining b''
+probe fail_after 0 status 6 stdout b'K' stderr b'' remaining b'Z'

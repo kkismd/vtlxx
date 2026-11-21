@@ -1,0 +1,30 @@
+--- a/src/sim65/paravirt.c
++++ b/src/sim65/paravirt.c
+@@ -38,0 +39,2 @@
++#include <poll.h>
++#include <errno.h>
+@@ -368,0 +371,17 @@
++static void PVTryRead (CPURegs* Regs)
++{
++    /* Experiment: X=255 selects a non-consuming ABI capability response. */
++    if (Regs->XR == 0xFF) { Regs->AC = 0x56; Regs->XR = 0x54; Regs->YR = 0x01; return; }
++    struct pollfd pfd; unsigned char Byte; int R;
++    pfd.fd = STDIN_FILENO; pfd.events = POLLIN; pfd.revents = 0;
++    do { R = poll (&pfd, 1, 0); } while (R < 0 && errno == EINTR);
++    if (R < 0 || (pfd.revents & (POLLERR | POLLNVAL))) { Regs->XR = 3; return; }
++    if (R == 0) { Regs->XR = 1; return; }
++    do { R = read (STDIN_FILENO, &Byte, 1); } while (R < 0 && errno == EINTR);
++    if (R == 1) { Regs->AC = Byte; Regs->XR = 0; }
++    else if (R == 0) { Regs->XR = 2; }
++    else if (errno == EAGAIN || errno == EWOULDBLOCK) { Regs->XR = 1; }
++    else { Regs->XR = 3; }
++}
++
++
+@@ -395,0 +415,6 @@
++
++    if (Regs->PC == 0xFFF0) {
++        PVTryRead (Regs);
++        lo = Pop (Regs); Regs->PC = lo + (Pop (Regs) << 8) + 1;
++        return;
++    }

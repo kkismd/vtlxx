@@ -1,0 +1,4 @@
+canonical before newline (0, '1 0', '')
+canonical after newline first (0, '0 65', '')
+canonical newline (0, '0 10', '')
+raw immediate (0, '0 66', '')
