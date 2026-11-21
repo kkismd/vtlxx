@@ -1,0 +1,43 @@
+sim65 basic stdout= b'65' stderr= b'' status= 0
+sim65 wait/nul stdout= b'65' stderr= b'' status= 0
+sim65 syntax stdout= b'' stderr= b'' status= 130
+sim65 truncated stdout= b'' stderr= b'' status= 129
+/tmp/vtlxx-596-replay-02/harness/target/release/probe basic stdout= b'65' stderr= b'cycles=466289 hooks=[0, 0, 0, 0, 0, 6, 2, 0, 1]\n' status= 0
+/tmp/vtlxx-596-replay-02/harness/target/release/probe wait/nul stdout= b'65' stderr= b'cycles=469543 hooks=[0, 0, 0, 0, 0, 11, 2, 0, 1]\n' status= 0
+/tmp/vtlxx-596-replay-02/harness/target/release/probe syntax stdout= b'' stderr= b'cycles=455866 hooks=[0, 0, 0, 0, 0, 3, 0, 0, 1]\n' status= 130
+/tmp/vtlxx-596-replay-02/harness/target/release/probe truncated stdout= b'' stderr= b'cycles=457815 hooks=[0, 0, 0, 0, 0, 6, 0, 0, 1]\n' status= 129
+stock cycle stdout= b'65466196 cycles\n' stderr= b'' status= 0
+mos cycle stdout= b'65' stderr= b'cycles=466289 hooks=[0, 0, 0, 0, 0, 6, 2, 0, 1]\n' status= 0
+stock adapter try unsupported stdout= b'' stderr= b'cycles=466615 hooks=[0, 0, 0, 0, 0, 9, 0, 0, 1]\n' status= 6
+try b'A=` ?=A'b'\x00' stdout= b'0' stderr= b'cycles=463783 hooks=[0, 0, 0, 0, 0, 0, 1, 0, 1]\n' status= 0
+try b'A=` ?=A'b'\xff' stdout= b'255' stderr= b'cycles=465294 hooks=[0, 0, 0, 0, 0, 0, 3, 0, 1]\n' status= 0
+try b'A=` B=` ?=A ?=B'b'' stdout= b'-1-1' stderr= b'cycles=468702 hooks=[0, 0, 0, 0, 0, 0, 4, 0, 1]\n' status= 0
+try b'A=` B=$ C=` ?=A ?=B ?=C'b'ABC' stdout= b'656667' stderr= b'cycles=474813 hooks=[0, 0, 0, 0, 0, 0, 6, 0, 1]\n' status= 0
+fatal stdout= b'K' stderr= b'cycles=11002 hooks=[0, 0, 0, 0, 0, 0, 1, 0, 1]\n' status= 6
+fatal-wait stdout= b'K' stderr= b'cycles=11001 hooks=[0, 0, 0, 0, 0, 0, 1, 0, 1]\n' status= 6
+capacity stdout= b'K' stderr= b'cycles=12308 hooks=[0, 0, 0, 0, 0, 0, 1, 0, 1]\n' status= 2
+wait-capacity stdout= b'K' stderr= b'cycles=12308 hooks=[0, 0, 0, 0, 0, 0, 1, 0, 1]\n' status= 2
+source read failure stdout= b'' stderr= b'HOST_IO_ERROR read call=3 cycles=455519 depth=0 eof=0\n' status= 120
+wait read failure stdout= b'' stderr= b'HOST_IO_ERROR read call=10 cycles=466924 depth=0 eof=0\n' status= 120
+read error mistaken for eof stdout= b'-1' stderr= b'cycles=468599 hooks=[0, 0, 0, 0, 0, 10, 2, 0, 1]\n' status= 0
+write failure injection stdout= b'' stderr= b'HOST_IO_ERROR write cycles=465384\n' status= 121
+/dev/full b'HOST_IO_ERROR write: No space left on device (os error 28)\n' 121
+old buffered /dev/full b'cycles=466289 hooks=[0, 0, 0, 0, 0, 6, 2, 0, 1]\n' 0
+OS read error b'K' b'cycles=11002 hooks=[0, 0, 0, 0, 0, 0, 1, 0, 1]\n' 6
+try not ready b'0' b'cycles=463789 hooks=[0, 0, 0, 0, 0, 0, 1, 0, 1]\n' 0
+sim65 wall 0.7517 response 0.0003 user 0.0015 system 0.0 stderr b''
+mos wall 0.7507 response 0.0003 user 0.0024 system 0.0 stderr b'cycles=469092 hooks=[0, 0, 0, 0, 0, 10, 2, 0, 1]\n'
+mos adapter wall 0.7511 response 0.0005 user 0.0023 system 0.0 stderr b'cycles=464810 hooks=[0, 0, 0, 0, 0, 0, 2, 0, 1]\n'
+delayed source wall 0.7508 response 0.0005 b'cycles=463683 hooks=[0, 0, 0, 0, 0, 0, 2, 0, 1]\n'
+sim65 limit 466196 stdout= b'65' stderr= b'Error: Maximum number of cycles reached.\n' status= 126
+sim65 limit 466197 stdout= b'65' stderr= b'' status= 0
+mos limit 466289 stdout= b'65' stderr= b'limit cycles=466289 hooks=[0, 0, 0, 0, 0, 6, 2, 0, 0]\n' status= 126
+mos limit 466290 stdout= b'65' stderr= b'cycles=466289 hooks=[0, 0, 0, 0, 0, 6, 2, 0, 1]\n' status= 0
+try busy limit stdout= b'' stderr= b'limit cycles=10000001 hooks=[0, 0, 0, 0, 0, 0, 0, 0, 0]\n' status= 126
+hup-data poll=1 revents=0x11 read=1 byte=Q
+hup-empty poll=1 revents=0x10 read=0
+race-nonblock poll=1 revents=0x1 read=-1 errno=11 Resource temporarily unavailable
+closed-fd poll=1 revents=0x20
+broken-pipe-write poll=1 revents=0xc
+signal poll=-1 errno=4 Interrupted system call
+PASS: representative cases
