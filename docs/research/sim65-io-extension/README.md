@@ -6,9 +6,9 @@ Research: [#593](https://github.com/kkismd/vtlxx/issues/593) · 親Tracker: [#59
 
 ## 結論
 
-Linux上でsim65のTry専用host hook案を実6502 guestとVTLXX native imageで実証しました。sourceとWaitはcc65の既存blocking `getchar` を保ち、Tryは `JSR $FFF0` で1 byteを試行し、X=0 Byte（Aにraw byte）、1 NotReady、2 EOF、3 Fatalを返す構成です。Waitの約0.75秒入力待ちではCPU時間表示0.00/0.00秒、4,872,280 cyclesでした。Try EIO、能力検出、stock sim65拒否、loader衝突、別reader競合も記録しています。
+Linux上でsim65のTry専用host hook案を実6502 guestとVTLXX native imageで実証しました。sourceとWaitはcc65の既存blocking `getchar` を保ち、Tryは `JSR $FFF0` で1 byteを試行し、X=0 Byte（Aにraw byte）、1 NotReady、2 EOF、3 Fatalを返す構成です。Waitの約0.75秒入力待ちではCPU時間表示0.00/0.00秒、487,280 cyclesでした。Try EIO、能力検出、stock sim65拒否、loader衝突、別reader競合も記録しています。
 
-これは**実験用コードであり、本番採用された仕様・機能ではありません**。待機/source read errorからruntime Fatalへ伝えるnative統合、Windows、一般fdの競合reader安全性などは未成立または対象外です。詳細なPass/Fail、#592との比較、費用見積りは報告コメントを正本とします。
+これは**実験用コードであり、本番採用された仕様・機能ではありません**。source長・本文・runtime WaitへのEIO注入ではruntimeを開始せずnative guest status 6で停止することを確認し、別runtime fixtureでstack/depth/EOF latch保持とbyte未消費を確認しました。source phaseもstatus 6へ停止しますが、frontend固有のエラー分類・診断は実装されていません。Windowsと一般fdの競合reader安全性も未検証です。詳細なPass/Fail、#592との比較、費用見積りは報告コメントを正本とします。
 
 ## 環境・識別子
 
@@ -25,51 +25,74 @@ VTLXX sourceは当該SHAからscratchへexportしました。cc65ソース全体
 
 ## 再現
 
-必要なものはGit、C build環境（make/compiler）、Python 3、POSIX/Linux、Rust toolchain、およびこのrepositoryです。Windowsでは以下のPOSIX pipe/poll実験を同条件で再現できません。
+必要なものはGit、C build環境（make/compiler）、Python 3、POSIX/Linux、`patch`、Rust toolchain、およびUbuntu cc65 packageの `cfg/sim6502.cfg` です。Windowsでは以下のPOSIX pipe/poll実験を同条件で再現できません。
 
-```sh
-git clone https://github.com/cc65/cc65.git /tmp/cc65-v218
-git -C /tmp/cc65-v218 checkout 6efb71bea773837c6fc4aae0c8270b2d70e3e69f
-git -C /tmp/cc65-v218 apply "$PWD/docs/research/sim65-io-extension/patches/cc65-v218-try-hook.patch"
-make -C /tmp/cc65-v218 -j2
+`cc65-*-try-hook.patch` と `*-capability.patch` はそれぞれ同じbase SHAから適用する独立patchです。後者にはcapability応答も含まれます。V2.18 patchのみ `SIM65_WAIT_FAIL_AFTER` と `SIM65_TRY_FAULT` の故障注入を含みます。master patchに `SIM65_TRY_FAULT` はありません。loader予約差分は `*-reserve-fff0.patch` で、main.cだけに適用する追加差分です。すべてscratch専用です。
 
-git clone https://github.com/cc65/cc65.git /tmp/cc65-master
-git -C /tmp/cc65-master checkout eebf54af545f4ae52f8489a2f6d4d5f93e7942d2
-git -C /tmp/cc65-master apply "$PWD/docs/research/sim65-io-extension/patches/cc65-master-try-hook.patch"
-make -C /tmp/cc65-master -j2
+以下をrepository rootから実行するとcc65を取得・固定・patch・buildし、VTLXX sourceを固定SHAからexportして、native imageとFatal fixtureを作成し、capability/native/Fatalの代表試験を行います。作業物はmktempで作る `/tmp/vtlxx-593-replay.*` 配下に限られます。
+
+```bash
+set -euo pipefail
+REPO_ROOT=$(git rev-parse --show-toplevel)
+EVIDENCE="$REPO_ROOT/docs/research/sim65-io-extension"
+WORK=$(mktemp -d /tmp/vtlxx-593-replay.XXXXXX)
+mkdir -p "$WORK/source" "$WORK/image" "$WORK/fatal" "$WORK/target"
+
+git clone https://github.com/cc65/cc65.git "$WORK/cc65-v218"
+git -C "$WORK/cc65-v218" checkout 6efb71bea773837c6fc4aae0c8270b2d70e3e69f
+patch -p1 -d "$WORK/cc65-v218" < "$EVIDENCE/patches/v218-capability.patch"
+cp /usr/share/cc65/cfg/sim6502.cfg "$WORK/cc65-v218/cfg/sim6502.cfg"
+make -C "$WORK/cc65-v218" -j2
+
+git clone https://github.com/cc65/cc65.git "$WORK/cc65-master"
+git -C "$WORK/cc65-master" checkout eebf54af545f4ae52f8489a2f6d4d5f93e7942d2
+patch -p1 -d "$WORK/cc65-master" < "$EVIDENCE/patches/master-capability.patch"
+make -C "$WORK/cc65-master" -j2
+
+git -C "$REPO_ROOT" archive 246d45c9a6ac85a9f8e4e9f762317db35a88e702 | tar -x -C "$WORK/source"
+patch -p1 -d "$WORK/source" < "$EVIDENCE/patches/vtlxx-sim65-adapter.patch"
+VTLXX_ROOT="$WORK/source/crates/vtlxx"
+CC65_ROOT="$WORK/cc65-v218" VTLXX_ROOT="$VTLXX_ROOT" OUT_DIR="$WORK/image" \
+  bash "$EVIDENCE/probes/build_vtlxx_image.sh"
+CC65_ROOT="$WORK/cc65-v218" VTLXX_ROOT="$VTLXX_ROOT" OUT_DIR="$WORK/fatal" \
+  bash "$EVIDENCE/probes/build_wait_fatal_probe.sh"
+
+cd "$WORK"
+"$WORK/cc65-v218/bin/cl65" -t sim6502 -o "$WORK/capability.bin" \
+  "$EVIDENCE/probes/capability_main.c" "$EVIDENCE/probes/capability_probe.s"
+"$WORK/cc65-v218/bin/cl65" -t sim6502 -o "$WORK/byte-probe.bin" \
+  "$EVIDENCE/probes/capability_byte_probe.c"
+"$WORK/cc65-v218/bin/cl65" -t sim6502 -o "$WORK/try-probe.bin" \
+  "$EVIDENCE/probes/probe_main.c" "$EVIDENCE/probes/probe_guest.s"
+
+export SIM65_V218="$WORK/cc65-v218/bin/sim65"
+export SIM65_MASTER="$WORK/cc65-master/bin/sim65"
+export SIM65_STOCK=/usr/bin/sim65
+export SIM65_CAPABILITY_IMAGE="$WORK/capability.bin"
+export SIM65_BYTE_PROBE="$WORK/byte-probe.bin"
+SIM65_V218="$SIM65_V218" SIM65_MASTER="$SIM65_MASTER" SIM65_STOCK="$SIM65_STOCK" \
+  SIM65_CAPABILITY_IMAGE="$SIM65_CAPABILITY_IMAGE" SIM65_BYTE_PROBE="$SIM65_BYTE_PROBE" \
+  python3 "$EVIDENCE/probes/capability_cases.py"
+SIM65_CAPABILITY_IMAGE="$SIM65_CAPABILITY_IMAGE" VTLXX_IMAGE="$WORK/image/vtlxx.prg" \
+  SIM65_V218="$SIM65_V218" SIM65_MASTER="$SIM65_MASTER" SIM65_STOCK="$SIM65_STOCK" \
+  python3 "$EVIDENCE/probes/capability_vtlxx_e2e.py"
+
+cargo build --manifest-path "$WORK/source/Cargo.toml" -p vtlxx --bin vtlxx6502 --target-dir "$WORK/target"
+export VTLXX6502="$WORK/target/debug/vtlxx6502"
+export WAIT_FATAL_SOURCE="$EVIDENCE/probes/wait-fatal.vtl"
+export CC65_BIN="$WORK/cc65-v218/bin"
+export WAIT_FATAL_IMAGE="$WORK/fatal/wait_fatal.prg"
+python3 "$EVIDENCE/probes/wait_fatal_cases.py"
+SIM65_BIN="$SIM65_V218" SIM65_IMAGE="$WORK/try-probe.bin" \
+  python3 "$EVIDENCE/probes/tty_mode_probe.py"
+python3 "$EVIDENCE/probes/pipe_reader_race.py"
 ```
 
-`cc65-*-try-hook.patch` はTry hookと故障注入を含む実験patchです（V2.18側の `SIM65_WAIT_FAIL_AFTER`、両版の `SIM65_TRY_FAULT`）。`*-capability.patch` はcapability応答も含む**独立した全体patch**で、同じベースSHAから適用します。両方を重ねないでください。loader予約差分は `*-reserve-fff0.patch` で、main.cだけに適用する追加差分です。VTLXX adapter差分は `vtlxx-sim65-adapter.patch` です。これらを製品へ適用しないでください。
+期待値: capability casesはpatched V2.18/masterがstatus 65、stockとfake wrong/error/timeoutがstatus 125。VTLXX native frameの結果はpatched両版でstdout `6590`, stderr空, status 0、stockはstatus 125でguest未起動。Fatal casesは通常EOFがstdout `-1`, stderr空, status 0、source長/source本文/runtime WaitのEIO注入がstdout空・stderrにstatus 6の停止診断・guest status 6でruntime outputなし。source phaseのstatus 6は停止確認であり、frontend専用error分類を示しません。別runtime fixtureは正常入力でstderr/stdout空・status 99・byte `Z`消費、EIO注入でstdout `K`・stderr空・status 6・`Z`未消費（runtime Cell `$1234`、depth 1、EOF latch 0）。TTYとpipe raceは各logを参照してください。
 
-guest probeの構築例（各cc65 checkout内）:
+V2.18 tag付属cfgはZP=27 bytesでlinkできないため、上記はUbuntu packageのZP=256 cfgをscratch cc65 treeへコピーします。固定パッケージcfgがない環境では同じメモリ領域設定のcfgを用意し、出所を記録してください。capability E2Eの入力frameは `[u16 LE length][source bytes][runtime bytes]` です。
 
-```sh
-cd docs/research/sim65-io-extension/probes
-cl65 -t sim6502 -o /tmp/capability.bin capability_main.c capability_probe.s
-cl65 -t sim6502 -o /tmp/byte-probe.bin capability_byte_probe.c
-```
-
-当該VTLXX revisionを展開してnative CLI imageを作る場合は、cc65とVTLXXのscratch rootを指定します。`experimental_adapter.s` は調査用adapterです。
-
-```sh
-git -C /path/to/vtlxx archive 246d45c9a6ac85a9f8e4e9f762317db35a88e702 crates/vtlxx | tar -x -C /tmp/vtlxx-src
-CC65_ROOT=/tmp/cc65-v218 VTLXX_ROOT=/tmp/vtlxx-src/crates/vtlxx \
-OUT_DIR=/tmp/vtlxx-image sh docs/research/sim65-io-extension/probes/build_vtlxx_image.sh
-```
-
-V2.18 tagのZP領域設定ではlinkが不足します。実験と同じ条件にする場合は、Ubuntu cc65 package由来の `cfg/sim6502.cfg`（ZP=256）を `CC65_ROOT/cfg/sim6502.cfg` にscratch内で適用してください。native CLIのsource frameは2-byte little endian length、続けてsource、runtime bytesです。
-
-能力検出ケースを走らせるには、能力patchを重ねたV2.18/master sim65、stock sim65、fake simulatorを指定します。
-
-```sh
-SIM65_V218=/tmp/cc65-v218/bin/sim65 SIM65_MASTER=/tmp/cc65-master/bin/sim65 \
-SIM65_STOCK=/usr/bin/sim65 SIM65_CAPABILITY_IMAGE=/tmp/capability.bin \
-SIM65_BYTE_PROBE=/tmp/byte-probe.bin python3 probes/capability_cases.py
-```
-
-期待値: patched V2.18/masterはbyte probeのstatus 65、stockはstatus 125でstderrに `capability rejected: probe exit 127`、誤応答・異常status・timeoutもstatus 125で拒否します。`capability_vtlxx_e2e.py` はVTLXX native imageを `VTLXX_IMAGE` に指定し、入力frame `[u16 LE length][source][runtime]` `A=` B=$ ?=A ?=B` + `AZ` を渡します。patched simulatorの期待stdoutは `6590`、status 0、stockは本体起動前にstatus 125です。
-
-Fatal/loader/race/TTYのprobeは `probes/` にあります。Fatal試験にはnative build/imageが必要で、`VTLXX6502`, `WAIT_FATAL_SOURCE`, `CC65_BIN`, `SIM65_V218`, `WAIT_FATAL_IMAGE` を設定します。loader fixture生成には `SIM65_TEMPLATE_IMAGE` と `SIM65_STOCK`, `SIM65_V218`, `SIM65_MASTER`, `SIM65_V218_RESERVED`, `SIM65_MASTER_RESERVED` を設定します。生成imageは `probes/` に作られます。競合実験は `python3 probes/pipe_reader_race.py`、TTYは `SIM65_BIN` と `SIM65_IMAGE` を設定して実行してください。
+loader境界fixtureは別途 `cc65-v218-reserve-fff0.patch` / `cc65-master-reserve-fff0.patch` を各対象treeへ適用したsim65を追加して比較します。`loader_collision_cases.py` は `SIM65_TEMPLATE_IMAGE` と5 simulator pathの環境変数を受け取りfixtureを生成します。TTYは `SIM65_BIN` / `SIM65_IMAGE` を使います。
 
 ## 成果物
 

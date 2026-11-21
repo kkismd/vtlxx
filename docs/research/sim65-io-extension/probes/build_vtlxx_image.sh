@@ -4,6 +4,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 : "${CC65_ROOT:?set CC65_ROOT to the patched cc65 checkout}"
 : "${VTLXX_ROOT:?set VTLXX_ROOT to crates/vtlxx at the recorded VTLXX SHA}"
 : "${OUT_DIR:?set OUT_DIR to a writable scratch directory}"
+mkdir -p "$OUT_DIR"
 sources=(6502/target/sim65_cli.s 6502/frontend/basic.s 6502/frontend/source.s 6502/compiler/arena.s 6502/compiler/emitter.s 6502/compiler/owner.s 6502/compiler/binding.s 6502/target/zp_layout.s 6502/runtime/state.s 6502/runtime/primitives.s 6502/runtime/arithmetic.s)
 objects=()
 for i in "${!sources[@]}"; do

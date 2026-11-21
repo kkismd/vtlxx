@@ -5,7 +5,7 @@
 | workload | wall | user/sys | sim65 cycles | stdout / 終了 |
 |---|---:|---:|---:|---|
 | source frame受信後、source payloadを250ms遅延 | simulator 0.24s、CLI 0.305s | 0.00/0.00s | 469,824 | `40` + cycles、status 0 |
-| 3回Wait、byteを約250ms間隔（合計0.75s） | simulator 0.72s、CLI 0.753s | 0.00/0.00s | 4,872,280 | `65/66/67` + cycles、status 0 |
+| 3回Wait、byteを約250ms間隔（合計0.75s） | simulator 0.72s、CLI 0.753s | 0.00/0.00s | 487,280 | `65/66/67` + cycles、status 0 |
 | 1回Wait、750ms遅延、cycle limit 4,000,000 | simulator 0.72s | 0.00/0.00s | 469,906 | `88` + cycles、status 0 |
 | pipe open/未入力のTry有限loop 1,000回 | simulator <0.01s、CLI 0.031s | 0.00/0.00s | 1,155,424 | `0` + cycles、status 0 |
 | Try loop、cycle limit 500,000 | simulator <0.01s、CLI 0.031s | 0.00/0.00s | limit到達 | stdout空、CLI cycle-limit error |
