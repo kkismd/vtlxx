@@ -8,7 +8,7 @@ Research: [#593](https://github.com/kkismd/vtlxx/issues/593) · 親Tracker: [#59
 
 Linux上でsim65のTry専用host hook案を実6502 guestとVTLXX native imageで実証しました。sourceとWaitはcc65の既存blocking `getchar` を保ち、Tryは `JSR $FFF0` で1 byteを試行し、X=0 Byte（Aにraw byte）、1 NotReady、2 EOF、3 Fatalを返す構成です。Waitの約0.75秒入力待ちではCPU時間表示0.00/0.00秒、487,280 cyclesでした。Try EIO、能力検出、stock sim65拒否、loader衝突、別reader競合も記録しています。
 
-これは**実験用コードであり、本番採用された仕様・機能ではありません**。source長・本文・runtime WaitへのEIO注入ではruntimeを開始せずnative guest status 6で停止することを確認し、別runtime fixtureでstack/depth/EOF latch保持とbyte未消費を確認しました。source phaseもstatus 6へ停止しますが、frontend固有のエラー分類・診断は実装されていません。Windowsと一般fdの競合reader安全性も未検証です。詳細なPass/Fail、#592との比較、費用見積りは報告コメントを正本とします。
+これは**実験用コードであり、本番採用された仕様・機能ではありません**。source長・本文へのEIO注入ではruntime開始前に、runtime WaitへのEIO注入ではruntime実行中に、それぞれnative guest status 6で停止することを確認しました。別runtime fixtureでstack/depth/EOF latch保持とbyte未消費を確認しました。source phaseもstatus 6へ停止しますが、frontend固有のエラー分類・診断は実装されていません。Windowsと一般fdの競合reader安全性も未検証です。詳細なPass/Fail、#592との比較、費用見積りは報告コメントを正本とします。
 
 ## 環境・識別子
 
