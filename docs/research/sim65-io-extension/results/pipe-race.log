@@ -1,0 +1,3 @@
+poll=[(3, 1)] competitor=b'A' victim_blocked_100ms=True victim_after_next_write=[b'B'] writer_open=True
+dup_sets_original_nonblock=True
+empty_read_errno=11 (EAGAIN)

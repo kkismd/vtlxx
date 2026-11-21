@@ -1,0 +1,6 @@
+v218 status 65 stdout b'' stderr b''
+master status 65 stdout b'' stderr b''
+stock status 125 stdout b'' stderr b"capability rejected: probe exit 127; stderr=b'Error: Illegal opcode $FF at address $FFF0\\n'\n"
+wrong-response status 125 stdout b'' stderr b"capability rejected: unexpected probe output b'wrong capability\\n'\n"
+timeout status 125 stdout b'' stderr b'capability rejected: timeout\n'
+error-status status 125 stdout b'' stderr b"capability rejected: probe exit 3; stderr=b''\n"
