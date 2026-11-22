@@ -267,10 +267,37 @@ mod tests {
             assert_eq!(stock.status.code(), Some(i32::from(expected_status)));
             assert!(stock.stdout.is_empty());
         }
+
+        for (runtime_bytes, expected_stdout) in [(&b"\0A"[..], &b"65"[..]), (&b""[..], &b"-1"[..])]
+        {
+            let framed = crate::frame_input(b"A=$ ?=A", runtime_bytes).unwrap();
+            let (result, output, _) = HostRunner::new(&image, framed.clone(), Some(2_000_000))
+                .unwrap()
+                .run()
+                .unwrap();
+            let HostOutcome::GuestExit { status, .. } = result else {
+                panic!("expected successful guest exit, got {result:?}");
+            };
+            assert_eq!(status, 0);
+            assert_eq!(output, expected_stdout);
+
+            let mut child = Command::new("sim65")
+                .args(["-x", "2000000"])
+                .arg(&path)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap();
+            child.stdin.take().unwrap().write_all(&framed).unwrap();
+            let stock = child.wait_with_output().unwrap();
+            assert_eq!(stock.status.code(), Some(0));
+            assert_eq!(stock.stdout, expected_stdout);
+        }
     }
 
     #[test]
-    fn buffered_guest_output_flush_failure_is_a_host_error() {
+    fn guest_output_write_failure_is_a_host_error() {
         struct FailOnWrite;
         impl Write for FailOnWrite {
             fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
@@ -292,6 +319,31 @@ mod tests {
         let mut image = b"sim65\x02\x00\xf0\x00\x02\x00\x02".to_vec();
         image.extend_from_slice(&body);
         let mut writer = FailOnWrite;
+        let error = run_with_io(&image, &[], Some(100), &mut writer).unwrap_err();
+        assert!(matches!(error, HostError::Output(_)));
+    }
+
+    #[test]
+    fn guest_output_flush_failure_is_a_host_error() {
+        struct FailOnFlush;
+        impl Write for FailOnFlush {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Err(std::io::Error::other("injected flush failure"))
+            }
+        }
+        let mut body = vec![
+            0xa9, 0x0a, 0x85, 0xf0, 0xa9, 0x20, 0x85, 0xf1, 0xa9, 0x00, 0x8d, 0x0a, 0x20, 0xa9,
+            0x03, 0x8d, 0x0b, 0x20, 0xa9, 0x01, 0x8d, 0x0c, 0x20, 0xa9, 0x00, 0x8d, 0x0d, 0x20,
+            0xa9, 0x01, 0xa2, 0x00, 0x20, 0xf7, 0xff, 0xa9, 0x00, 0x4c, 0xf9, 0xff,
+        ];
+        body.resize(0x100, 0xea);
+        body.push(b'X');
+        let mut image = b"sim65\x02\x00\xf0\x00\x02\x00\x02".to_vec();
+        image.extend_from_slice(&body);
+        let mut writer = FailOnFlush;
         let error = run_with_io(&image, &[], Some(100), &mut writer).unwrap_err();
         assert!(matches!(error, HostError::Output(_)));
     }
