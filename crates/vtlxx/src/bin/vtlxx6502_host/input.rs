@@ -188,10 +188,10 @@ mod live {
             if let Some(mut wake) = self.wake.take() {
                 let _ = wake.write_all(&[1]);
             }
-            if let Some(worker) = self.worker.take() {
-                if worker.join().is_err() {
-                    return Err(io::Error::other("input worker panicked"));
-                }
+            if let Some(worker) = self.worker.take()
+                && worker.join().is_err()
+            {
+                return Err(io::Error::other("input worker panicked"));
             }
             let state = self.shared.state.lock().unwrap();
             if let Some(error) = &state.failure {

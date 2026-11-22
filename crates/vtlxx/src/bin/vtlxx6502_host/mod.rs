@@ -488,6 +488,62 @@ mod tests {
         assert_eq!(runner.input.try_byte(), input::InputEvent::Byte(b'Z'));
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
+    fn mos_try_empty_pipe_returns_immediately_then_wait_reads_arriving_byte() {
+        use std::{sync::mpsc, time::Duration};
+
+        let (_temp, path) = compile_image(true);
+        let image = std::fs::read(path).unwrap();
+        let (reader, writer) = std::io::pipe().unwrap();
+        let prefix = crate::frame_input(b"?=`", b"").unwrap();
+        let (send, receive) = mpsc::channel();
+        let image_copy = image.clone();
+        let thread = std::thread::spawn(move || {
+            let result =
+                HostRunner::interactive(&image_copy, prefix, reader.into(), Some(2_000_000))
+                    .unwrap()
+                    .run();
+            send.send(result).unwrap();
+        });
+        let result = receive.recv_timeout(Duration::from_secs(5));
+        drop(writer); // Also unblocks a broken implementation before joining.
+        thread.join().unwrap();
+        let (outcome, output, _) = result.expect("Try blocked on an open empty pipe").unwrap();
+        assert!(matches!(outcome, HostOutcome::GuestExit { status: 0, .. }));
+        assert_eq!(output, b"0");
+
+        struct SendAfterOutput {
+            output: Vec<u8>,
+            writer: std::io::PipeWriter,
+        }
+        impl Write for SendAfterOutput {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.output.is_empty() {
+                    assert_eq!(bytes, b"0");
+                    self.writer.write_all(b"A")?;
+                }
+                self.output.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let (reader, writer) = std::io::pipe().unwrap();
+        let prefix = crate::frame_input(b"?=` ?=$", b"").unwrap();
+        let mut runner =
+            HostRunner::interactive(&image, prefix, reader.into(), Some(2_000_000)).unwrap();
+        let mut output = SendAfterOutput {
+            output: Vec::new(),
+            writer,
+        };
+        let outcome = runner.run_to(&mut output, &mut Vec::new()).unwrap();
+        assert!(matches!(outcome, HostOutcome::GuestExit { status: 0, .. }));
+        assert_eq!(output.output, b"065");
+    }
+
     #[test]
     fn guest_output_write_failure_is_a_host_error() {
         struct FailOnWrite;
