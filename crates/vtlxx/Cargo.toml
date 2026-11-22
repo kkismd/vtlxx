@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 getrandom = "0.3"
+mos6502 = "=0.10.1"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
