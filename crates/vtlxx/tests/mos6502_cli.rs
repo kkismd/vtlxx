@@ -155,6 +155,79 @@ fn fixed_seed_vector_matches_reference() {
     assert_eq!(result.stdout, b"16576123042990058932324727857");
 }
 
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn product_engines_match_on_shared_programs() {
+    let temp = TestDir::new();
+    let input = temp.0.join("shared-input.bin");
+    fs::write(&input, [0, 0, 65]).unwrap();
+    for (source, expected_status, expected) in [
+        ("?=65", 0, &b"65"[..]),
+        ("A=$ ?=A", 0, &b"65"[..]),
+        (".NUM:=4 &=p [ ?=.NUM ?=\"!\" ] p=()", 0, &b"4!"[..]),
+        ("A=' B=' ?=A ?=B", 0, &b"1657612304"[..]),
+        ("?=42 A=", 130, &b""[..]),
+    ] {
+        let path = temp.source(source.as_bytes());
+        let mut outputs = Vec::new();
+        for engine in [None, Some("sim65"), Some("mos6502")] {
+            let mut command = cli();
+            command
+                .arg(&path)
+                .args([
+                    "--seed",
+                    "1",
+                    "--cycle-limit",
+                    "200000000",
+                    "--runtime-input",
+                ])
+                .arg(&input);
+            if let Some(engine) = engine {
+                command.args(["--engine", engine]);
+            }
+            let output = command.output().unwrap();
+            assert_eq!(
+                output.status.code(),
+                Some(expected_status),
+                "{source}: {engine:?}: {output:?}"
+            );
+            assert_eq!(output.stdout, expected, "{source}: {engine:?}");
+            if expected_status == 0 {
+                assert!(output.stderr.is_empty(), "{source}: {engine:?}: {output:?}");
+            } else {
+                assert!(String::from_utf8_lossy(&output.stderr).contains("compilation failed"));
+            }
+            outputs.push(output);
+        }
+        assert_eq!(outputs[0].stdout, outputs[1].stdout);
+        assert_eq!(outputs[0].stderr, outputs[1].stderr);
+    }
+}
+
+#[test]
+#[ignore = "requires ca65 and ld65; run with --ignored"]
+fn busy_try_obeys_cycle_limit() {
+    let temp = TestDir::new();
+    let source = temp.source(b".LOOP:=1 ^=.LOOP A=` #=.LOOP");
+    let mut child = TimedChild(
+        cli()
+            .arg(source)
+            .args([
+                "--engine",
+                "mos6502",
+                "--interactive",
+                "--cycle-limit",
+                "2000000",
+            ])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    assert_eq!(wait(&mut child.0).code(), Some(126));
+}
+
 struct TimedChild(Child);
 impl Drop for TimedChild {
     fn drop(&mut self) {

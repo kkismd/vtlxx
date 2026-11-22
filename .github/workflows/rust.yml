@@ -29,3 +29,30 @@ jobs:
 
       - name: Run tests
         run: cargo test --workspace
+
+      - name: Install and verify cc65 tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cc65
+          ca65 --version
+          ld65 --version
+          sim65 --version
+
+      - name: Run required native tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_native() {
+            local output
+            output=$(cargo test -p vtlxx "$@" -- --ignored --test-threads=1)
+            printf '%s\n' "$output"
+            # An empty selection or skipped required tests must not pass CI.
+            grep -Eq 'test result: ok\. [1-9][0-9]* passed; 0 failed; 0 ignored;' <<< "$output"
+          }
+          run_native --bin vtlxx6502
+          run_native --test sim65_cli
+          run_native --test sim65_6502
+          run_native --test sim65_runtime
+          run_native --test sim65_frontend
+          run_native --test mos6502_cli
+          run_native --test mos6502_tty
