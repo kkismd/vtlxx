@@ -534,6 +534,39 @@ mod tests {
         assert_eq!(runner.input.try_byte(), input::InputEvent::Byte(b'Z'));
     }
 
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
+    fn mos_adapter_rejects_truncated_source_frames_as_transport_errors() {
+        let (_temp, path) = compile_image(true);
+        let image = std::fs::read(path).unwrap();
+        for input in [vec![], vec![5], vec![5, 0, b'?', b'=', b'6']] {
+            let (outcome, stdout, stderr) = HostRunner::new(&image, input.clone(), Some(2_000_000))
+                .unwrap()
+                .run()
+                .unwrap();
+            assert!(
+                matches!(outcome, HostOutcome::GuestExit { status: 129, .. }),
+                "input {input:?}: unexpected outcome: {outcome:?}"
+            );
+            assert!(stdout.is_empty());
+            assert!(stderr.is_empty());
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn observed_worker_failure_takes_precedence_over_successful_guest_exit() {
+        // LDA #0 / JMP $fff9: exit successfully after the worker has failed.
+        let image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9\x00\x4c\xf9\xff";
+        let mut runner = HostRunner::new(image, vec![], Some(100)).unwrap();
+        let directory = std::fs::File::open(std::env::temp_dir()).unwrap();
+        runner.input = input::HostInput::interactive(vec![], directory.into());
+        assert_eq!(runner.input.wait_byte(), input::InputEvent::Fatal);
+        let error = runner.run_to(&mut Vec::new(), &mut Vec::new()).unwrap_err();
+        assert!(matches!(error, HostError::Input(_)));
+        assert!(error.to_string().contains("guest input"));
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     #[ignore = "requires ca65 and ld65"]

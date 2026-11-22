@@ -213,4 +213,43 @@ mod tests {
         assert_eq!(cpu.memory.get_byte(0x3000), 0);
         assert_eq!(cpu.registers.program_counter, 0xfff6);
     }
+
+    #[test]
+    fn partial_output_then_write_failure_retains_output_and_reports_error() {
+        #[derive(Default)]
+        struct PartialWriter(Vec<u8>);
+        impl Write for PartialWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.0.is_empty() {
+                    self.0.push(bytes[0]);
+                    Ok(1)
+                } else {
+                    Err(std::io::Error::other("injected partial write failure"))
+                }
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut cpu = cpu();
+        cpu.memory.set_byte(0x2002, 1);
+        for (address, byte) in (0x3000..).zip(*b"abc") {
+            cpu.memory.set_byte(address, byte);
+        }
+        let mut writer = PartialWriter::default();
+        let error = dispatch(
+            &mut cpu,
+            0xfff7,
+            &mut &b""[..],
+            &mut writer,
+            &mut Vec::new(),
+            0xf0,
+        )
+        .unwrap_err();
+        assert!(matches!(error, HostError::Output(_)));
+        assert_eq!(writer.0, b"a");
+        assert_eq!(cpu.memory.get_byte(0xf0), 0);
+        assert_eq!(cpu.registers.accumulator, 3);
+        assert_eq!(cpu.registers.program_counter, 0xfff6);
+    }
 }

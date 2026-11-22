@@ -1,6 +1,6 @@
 # VTLXX 6502 ターゲット
 
-このディレクトリは VTLXX の sim65 固有コードを置く。`target/sim65_adapter.s` が byte と EOF を carry flag で区別する `serial_in`、readinessを提供できない場合に Fatal statusを返す `serial_try_in`、1 byte の `serial_out`、8-bit status の `halt` を提供する。`serial_in` は A に任意の byte（`$ff` を含む）を返し carry clear、EOF は carry setで返す。`serial_try_in` はsim65 stdinを読まず X=3 (Fatal/unsupported) を返す。A register を受け渡しに使う呼び出し規約と `sim6502.lib` への接続はこの target 内だけの取り決めであり、portable VTLXX runtime ABI ではない。
+このディレクトリは VTLXX の 6502 target と host 別 adapter を置く。`target/sim65_adapter.s` が byte と EOF を carry flag で区別する `serial_in`、readinessを提供できない場合に Fatal statusを返す `serial_try_in`、1 byte の `serial_out`、8-bit status の `halt` を提供する。`serial_in` は A に任意の byte（`$ff` を含む）を返し carry clear、EOF は carry setで返す。`serial_try_in` はsim65 stdinを読まず X=3 (Fatal/unsupported) を返す。A register を受け渡しに使う呼び出し規約と `sim6502.lib` への接続はこの target 内だけの取り決めであり、portable VTLXX runtime ABI ではない。
 
 `target/sim65_scripted_adapter.s` はnative試験専用で、通常adapterと同時にはlinkしない。fixtureが所有するタグ付きイベント列を `serial_in` と `serial_try_in` で共有し、TryのNotReady/Byte/EOF/FatalとWait入力の順序を再現する。2-byte eventの範囲外・不完全event・tag 0..3以外はfixture破損としてsim65 status 64で終了する。これは入力FatalのX=3や同期入力失敗status 6とは別である。明示EOFのみstickyになり、明示FatalはTryでX=3、Waitでstatus 6となる。この経路はCLI optionや標準sim65 stdinのreadinessを提供しない。
 
@@ -12,7 +12,7 @@ cargo test -p vtlxx --test sim65_6502 -- --ignored
 
 通常の `cargo test --workspace` は cc65 を必要としない。
 
-`entropy16` は target-private adapter symbol で、成功時は carry clear / A=low / X=high、取得不可は carry setを返す。`vtlxx6502` はOS由来raw16値または `--seed` のraw16値をsim65 adapterのprivate assemble定数として渡す。OS取得に失敗した場合は取得不可adapterをlinkし、`'`未使用sourceの実行を妨げない。実機adapterは同じsymbol/ABIを実装して差し替える。
+`entropy16` は target-private adapter symbol で、成功時は carry clear / A=low / X=high、取得不可は carry setを返す。`vtlxx6502` はOS由来raw16値または `--seed` のraw16値を選択したadapterのprivate assemble定数として渡す。OS取得に失敗した場合は取得不可adapterをlinkし、`'`未使用sourceの実行を妨げない。実機adapterは同じsymbol/ABIを実装して差し替える。
 
 ## Runtime helper（#274）
 
@@ -114,7 +114,37 @@ cargo test -p vtlxx --test sim65_frontend -- --ignored
 
 `target/sim65_cli.s` は CLI 専用entryで、`_main` から `fe_compile_run` を一度呼ぶ。compile成功時は既にfrontendが実行したruntimeの後で `halt(0)` し、compile error時は `fe_compile_status` を `$80` と OR したtarget statusで終了する。test probe用entryとは分離し、追加serial readやsentinel出力を行わない。
 
-crate root の `vtlxx6502` host binaryが source/runtime inputをraw bytesで読み、source lengthをu16 LEで検証・framingする。`ca65` / `ld65` は argvで起動し、対象source、既存runtime/frontend/compiler、CLI entry、`sim65_adapter.s` を組み立てて `sim6502.lib` と linkする。生成programは4,000,000 cycle limit付きでsim65へ渡す。一時directoryは各実行で新規作成し、終了時に削除する。
+crate root の `vtlxx6502` host binary は source を raw bytes で読み、長さを u16（最大65,535 bytes）で検証し、little-endian length header を付ける。`ca65` / `ld65` と `sim6502.lib` が必要で、実行ごとに選択した engine 用 adapter を他の target code と別途組み立てて link する。一時 directory は各実行で作成し、終了時に削除する。既定は標準 `sim65`、`--engine sim65` も同じ経路である。Linux では `--engine mos6502` で VTLXX 専用 host を選べる。新 host は Linux 以外では未対応で、汎用 sim6502 emulator ではなく、この CLI が必要とする service のみを実装する。両 engine の image を共用しない。
+
+repository root からの例（`ca65`、`ld65`、`sim65` を PATH に用意）:
+
+```sh
+printf 'A=$ ?=A' > /tmp/input.vtl
+printf 'A' > /tmp/input.bin
+cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --runtime-input /tmp/input.bin
+cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --engine mos6502 --runtime-input /tmp/input.bin --seed 123 --cycle-limit 4000000
+```
+
+どちらも `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `'` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれず、両 engine の cycle 値の完全一致は保証しない。
+
+対話では runtime 入力と出力を標準入出力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
+
+```sh
+cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --engine mos6502 --interactive
+```
+
+逐字入力が必要な場合は Linux の TTY 上で raw mode を明示する。次の例では Try がその時点の入力を一度だけ読み、その後 Wait が次の文字を待つ。
+
+```sh
+printf '?=` ?=$' > /tmp/try.vtl
+cargo run -p vtlxx --bin vtlxx6502 -- /tmp/try.vtl --engine mos6502 --interactive --raw-tty
+```
+
+`--raw-tty` は mos6502 の `--interactive` と TTY stdin が必要で、echo を無効にする。正常終了・エラーおよび SIGINT / SIGTERM / SIGHUP / SIGQUIT では端末設定を復元する。SIGTSTP では停止前に復元し、SIGCONT 後に再適用する。捕捉できない SIGKILL / SIGSTOP ではこの復元を保証できない。
+
+source と runtime は同じ入力 session を共有するが、source frame の読み取りと compile 完了後に runtime が開始する。Wait (`$`) は入力を blocking で待ち、NUL を読み捨て、byte または EOF の -1 を返す。Try（バッククォート）は待たずに最大1 byteを消費し、未到着と raw NUL を 0、EOF を -1 として返す。EOF は後続の Wait / Try でも維持され、Fatal は guest status 6 で停止する。通常 sim65 の Try は未対応で入力を消費せず status 6 となる。
+
+mos6502 host は標準の [`mos6502` 0.10.1](https://crates.io/crates/mos6502/0.10.1)（BSD-3-Clause）を使い、固定された依存元と version は [Cargo.lock](../../../Cargo.lock) に記録する。CPU core と cc65 は改造しない。
 
 ## 現行の6502資源構成
 
