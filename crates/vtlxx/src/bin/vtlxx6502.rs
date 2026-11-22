@@ -1,6 +1,8 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::io::Read;
+use std::io::{self, Write};
 #[cfg(unix)]
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::{Path, PathBuf};
@@ -11,14 +13,18 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod vtlxx6502_host;
+#[cfg(target_os = "linux")]
+mod vtlxx6502_tty;
 
 const DEFAULT_CYCLE_LIMIT: u32 = 4_000_000;
 const MAX_SOURCE_LEN: usize = u16::MAX as usize;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
-const USAGE: &str = "Usage: vtlxx6502 <source.vtl> [--runtime-input <path> | --interactive] [--cycle-limit <cycles>] [--seed <signed16>]\n\
+const USAGE: &str = "Usage: vtlxx6502 <source.vtl> [--runtime-input <path> | --interactive] [--cycle-limit <cycles>] [--seed <signed16>] [--engine sim65|mos6502] [--raw-tty]\n\
 Compile VTLXX source with the NMOS 6502 target and run it with sim65.\n\
 Options:\n\
+  --engine <engine>       Select sim65 (default) or mos6502\n\
+  --raw-tty               Enable raw terminal input (mos6502 interactive only)\n\
   --runtime-input <path>  Supply raw runtime input bytes\n\
   --interactive           Connect runtime input and output to standard I/O\n\
   --cycle-limit <cycles>  Set sim65 cycle limit (default: 4000000; unlimited in interactive mode)\n\
@@ -54,6 +60,12 @@ impl Drop for TempDir {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Engine {
+    Sim65,
+    Mos6502,
+}
+
 #[derive(Debug)]
 struct Arguments {
     source: PathBuf,
@@ -61,6 +73,8 @@ struct Arguments {
     cycle_limit: Option<u32>,
     seed: Option<i16>,
     interactive: bool,
+    engine: Engine,
+    raw_tty: bool,
 }
 
 #[derive(Debug)]
@@ -78,11 +92,32 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
     let mut cycle_limit_seen = false;
     let mut seed = None;
     let mut seed_seen = false;
+    let mut engine = None;
+    let mut raw_tty = false;
     while let Some(arg) = args.next() {
         if arg == "-h" || arg == "--help" {
             return Ok(ParsedArguments::Help);
         }
-        if arg == "--interactive" {
+        if arg == "--engine" {
+            if engine.is_some() {
+                return Err("--engine may be specified only once".into());
+            }
+            let value = args
+                .next()
+                .ok_or_else(|| "--engine requires sim65 or mos6502".to_string())?;
+            engine = Some(if value == "sim65" {
+                Engine::Sim65
+            } else if value == "mos6502" {
+                Engine::Mos6502
+            } else {
+                return Err("--engine requires sim65 or mos6502".into());
+            });
+        } else if arg == "--raw-tty" {
+            if raw_tty {
+                return Err("--raw-tty may be specified only once".into());
+            }
+            raw_tty = true;
+        } else if arg == "--interactive" {
             if interactive {
                 return Err("--interactive may be specified only once".into());
             }
@@ -148,6 +183,17 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
     if interactive && runtime_input.is_some() {
         return Err("--interactive and --runtime-input are mutually exclusive".into());
     }
+    if raw_tty && (engine != Some(Engine::Mos6502) || !interactive) {
+        return Err("--raw-tty requires --engine mos6502 --interactive".into());
+    }
+    #[cfg(not(target_os = "linux"))]
+    if engine == Some(Engine::Mos6502) {
+        return Err("mos6502 engine is supported only on Linux".into());
+    }
+    #[cfg(target_os = "linux")]
+    if raw_tty && unsafe { libc::isatty(libc::STDIN_FILENO) } != 1 {
+        return Err("--raw-tty requires a TTY on stdin".into());
+    }
     if !interactive && cycle_limit.is_none() {
         cycle_limit = Some(DEFAULT_CYCLE_LIMIT);
     }
@@ -158,6 +204,8 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
         cycle_limit,
         seed,
         interactive,
+        engine: engine.unwrap_or(Engine::Sim65),
+        raw_tty,
     }))
 }
 
@@ -264,12 +312,7 @@ fn transfer_input<R: Read + AsRawFd, W: Write>(
     }
 }
 
-fn build_and_run(
-    input: &[u8],
-    cycle_limit: Option<u32>,
-    interactive: bool,
-    entropy_seed: Option<u16>,
-) -> Result<Output, String> {
+fn build_image(entropy_seed: Option<u16>, engine: Engine) -> Result<(TempDir, PathBuf), String> {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         "6502/target/sim65_cli.s",
@@ -283,7 +326,11 @@ fn build_and_run(
         "6502/runtime/state.s",
         "6502/runtime/primitives.s",
         "6502/runtime/arithmetic.s",
-        "6502/target/sim65_adapter.s",
+        if engine == Engine::Sim65 {
+            "6502/target/sim65_adapter.s"
+        } else {
+            "6502/target/mos6502_adapter.s"
+        },
     ];
     let temp = TempDir::new()?;
     let mut objects = Vec::with_capacity(sources.len());
@@ -293,7 +340,9 @@ fn build_and_run(
         let mut assemble_args = vec![OsStr::new("-t"), OsStr::new("sim6502")];
         let entropy_define =
             entropy_seed.map(|seed| OsString::from(format!("SIM65_ENTROPY_SEED=${seed:04X}")));
-        if source.ends_with("6502/target/sim65_adapter.s") {
+        if source.ends_with("6502/target/sim65_adapter.s")
+            || source.ends_with("6502/target/mos6502_adapter.s")
+        {
             if let Some(define) = &entropy_define {
                 assemble_args.extend([OsStr::new("-D"), define.as_os_str()]);
             } else {
@@ -317,7 +366,24 @@ fn build_and_run(
     link_args.push(OsStr::new("sim6502.lib"));
     let output = run_tool("ld65", "link", &link_args, &[])?;
     require_success("link", "ld65", &output)?;
+    Ok((temp, executable))
+}
 
+fn build_and_run(
+    input: &[u8],
+    cycle_limit: Option<u32>,
+    interactive: bool,
+    entropy_seed: Option<u16>,
+    engine: Engine,
+    raw_tty: bool,
+) -> Result<Output, String> {
+    let (_temp, executable) = build_image(entropy_seed, engine)?;
+    #[cfg(target_os = "linux")]
+    if engine == Engine::Mos6502 {
+        return execute_mos(&executable, input, cycle_limit, interactive, raw_tty);
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = raw_tty;
     let mut command = Command::new("sim65");
     if let Some(limit) = cycle_limit {
         command.arg("-x").arg(limit.to_string());
@@ -381,6 +447,80 @@ fn build_and_run(
     }
 }
 
+#[cfg(target_os = "linux")]
+fn execute_mos(
+    executable: &Path,
+    input: &[u8],
+    cycle_limit: Option<u32>,
+    interactive: bool,
+    raw_tty: bool,
+) -> Result<Output, String> {
+    use std::os::unix::process::ExitStatusExt;
+    use vtlxx6502_host::{HostOutcome, HostRunner};
+    let image = fs::read(executable).map_err(|error| format!("read image: {error}"))?;
+    let limit = cycle_limit.map(u64::from);
+    let mut runner = if interactive {
+        let fd = unsafe { libc::dup(libc::STDIN_FILENO) };
+        if fd < 0 {
+            return Err(format!("duplicate stdin: {}", io::Error::last_os_error()));
+        }
+        let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+        HostRunner::interactive(&image, input.to_vec(), fd, limit)
+    } else {
+        HostRunner::new(&image, input.to_vec(), limit)
+    }
+    .map_err(|error| format!("mos6502 host: {error}"))?;
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let outcome = if interactive {
+        let mut out = io::stdout().lock();
+        let mut err = io::stderr().lock();
+        if raw_tty {
+            let mut tty = vtlxx6502_tty::RawTty::new(libc::STDIN_FILENO)
+                .map_err(|error| format!("raw tty: {error}"))?;
+            let signal_fd = tty.signal_fd();
+            let result = runner.run_to_with_signals(&mut out, &mut err, signal_fd, &mut |woken| {
+                if woken || tty.pending() {
+                    tty.process_signals()
+                } else {
+                    Ok(None)
+                }
+            });
+            tty.restore()
+                .map_err(|error| format!("restore tty: {error}"))?;
+            result
+        } else {
+            runner.run_to(&mut out, &mut err)
+        }
+    } else {
+        runner.run_to(&mut stdout, &mut stderr)
+    }
+    .map_err(|error| format!("mos6502 host: {error}"))?;
+    if !interactive && !stderr.is_empty() {
+        io::stderr()
+            .write_all(&stderr)
+            .and_then(|()| io::stderr().flush())
+            .map_err(|error| format!("mos6502 host: write stderr: {error}"))?;
+        stderr.clear();
+    }
+    let status = match outcome {
+        HostOutcome::GuestExit { status, .. } => i32::from(status),
+        HostOutcome::CycleLimit { .. } => {
+            stderr.extend_from_slice(b"mos6502 cycle limit exceeded");
+            126
+        }
+        HostOutcome::Interrupted { signal } => {
+            stderr.extend_from_slice(format!("interrupted by signal {signal}").as_bytes());
+            128 + signal
+        }
+    };
+    Ok(Output {
+        status: std::process::ExitStatus::from_raw(status << 8),
+        stdout,
+        stderr,
+    })
+}
+
 fn os_entropy16() -> io::Result<u16> {
     let mut bytes = [0; 2];
     getrandom::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
@@ -418,6 +558,8 @@ fn execute_with_provider(
         arguments.cycle_limit,
         arguments.interactive,
         entropy_seed,
+        arguments.engine,
+        arguments.raw_tty,
     )
 }
 
@@ -462,26 +604,50 @@ fn main() {
     };
     match parsed {
         ParsedArguments::Help => print!("{USAGE}"),
-        ParsedArguments::Run(arguments) => match execute(arguments) {
-            Ok(output) => {
-                if let Err(error) = io::stdout().write_all(&output.stdout) {
-                    eprintln!("vtlxx6502: write stdout: {error}");
+        ParsedArguments::Run(arguments) => {
+            let engine = arguments.engine;
+            match execute(arguments) {
+                Ok(output) => {
+                    if let Err(error) = io::stdout().write_all(&output.stdout) {
+                        eprintln!("vtlxx6502: write stdout: {error}");
+                        std::process::exit(2);
+                    }
+                    if !output.status.success() {
+                        let (status, message) = if engine == Engine::Sim65 {
+                            report_simulation_failure(&output)
+                        } else {
+                            let status = output.status.code().unwrap_or(1);
+                            let detail = String::from_utf8_lossy(&output.stderr);
+                            (
+                                status,
+                                if detail.is_empty() && (129..=132).contains(&status) {
+                                    format!(
+                                        "6502 compilation failed (frontend status {})",
+                                        status & 0x7f
+                                    )
+                                } else if detail.is_empty() {
+                                    format!("mos6502 guest exited with status {status}")
+                                } else {
+                                    format!(
+                                        "mos6502 guest exited with status {status}: {}",
+                                        detail.trim()
+                                    )
+                                },
+                            )
+                        };
+                        eprintln!("vtlxx6502: {message}");
+                        std::process::exit(status);
+                    }
+                    if !output.stderr.is_empty() {
+                        let _ = io::stderr().write_all(&output.stderr);
+                    }
+                }
+                Err(error) => {
+                    eprintln!("vtlxx6502: {error}");
                     std::process::exit(2);
                 }
-                if !output.status.success() {
-                    let (status, message) = report_simulation_failure(&output);
-                    eprintln!("vtlxx6502: {message}");
-                    std::process::exit(status);
-                }
-                if !output.stderr.is_empty() {
-                    let _ = io::stderr().write_all(&output.stderr);
-                }
             }
-            Err(error) => {
-                eprintln!("vtlxx6502: {error}");
-                std::process::exit(2);
-            }
-        },
+        }
     }
 }
 
@@ -725,6 +891,8 @@ mod tests {
                     cycle_limit: Some(200_000_000),
                     seed: None,
                     interactive: false,
+                    engine: Engine::Sim65,
+                    raw_tty: false,
                 },
                 || Err(io::Error::other("injected entropy failure")),
             )

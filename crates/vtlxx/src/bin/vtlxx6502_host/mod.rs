@@ -13,6 +13,7 @@ use std::io::Write;
 pub(crate) enum HostOutcome {
     GuestExit { status: u8, cycles: u64 },
     CycleLimit { cycles: u64 },
+    Interrupted { signal: i32 },
 }
 
 #[derive(Debug)]
@@ -21,6 +22,7 @@ pub(crate) enum HostError {
     Service(String),
     Input(std::io::Error),
     Output(std::io::Error),
+    Signal(std::io::Error),
 }
 
 impl std::fmt::Display for HostError {
@@ -29,6 +31,7 @@ impl std::fmt::Display for HostError {
             Self::Image(message) | Self::Service(message) => f.write_str(message),
             Self::Input(error) => write!(f, "guest input: {error}"),
             Self::Output(error) => write!(f, "guest output: {error}"),
+            Self::Signal(error) => write!(f, "signal handling: {error}"),
         }
     }
 }
@@ -92,7 +95,30 @@ impl HostRunner {
         stdout: &mut dyn Write,
         stderr: &mut dyn Write,
     ) -> Result<HostOutcome, HostError> {
-        let result = self.run_loop(stdout, stderr);
+        self.run_with_callback(stdout, stderr, &mut |_| Ok(None))
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn run_to_with_signals(
+        &mut self,
+        stdout: &mut dyn Write,
+        stderr: &mut dyn Write,
+        signal_fd: std::os::fd::RawFd,
+        mut callback: impl FnMut(bool) -> std::io::Result<Option<i32>>,
+    ) -> Result<HostOutcome, HostError> {
+        self.input
+            .set_signal_fd(signal_fd)
+            .map_err(HostError::Signal)?;
+        self.run_with_callback(stdout, stderr, &mut callback)
+    }
+
+    fn run_with_callback(
+        &mut self,
+        stdout: &mut dyn Write,
+        stderr: &mut dyn Write,
+        callback: &mut dyn FnMut(bool) -> std::io::Result<Option<i32>>,
+    ) -> Result<HostOutcome, HostError> {
+        let result = self.run_loop_with_callback(stdout, stderr, callback);
         let finished = self.input.finish().map_err(HostError::Input);
         match result {
             Ok(outcome @ HostOutcome::GuestExit { status: 6, .. }) => Ok(outcome),
@@ -109,7 +135,21 @@ impl HostRunner {
         stdout: &mut dyn Write,
         stderr: &mut dyn Write,
     ) -> Result<HostOutcome, HostError> {
+        self.run_loop_with_callback(stdout, stderr, &mut |_| Ok(None))
+    }
+
+    fn run_loop_with_callback(
+        &mut self,
+        stdout: &mut dyn Write,
+        stderr: &mut dyn Write,
+        callback: &mut dyn FnMut(bool) -> std::io::Result<Option<i32>>,
+    ) -> Result<HostOutcome, HostError> {
+        let mut woken = false;
         loop {
+            if let Some(signal) = callback(woken).map_err(HostError::Signal)? {
+                return Ok(HostOutcome::Interrupted { signal });
+            }
+            woken = false;
             if self
                 .cycle_limit
                 .is_some_and(|limit| self.cpu.cycles >= limit)
@@ -120,16 +160,22 @@ impl HostRunner {
             }
             let pc = self.cpu.registers.program_counter;
             if pc == 0xffef || pc == 0xfff0 {
-                services::input_service(&mut self.cpu, pc, &mut self.input);
+                woken = !services::input_service(&mut self.cpu, pc, &mut self.input);
             } else if (0xfff1..=0xfff9).contains(&pc) {
-                match services::dispatch(
+                let service = services::dispatch(
                     &mut self.cpu,
                     pc,
                     &mut self.input,
                     stdout,
                     stderr,
                     self.software_stack_zp,
-                )? {
+                );
+                if matches!(&service, Err(HostError::Input(e)) if e.kind() == std::io::ErrorKind::Interrupted)
+                {
+                    woken = true;
+                    continue;
+                }
+                match service? {
                     services::ServiceResult::Continue => continue,
                     services::ServiceResult::Exit(status) => {
                         return Ok(HostOutcome::GuestExit {

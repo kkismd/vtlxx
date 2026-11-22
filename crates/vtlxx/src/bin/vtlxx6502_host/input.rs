@@ -6,6 +6,7 @@ pub(super) enum InputEvent {
     NotReady,
     Eof,
     Fatal,
+    Interrupted,
 }
 
 pub(super) struct HostInput {
@@ -82,6 +83,7 @@ impl HostInput {
             }
             InputEvent::Eof => Ok(0),
             InputEvent::Fatal => Err(io::Error::other("input worker failed")),
+            InputEvent::Interrupted => Err(io::Error::from(io::ErrorKind::Interrupted)),
             InputEvent::NotReady => unreachable!(),
         }
     }
@@ -90,6 +92,14 @@ impl HostInput {
         #[cfg(target_os = "linux")]
         if let Some(live) = &mut self.live {
             return live.finish();
+        }
+        Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn set_signal_fd(&mut self, fd: std::os::fd::RawFd) -> io::Result<()> {
+        if let Some(live) = &mut self.live {
+            live.set_signal_fd(fd)?;
         }
         Ok(())
     }
@@ -107,7 +117,7 @@ mod live {
     use std::{
         collections::VecDeque,
         io::{self, Write},
-        os::fd::{AsRawFd, OwnedFd},
+        os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd},
         sync::{Arc, Condvar, Mutex},
         thread::{self, JoinHandle},
     };
@@ -118,6 +128,7 @@ mod live {
         cancelled: bool,
         done: bool,
         failure: Option<String>,
+        interrupted: bool,
     }
     struct Shared {
         state: Mutex<State>,
@@ -128,6 +139,7 @@ mod live {
         shared: Arc<Shared>,
         wake: Option<io::PipeWriter>,
         worker: Option<JoinHandle<()>>,
+        signal: Option<OwnedFd>,
     }
     impl LiveInput {
         pub(super) fn new(fd: OwnedFd) -> Self {
@@ -139,12 +151,22 @@ mod live {
                         cancelled: false,
                         done: false,
                         failure: None,
+                        interrupted: false,
                     }),
                     changed: Condvar::new(),
                 }),
                 wake: None,
                 worker: None,
+                signal: None,
             }
+        }
+        pub(super) fn set_signal_fd(&mut self, fd: RawFd) -> io::Result<()> {
+            let copy = unsafe { libc::dup(fd) };
+            if copy < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            self.signal = Some(unsafe { OwnedFd::from_raw_fd(copy) });
+            Ok(())
         }
         fn start(&mut self) -> io::Result<()> {
             if self.fd.is_none() {
@@ -153,7 +175,8 @@ mod live {
             let (cancel, wake) = io::pipe()?;
             let fd = self.fd.take().unwrap();
             let shared = Arc::clone(&self.shared);
-            self.worker = Some(thread::spawn(move || producer(fd, cancel, shared)));
+            let signal = self.signal.take();
+            self.worker = Some(thread::spawn(move || producer(fd, cancel, signal, shared)));
             self.wake = Some(wake);
             Ok(())
         }
@@ -166,6 +189,11 @@ mod live {
             }
             let mut state = self.shared.state.lock().unwrap();
             loop {
+                if state.interrupted {
+                    state.interrupted = false;
+                    self.shared.changed.notify_all();
+                    return InputEvent::Interrupted;
+                }
                 if let Some(event) = state.queue.pop_front() {
                     self.shared.changed.notify_all();
                     return event;
@@ -218,8 +246,8 @@ mod live {
         shared.changed.notify_all();
         true
     }
-    fn producer(fd: OwnedFd, cancel: io::PipeReader, shared: Arc<Shared>) {
-        let result = produce(&fd, &cancel, &shared);
+    fn producer(fd: OwnedFd, cancel: io::PipeReader, signal: Option<OwnedFd>, shared: Arc<Shared>) {
+        let result = produce(&fd, &cancel, signal.as_ref(), &shared);
         let mut state = shared.state.lock().unwrap();
         if let Err(e) = result {
             state.failure = Some(e.to_string());
@@ -232,7 +260,12 @@ mod live {
         state.done = true;
         shared.changed.notify_all();
     }
-    fn produce(fd: &OwnedFd, cancel: &io::PipeReader, shared: &Shared) -> io::Result<()> {
+    fn produce(
+        fd: &OwnedFd,
+        cancel: &io::PipeReader,
+        signal: Option<&OwnedFd>,
+        shared: &Shared,
+    ) -> io::Result<()> {
         loop {
             let mut fds = [
                 libc::pollfd {
@@ -245,14 +278,31 @@ mod live {
                     events: libc::POLLIN,
                     revents: 0,
                 },
+                libc::pollfd {
+                    fd: signal.map_or(-1, AsRawFd::as_raw_fd),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
             ];
-            let result = unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) };
+            let result = unsafe { libc::poll(fds.as_mut_ptr(), 3, -1) };
             if result < 0 {
                 let e = io::Error::last_os_error();
                 if e.kind() == io::ErrorKind::Interrupted {
                     continue;
                 }
                 return Err(e);
+            }
+            if fds[2].revents != 0 {
+                let mut state = shared.state.lock().unwrap();
+                state.interrupted = true;
+                shared.changed.notify_all();
+                while state.interrupted && !state.cancelled {
+                    state = shared.changed.wait(state).unwrap();
+                }
+                if state.cancelled {
+                    return Ok(());
+                }
+                continue;
             }
             if fds[0].revents & libc::POLLNVAL != 0 {
                 return Err(io::Error::other("invalid input descriptor"));
@@ -395,6 +445,43 @@ mod tests {
         assert_eq!(byte, *b"z");
         producer.join().unwrap();
         input.finish().unwrap();
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn signal_wakes_blocked_input_without_becoming_guest_data() {
+        use std::{
+            io::{Read, Write},
+            os::fd::AsRawFd,
+            sync::mpsc,
+            time::Duration,
+        };
+        let (reader, mut writer) = io::pipe().unwrap();
+        let (mut signal_reader, mut signal_writer) = io::pipe().unwrap();
+        let mut input = HostInput::interactive(vec![], reader.into());
+        input.set_signal_fd(signal_reader.as_raw_fd()).unwrap();
+        let (send, receive) = mpsc::channel();
+        let (resume, resumed) = mpsc::channel();
+        let thread = std::thread::spawn(move || {
+            send.send(input.wait_byte()).unwrap();
+            resumed.recv().unwrap();
+            let event = loop {
+                let event = input.wait_byte();
+                if event != InputEvent::Interrupted {
+                    break event;
+                }
+            };
+            input.finish().unwrap();
+            event
+        });
+        signal_writer.write_all(&[1]).unwrap();
+        assert_eq!(
+            receive.recv_timeout(Duration::from_secs(2)).unwrap(),
+            InputEvent::Interrupted
+        );
+        signal_reader.read_exact(&mut [0]).unwrap();
+        resume.send(()).unwrap();
+        writer.write_all(b"x").unwrap();
+        assert_eq!(thread.join().unwrap(), InputEvent::Byte(b'x'));
     }
     #[cfg(target_os = "linux")]
     #[test]

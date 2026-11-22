@@ -25,12 +25,19 @@ fn return_from_service(cpu: &mut CPU<Memory, Nmos6502>) {
     cpu.registers.program_counter = u16::from_le_bytes([low, high]).wrapping_add(1);
 }
 
-pub(super) fn input_service(cpu: &mut CPU<Memory, Nmos6502>, pc: u16, input: &mut HostInput) {
+pub(super) fn input_service(
+    cpu: &mut CPU<Memory, Nmos6502>,
+    pc: u16,
+    input: &mut HostInput,
+) -> bool {
     let event = if pc == 0xffef {
         input.try_byte()
     } else {
         input.wait_byte()
     };
+    if event == InputEvent::Interrupted {
+        return false;
+    }
     cpu.registers.index_x = match event {
         InputEvent::Byte(byte) => {
             cpu.registers.accumulator = byte;
@@ -39,8 +46,10 @@ pub(super) fn input_service(cpu: &mut CPU<Memory, Nmos6502>, pc: u16, input: &mu
         InputEvent::NotReady => 1,
         InputEvent::Eof => 2,
         InputEvent::Fatal => 3,
+        InputEvent::Interrupted => unreachable!(),
     };
     return_from_service(cpu);
+    true
 }
 
 pub(super) fn dispatch(
