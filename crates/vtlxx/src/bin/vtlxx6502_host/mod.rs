@@ -3,6 +3,7 @@
 //! Private runner for the stock sim6502 image format. This is deliberately
 //! local to the `vtlxx6502` binary; CLI selection is added by a later issue.
 mod image;
+mod input;
 mod services;
 
 use mos6502::{cpu::CPU, instruction::Nmos6502, memory::Memory};
@@ -34,7 +35,7 @@ impl std::fmt::Display for HostError {
 
 pub(crate) struct HostRunner {
     cpu: CPU<Memory, Nmos6502>,
-    input: std::io::Cursor<Vec<u8>>,
+    input: input::HostInput,
     cycle_limit: Option<u64>,
     software_stack_zp: u8,
 }
@@ -45,13 +46,35 @@ impl HostRunner {
         input: Vec<u8>,
         cycle_limit: Option<u64>,
     ) -> Result<Self, HostError> {
+        Self::with_input(bytes, input::HostInput::memory(input), cycle_limit)
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn interactive(
+        bytes: &[u8],
+        prefix: Vec<u8>,
+        fd: std::os::fd::OwnedFd,
+        cycle_limit: Option<u64>,
+    ) -> Result<Self, HostError> {
+        Self::with_input(
+            bytes,
+            input::HostInput::interactive(prefix, fd),
+            cycle_limit,
+        )
+    }
+
+    fn with_input(
+        bytes: &[u8],
+        input: input::HostInput,
+        cycle_limit: Option<u64>,
+    ) -> Result<Self, HostError> {
         let loaded = image::load(bytes)?;
         let mut cpu = CPU::new(loaded.memory, Nmos6502);
         cpu.registers.program_counter = loaded.entry;
         cpu.registers.stack_pointer.0 = 0xff;
         Ok(Self {
             cpu,
-            input: std::io::Cursor::new(input),
+            input,
             cycle_limit,
             software_stack_zp: loaded.software_stack_zp,
         })
@@ -64,7 +87,24 @@ impl HostRunner {
         Ok((outcome, stdout, stderr))
     }
 
-    fn run_to(
+    pub(crate) fn run_to(
+        &mut self,
+        stdout: &mut dyn Write,
+        stderr: &mut dyn Write,
+    ) -> Result<HostOutcome, HostError> {
+        let result = self.run_loop(stdout, stderr);
+        let finished = self.input.finish().map_err(HostError::Input);
+        match result {
+            Ok(outcome @ HostOutcome::GuestExit { status: 6, .. }) => Ok(outcome),
+            Ok(outcome) => {
+                finished?;
+                Ok(outcome)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn run_loop(
         &mut self,
         stdout: &mut dyn Write,
         stderr: &mut dyn Write,
@@ -79,7 +119,9 @@ impl HostRunner {
                 });
             }
             let pc = self.cpu.registers.program_counter;
-            if (0xfff1..=0xfff9).contains(&pc) {
+            if pc == 0xffef || pc == 0xfff0 {
+                services::input_service(&mut self.cpu, pc, &mut self.input);
+            } else if (0xfff1..=0xfff9).contains(&pc) {
                 match services::dispatch(
                     &mut self.cpu,
                     pc,
@@ -143,7 +185,7 @@ mod tests {
         }
     }
 
-    fn compile_image() -> (Temp, PathBuf) {
+    fn compile_image(mos_adapter: bool) -> (Temp, PathBuf) {
         let temp = Temp::new();
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let sources = [
@@ -158,14 +200,18 @@ mod tests {
             "6502/runtime/state.s",
             "6502/runtime/primitives.s",
             "6502/runtime/arithmetic.s",
-            "6502/target/sim65_adapter.s",
+            if mos_adapter {
+                "6502/target/mos6502_adapter.s"
+            } else {
+                "6502/target/sim65_adapter.s"
+            },
         ];
         let mut objects = Vec::new();
         for (index, name) in sources.iter().enumerate() {
             let object = temp.0.join(format!("{index}.o"));
             let mut command = Command::new("ca65");
             command.args([OsStr::new("-t"), OsStr::new("sim6502")]);
-            if name.ends_with("sim65_adapter.s") {
+            if name.ends_with("adapter.s") {
                 command.args([OsStr::new("-D"), OsStr::new("SIM65_ENTROPY_UNAVAILABLE")]);
             }
             let status = command
@@ -187,10 +233,128 @@ mod tests {
         (temp, image)
     }
 
+    fn compile_runtime_probe(fixture: &str, case: u8, wait: bool) -> (Temp, PathBuf) {
+        let temp = Temp::new();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let original =
+            std::fs::read_to_string(root.join("tests/fixtures/sim65").join(fixture)).unwrap();
+        // The stock fixture checks scripted-adapter call counts. The host test
+        // checks input position itself, while preserving its stack assertions.
+        let mut source = original
+            .replace("script_try_calls, ", "")
+            .replace("    lda script_try_calls\n    cmp #1\n    bne @bad\n", "")
+            .replace(
+                "    lda script_try_calls\n    cmp #1\n    bne @probe_bad\n",
+                "",
+            )
+            .replace("    lda script_try_calls\n    bne @probe_bad\n", "");
+        if wait {
+            source = source.replace("rt_try_read_char", "rt_read_char");
+        }
+        let fixture_path = temp.0.join("probe.s");
+        std::fs::write(&fixture_path, source).unwrap();
+        let sources = [
+            fixture_path,
+            root.join("6502/target/zp_layout.s"),
+            root.join("6502/runtime/state.s"),
+            root.join("6502/runtime/primitives.s"),
+            root.join("6502/runtime/arithmetic.s"),
+            root.join("6502/target/mos6502_adapter.s"),
+        ];
+        let mut objects = Vec::new();
+        for (index, source) in sources.iter().enumerate() {
+            let object = temp.0.join(format!("probe-{index}.o"));
+            let mut command = Command::new("ca65");
+            command.args(["-t", "sim6502"]);
+            if index == 0 {
+                command.args(["-D", &format!("TEST_CASE={case}")]);
+            }
+            if index == 2 {
+                command.args(["-D", "RT_TEST_PROBE"]);
+            }
+            assert!(
+                command
+                    .arg(source)
+                    .arg("-o")
+                    .arg(&object)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+            objects.push(object);
+        }
+        let image = temp.0.join("probe.prg");
+        assert!(
+            Command::new("ld65")
+                .args(["-t", "sim6502", "-o"])
+                .arg(&image)
+                .args(&objects)
+                .arg("sim6502.lib")
+                .status()
+                .unwrap()
+                .success()
+        );
+        (temp, image)
+    }
+
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
+    fn mos_try_overflow_preserves_stack_eof_and_input() {
+        for (case, wait) in [(16, false), (17, false), (16, true), (17, true)] {
+            let (_temp, path) = compile_runtime_probe("runtime_try_capacity.s", case, wait);
+            let image = std::fs::read(path).unwrap();
+            let mut runner = HostRunner::new(&image, vec![65], Some(2_000_000)).unwrap();
+            let mut out = Vec::new();
+            let result = runner.run_to(&mut out, &mut Vec::new()).unwrap();
+            assert!(matches!(result, HostOutcome::GuestExit { status: 2, .. }));
+            assert_eq!(out, b"K");
+            assert_eq!(runner.input.try_byte(), input::InputEvent::Byte(65));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
+    fn mos_try_fatal_preserves_stack_and_eof() {
+        let (_temp, path) = compile_runtime_probe("runtime_try_fatal.s", 1, false);
+        let image = std::fs::read(path).unwrap();
+        let mut runner = HostRunner::new(&image, vec![], Some(2_000_000)).unwrap();
+        // Linux poll/read on a directory produces a real input failure.
+        let directory = std::fs::File::open(std::env::temp_dir()).unwrap();
+        runner.input = input::HostInput::interactive(vec![], directory.into());
+        assert_eq!(runner.input.wait_byte(), input::InputEvent::Fatal);
+        let mut out = Vec::new();
+        let result = runner.run_loop(&mut out, &mut Vec::new()).unwrap();
+        assert!(matches!(result, HostOutcome::GuestExit { status: 6, .. }));
+        assert_eq!(out, b"K");
+        assert!(runner.input.finish().is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
+    fn mos_wait_fatal_stops_source_and_runtime() {
+        let (_temp, path) = compile_image(true);
+        let image = std::fs::read(path).unwrap();
+        for prefix in [
+            vec![5, 0, b'?', b'='],
+            crate::frame_input(b"A=$ ?=A", b"").unwrap(),
+        ] {
+            let mut runner = HostRunner::new(&image, vec![], Some(2_000_000)).unwrap();
+            let directory = std::fs::File::open(std::env::temp_dir()).unwrap();
+            runner.input = input::HostInput::interactive(prefix, directory.into());
+            let mut out = Vec::new();
+            let result = runner.run_loop(&mut out, &mut Vec::new()).unwrap();
+            assert!(matches!(result, HostOutcome::GuestExit { status: 6, .. }));
+            assert!(out.is_empty());
+            assert!(runner.input.finish().is_err());
+        }
+    }
+
     #[test]
     #[ignore = "requires ca65, ld65, and sim65; runs the stock image directly on mos6502"]
     fn stock_adapter_image_runs_source_compile_output_and_exit() {
-        let (_temp, path) = compile_image();
+        let (_temp, path) = compile_image(false);
         let image = std::fs::read(&path).unwrap();
         let input = crate::frame_input(b"?=65", b"").unwrap();
         let (outcome, stdout, _) = HostRunner::new(&image, input.clone(), Some(2_000_000))
@@ -294,6 +458,90 @@ mod tests {
             assert_eq!(stock.status.code(), Some(0));
             assert_eq!(stock.stdout, expected_stdout);
         }
+    }
+
+    #[test]
+    #[ignore = "requires ca65 and ld65; runs the mos6502 adapter on the private host"]
+    fn mos_adapter_shares_source_wait_try_and_sticky_eof() {
+        let (_temp, path) = compile_image(true);
+        let image = std::fs::read(path).unwrap();
+        // Try consumes NUL and 0xff, Wait skips NUL and returns 'A', then
+        // both operations observe EOF from the same runtime session.
+        let input = crate::frame_input(b"?=` ?=` ?=$ ?=` ?=$", &[0, 255, 0, 65]).unwrap();
+        let (outcome, output, _) = HostRunner::new(&image, input, Some(2_000_000))
+            .unwrap()
+            .run()
+            .unwrap();
+        assert!(matches!(outcome, HostOutcome::GuestExit { status: 0, .. }));
+        assert_eq!(output, b"025565-1-1");
+
+        // Compilation failure cannot run or consume the runtime sentinel.
+        let input = crate::frame_input(b"A=$+", b"Z").unwrap();
+        let mut runner = HostRunner::new(&image, input, Some(2_000_000)).unwrap();
+        let mut out = Vec::new();
+        let outcome = runner.run_to(&mut out, &mut Vec::new()).unwrap();
+        assert!(matches!(
+            outcome,
+            HostOutcome::GuestExit { status: 130, .. }
+        ));
+        assert!(out.is_empty());
+        assert_eq!(runner.input.try_byte(), input::InputEvent::Byte(b'Z'));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
+    fn mos_try_empty_pipe_returns_immediately_then_wait_reads_arriving_byte() {
+        use std::{sync::mpsc, time::Duration};
+
+        let (_temp, path) = compile_image(true);
+        let image = std::fs::read(path).unwrap();
+        let (reader, writer) = std::io::pipe().unwrap();
+        let prefix = crate::frame_input(b"?=`", b"").unwrap();
+        let (send, receive) = mpsc::channel();
+        let image_copy = image.clone();
+        let thread = std::thread::spawn(move || {
+            let result =
+                HostRunner::interactive(&image_copy, prefix, reader.into(), Some(2_000_000))
+                    .unwrap()
+                    .run();
+            send.send(result).unwrap();
+        });
+        let result = receive.recv_timeout(Duration::from_secs(5));
+        drop(writer); // Also unblocks a broken implementation before joining.
+        thread.join().unwrap();
+        let (outcome, output, _) = result.expect("Try blocked on an open empty pipe").unwrap();
+        assert!(matches!(outcome, HostOutcome::GuestExit { status: 0, .. }));
+        assert_eq!(output, b"0");
+
+        struct SendAfterOutput {
+            output: Vec<u8>,
+            writer: std::io::PipeWriter,
+        }
+        impl Write for SendAfterOutput {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                if self.output.is_empty() {
+                    assert_eq!(bytes, b"0");
+                    self.writer.write_all(b"A")?;
+                }
+                self.output.extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let (reader, writer) = std::io::pipe().unwrap();
+        let prefix = crate::frame_input(b"?=` ?=$", b"").unwrap();
+        let mut runner =
+            HostRunner::interactive(&image, prefix, reader.into(), Some(2_000_000)).unwrap();
+        let mut output = SendAfterOutput {
+            output: Vec::new(),
+            writer,
+        };
+        let outcome = runner.run_to(&mut output, &mut Vec::new()).unwrap();
+        assert!(matches!(outcome, HostOutcome::GuestExit { status: 0, .. }));
+        assert_eq!(output.output, b"065");
     }
 
     #[test]
