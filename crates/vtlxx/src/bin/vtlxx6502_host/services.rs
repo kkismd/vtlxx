@@ -1,4 +1,5 @@
 use super::HostError;
+use super::input::{HostInput, InputEvent};
 use mos6502::{
     cpu::CPU,
     instruction::Nmos6502,
@@ -22,6 +23,24 @@ fn return_from_service(cpu: &mut CPU<Memory, Nmos6502>) {
     cpu.registers.stack_pointer.increment();
     let high = cpu.memory.get_byte(cpu.registers.stack_pointer.to_u16());
     cpu.registers.program_counter = u16::from_le_bytes([low, high]).wrapping_add(1);
+}
+
+pub(super) fn input_service(cpu: &mut CPU<Memory, Nmos6502>, pc: u16, input: &mut HostInput) {
+    let event = if pc == 0xffef {
+        input.try_byte()
+    } else {
+        input.wait_byte()
+    };
+    cpu.registers.index_x = match event {
+        InputEvent::Byte(byte) => {
+            cpu.registers.accumulator = byte;
+            0
+        }
+        InputEvent::NotReady => 1,
+        InputEvent::Eof => 2,
+        InputEvent::Fatal => 3,
+    };
+    return_from_service(cpu);
 }
 
 pub(super) fn dispatch(
