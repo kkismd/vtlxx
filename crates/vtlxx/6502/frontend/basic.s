@@ -12,6 +12,8 @@
 .import cc_is_bound, cc_publish, cc_resolve
 .import cc_name, cc_name_len
 .import cc_push_const, cc_call, cc_load_reg, cc_store_reg
+.import cc_static_begin, cc_static_byte, cc_static_finish, cc_static_read
+.import cc_static_start, cc_static_length
 .import cc_literal_output_begin, cc_literal_output_byte, cc_literal_output_finish
 .import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
@@ -69,7 +71,10 @@ operator_high:  .byte >rt_add,>rt_sub,>rt_mul,>rt_div,>rt_rem,>rt_lt,>rt_gt
 
 .segment "BSS"
 constant_name: .res 16
-constant_table: .res 128*19 ; 16-byte NUL-terminated name + signed i16
+constant_table: .res 128*22 ; name[17], kind, value/start, length
+static_slots: .res 16
+static_state: .res 1
+definition_kind: .res 1
 while_loop_targets: .res 16*2
 structured_patches: .res 16*2
 top_level_chunk_targets: .res 65*2
@@ -782,10 +787,10 @@ statement:
     jsr peek
     lda look_state
     cmp #1
-    jne @while_syntax
+    bne @while_syntax
     lda look_byte
     cmp #'['
-    jeq @while_syntax
+    beq @while_syntax
     cmp #'~'
     beq @while_condition_stack
     lda #0
@@ -797,19 +802,19 @@ statement:
     jsr operand
 @while_condition_ready:
     lda fe_compile_status
-    jne @while_done
+    bne @while_done
     lda cc_status
-    jne @while_backend
+    bne @while_backend
     jsr statement_end
     lda fe_compile_status
-    jne @while_done
+    bne @while_done
 
     ; The JZ consumes exactly the condition's top runtime Cell.
     jsr cc_jz_placeholder
     sta while_word
     stx while_word+1
     lda cc_status
-    jne @while_backend
+    bne @while_backend
     lda structured_depth
     asl a
     tay
@@ -825,7 +830,7 @@ statement:
     lda fe_compile_status
     bne @while_done
     lda cc_status
-    jne @while_backend
+    bne @while_backend
     lda structured_depth
     asl a
     sta while_offset
@@ -838,7 +843,7 @@ statement:
     lda while_word
     jsr cc_jump_to
     lda cc_status
-    jne @while_backend
+    bne @while_backend
     ldy while_offset
     lda structured_patches,y
     sta while_word
@@ -848,7 +853,7 @@ statement:
     lda while_word
     jsr cc_patch_here
     lda cc_status
-    jne @while_backend
+    bne @while_backend
     rts
 @while_syntax:
     jmp syntax_error
@@ -867,12 +872,12 @@ statement:
     jsr peek
     lda look_state
     cmp #1
-    jne @write_definition_syntax
+    bne @write_definition_syntax
     lda look_byte
     cmp #'a'
-    jcc @write_definition_syntax
+    bcc @write_definition_syntax
     cmp #'z'+1
-    jcs @write_definition_syntax
+    bcs @write_definition_syntax
     sta cc_name
     lda #1
     sta cc_name_len
@@ -880,14 +885,14 @@ statement:
     jsr peek
     jsr scan_write_name_tail
     lda fe_compile_status
-    jne @write_definition_done
+    bne @write_definition_done
     jsr require_form_boundary
     lda fe_compile_status
     bne @write_definition_done
     jsr cc_is_bound
     bcs @write_definition_syntax
     lda cc_status
-    jne @write_definition_backend
+    bne @write_definition_backend
     lda cc_name_len
     sta definition_length
     tax
@@ -905,7 +910,7 @@ statement:
     bne @write_definition_done
     jsr cc_begin_owner
     lda cc_status
-    jne @write_definition_backend
+    bne @write_definition_backend
     jsr required_block
     lda fe_compile_status
     bne @write_definition_done
@@ -913,7 +918,7 @@ statement:
     sta cc_arg
     stx cc_arg+1
     lda cc_status
-    jne @write_definition_backend
+    bne @write_definition_backend
     ldx definition_length
     stx cc_name_len
 @restore_definition_name:
@@ -924,7 +929,7 @@ statement:
     bne @restore_definition_name
     jsr cc_publish
     lda cc_status
-    jne @write_definition_backend
+    bne @write_definition_backend
     jsr fe_start_chunk
     rts
 @write_definition_syntax:
@@ -938,10 +943,10 @@ statement:
 fe_label:
     jsr resolve_label_operand
     lda fe_compile_status
-    jne @done
+    bne @done
     jsr statement_end
     lda fe_compile_status
-    jne @done
+    bne @done
     lda target_index
     cmp #'^'
     bne @jump
@@ -988,17 +993,30 @@ fe_definition:
     jsr take
     jsr skip_horizontal
     lda fe_compile_status
-    bne @definition_done
+    jne @definition_done
     jsr peek
     lda look_state
     cmp #1
     jne literal_error
+    lda #0
+    sta definition_kind
+    lda look_byte
+    cmp #'['
+    bne @integer
+    lda #1
+    sta definition_kind
+    jsr static_definition
+    lda fe_compile_status
+    bne @definition_done
+    jmp @publish
+@integer:
     jsr parse_literal
     lda fe_compile_status
     bne @definition_done
     jsr statement_end
     lda fe_compile_status
     bne @definition_done
+@publish:
     ; Validate everything before publishing a table entry.
     lda constant_count
     sta constant_slot
@@ -1015,15 +1033,167 @@ fe_definition:
     bne @copy_name
 @store_value:
     lda #0
-    sta (constant_ptr),y          ; terminator (not needed for compare)
+    sta (constant_ptr),y
+    ldy #17
+    lda definition_kind
+    sta (constant_ptr),y
+    cmp #0
+    beq @integer_value
+    iny
+    lda cc_static_start
+    sta (constant_ptr),y
+    iny
+    lda cc_static_start+1
+    sta (constant_ptr),y
+    iny
+    lda cc_static_length
+    sta (constant_ptr),y
+    iny
+    lda cc_static_length+1
+    sta (constant_ptr),y
+    jmp @published
+@integer_value:
     iny
     lda literal
     sta (constant_ptr),y
     iny
     lda literal+1
     sta (constant_ptr),y
+@published:
     inc constant_count
 @definition_done:
+    rts
+
+; State: 0 initial, 1 element, 2 comma, 3 whitespace after element.
+static_definition:
+    jsr take
+    jsr cc_static_begin
+    lda cc_status
+    jne backend_error
+    lda #0
+    sta static_state
+@next:
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #']'
+    jeq @close
+    cmp #','
+    jeq @comma
+    cmp #';'
+    jeq @comment
+    cmp #' '
+    jeq @space
+    cmp #9
+    jeq @space
+    cmp #10
+    jeq @space
+    cmp #13
+    jeq @space
+    lda static_state
+    cmp #1
+    jeq syntax_error
+    lda look_byte
+    cmp #'"'
+    beq @string
+    cmp #'0'
+    jcc syntax_error
+    cmp #'9'+1
+    jcs syntax_error
+    jsr parse_literal
+    lda fe_compile_status
+    jne @done
+    lda literal+1
+    jne literal_error
+    lda literal
+    jsr cc_static_byte
+    lda cc_status
+    jne backend_error
+    jmp @element
+@string:
+    jsr take
+@string_next:
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'"'
+    beq @string_end
+    cmp #$20
+    jcc syntax_error
+    cmp #$7f
+    jcs syntax_error
+    jsr cc_static_byte
+    lda cc_status
+    jne backend_error
+    jsr take
+    jmp @string_next
+@string_end:
+    jsr take
+@element:
+    lda #1
+    sta static_state
+    jmp @next
+@space:
+    lda static_state
+    cmp #1
+    bne :+
+    lda #3
+    sta static_state
+:
+    jsr take
+    jmp @next
+@comment:
+    lda static_state
+    cmp #1
+    bne :+
+    lda #3
+    sta static_state
+:
+    jsr take
+@comment_next:
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #10
+    beq @space
+    jsr take
+    jmp @comment_next
+@comma:
+    lda static_state
+    cmp #1
+    beq :+
+    cmp #3
+    jne syntax_error
+:
+    lda #2
+    sta static_state
+    jsr take
+    jmp @next
+@close:
+    lda static_state
+    cmp #2
+    jeq syntax_error
+    jsr take
+    jsr peek
+    jsr statement_end
+    lda fe_compile_status
+    bne @done
+    jsr cc_static_finish
+    lda cc_status
+    jne backend_error
+@done:
     rts
 
 ; Consume only space and tab; a newline cannot occur inside a declaration.
@@ -1078,6 +1248,8 @@ resolve_label_operand:
     bcs :+
     jmp syntax_error
 :
+    jsr constant_kind
+    jne syntax_error
     jsr constant_load_value
     jmp @range
 @decimal:
@@ -1186,9 +1358,7 @@ constant_find:
 constant_load_value:
     ; Move from name start to the saved two-byte value.
     jsr constant_address
-    lda constant_length
-    tay
-    iny
+    ldy #18
     lda (constant_ptr),y
     sta literal
     iny
@@ -1196,7 +1366,13 @@ constant_load_value:
     sta literal+1
     rts
 
-; Convert constant_slot to a full 16-bit address. Entry offsets are 19 bytes;
+constant_kind:
+    jsr constant_address
+    ldy #17
+    lda (constant_ptr),y
+    rts
+
+; Convert constant_slot to a full 16-bit address. Entry offsets are 22 bytes;
 ; repeated pointer increments avoid truncating offsets above 255 into Y.
 constant_address:
     lda #<constant_table
@@ -1210,7 +1386,7 @@ constant_address:
     beq @address_ready
     clc
     lda constant_ptr
-    adc #19
+    adc #22
     sta constant_ptr
     lda constant_ptr+1
     adc #0
@@ -1393,11 +1569,11 @@ value:
     cmp #'-'
     jeq @literal
     cmp #'.'
-    jeq @named
+    beq @named
     cmp #'A'
-    bcc @applied
+    jcc @applied
     cmp #'Z'+1
-    bcs @applied
+    jcs @applied
     sec
     sbc #'A'
     pha
@@ -1416,10 +1592,61 @@ value:
     bcs :+
     jmp syntax_error
 :
+    jsr constant_kind
+    bne @named_data
+    lda look_state
+    cmp #1
+    bne @named_integer
+    lda look_byte
+    cmp #'('
+    jeq syntax_error
+@named_integer:
     jsr constant_load_value
     lda literal
     ldx literal+1
     jmp cc_push_const
+@named_data:
+    lda look_state
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #'('
+    jne syntax_error
+    jsr take
+    jsr enter_nesting
+    lda fe_compile_status
+    jne @done
+    ldx nesting
+    dex
+    lda constant_slot
+    sta static_slots,x
+    lda #0
+    jsr operand
+    lda fe_compile_status
+    bne @named_leave
+    jsr close_group
+@named_leave:
+    ldx nesting
+    dex
+    lda static_slots,x
+    sta constant_slot
+    dec nesting
+    lda fe_compile_status
+    jne @done
+    jsr constant_address
+    ldy #18
+    lda (constant_ptr),y
+    sta cc_static_start
+    iny
+    lda (constant_ptr),y
+    sta cc_static_start+1
+    iny
+    lda (constant_ptr),y
+    sta cc_static_length
+    iny
+    lda (constant_ptr),y
+    sta cc_static_length+1
+    jmp cc_static_read
 @applied:
     cmp #'@'
     jne syntax_error

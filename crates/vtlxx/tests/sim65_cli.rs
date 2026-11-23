@@ -389,6 +389,155 @@ fn constant_table_accepts_128_entries_and_rejects_129() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn static_bytes_compile_and_resolve_nested_indices() {
+    let temp = TestDir::new();
+    let cases: &[(&str, &str, &[u8])] = &[
+        (
+            "mixed",
+            ".DATA:=[0,127,128,255] ?=.DATA(0) ?=() ?=.DATA(1) ?=() ?=.DATA(2) ?=() ?=.DATA(3)",
+            b"0\n127\n128\n255",
+        ),
+        (
+            "lines",
+            ".DATA:=[\r\n \"A; B\" ; comment\r\n 10,\"\", 0\r\n] ?=.DATA(0) ?=() ?=.DATA(1) ?=() ?=.DATA(4) ?=() ?=.DATA(5)",
+            b"65\n59\n10\n0",
+        ),
+        (
+            "nested",
+            ".INDEX:=1 .INNER:=[2,0] .OUTER:=[11,22,33] @=0,1 I=0 ?=.OUTER(.INNER(I)) ?=() ?=.OUTER(.INDEX) ?=() ?=.OUTER(@(0))",
+            b"33\n22\n22",
+        ),
+        (
+            "interleaved",
+            "?=1 .EMPTY:=[] .DATA:=[\"AB\"] &=p [ ?=.DATA(1) ] .NUM:=3 p=() ?=.NUM",
+            b"1663",
+        ),
+        ("adjacent-form", ".DATA:=[\"A\"] ?=.DATA(0)", b"65"),
+    ];
+    for &(name, source, expected) in cases {
+        assert_runtime_input_output(&temp, name, source.as_bytes(), b"", expected);
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn static_bytes_share_the_constant_table_limit() {
+    let temp = TestDir::new();
+    let definitions: String = (0..127).map(|i| format!(".N{i}:={i}\n")).collect();
+    let source = format!("{definitions}.DATA:=[255] ?=.N126 ?=.DATA(0)");
+    assert_runtime_input_output(&temp, "mixed-table", source.as_bytes(), b"", b"126255");
+    let source = format!("?=42\n{definitions}.DATA:=[] .EXTRA:=1");
+    let result = run_program_with_input(&temp, "mixed-table-full", source.as_bytes(), b"");
+    assert!(!result.status.success(), "{result:?}");
+    assert!(result.stdout.is_empty(), "{result:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn static_byte_index_nesting_is_bounded() {
+    let temp = TestDir::new();
+    let nested = |depth: usize| format!("{}0{}", ".DATA(".repeat(depth), ")".repeat(depth));
+    let source = format!(".DATA:=[0] ?={}", nested(16));
+    assert_runtime_input_output(&temp, "static-depth-16", source.as_bytes(), b"", b"0");
+    let source = format!("?=42 .DATA:=[0] ?={}", nested(17));
+    let result = run_program_with_input(&temp, "static-depth-17", source.as_bytes(), b"");
+    assert!(!result.status.success(), "{result:?}");
+    assert!(result.stdout.is_empty(), "{result:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn invalid_static_byte_sources_do_not_start_runtime() {
+    let temp = TestDir::new();
+    let cases = [
+        ".DATA:=[,1]",
+        ".DATA:=[1,]",
+        ".DATA:=[1,,2]",
+        ".DATA:=[256]",
+        ".DATA:=[-1]",
+        ".DATA:=[1+2]",
+        ".DATA:=[1\"A\"]",
+        ".DATA:=[\"A\"2]",
+        ".DATA:=[\"A\nB\"]",
+        ".DATA:=[\"unterminated]",
+        ".DATA:=[1",
+        ".DATA:=\n[1]",
+        ".DATA:=[1]A=2",
+        ".DATA:=[1] .DATA:=2",
+        ".DATA:=2 .DATA:=[1]",
+        ".DATA:=[1] A=.DATA",
+        ".DATA:=1 A=.DATA(0)",
+        ".DATA:=[1] A=.DATA()",
+        ".DATA:=[1] A=.DATA(0,1)",
+        ".DATA:=[1] #=.DATA",
+        ".DATA:=[1] ^=.DATA",
+        "A=.DATA(0) .DATA:=[1]",
+        "&=p [ .DATA:=[1] ]",
+        "%=1 [ .DATA:=[1] ]",
+        "*=0 [ .DATA:=[1] ]",
+        ".DATA:=[1; comment\n,]",
+        ".DATA:=[\"é\"]",
+    ];
+    for (index, source) in cases.iter().enumerate() {
+        let source = format!("?=42 {source}");
+        let result = run_program_with_input(
+            &temp,
+            &format!("static-invalid-{index}"),
+            source.as_bytes(),
+            b"",
+        );
+        assert!(!result.status.success(), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+        assert!(
+            String::from_utf8_lossy(&result.stderr).contains("compilation failed"),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn static_byte_reads_report_out_of_range_at_runtime() {
+    let temp = TestDir::new();
+    for (index, source) in [
+        ".DATA:=[5] A=.DATA(-1)",
+        ".DATA:=[5] A=.DATA(1)",
+        ".DATA:=[] A=.DATA(0)",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let result = run_program_with_input(
+            &temp,
+            &format!("static-bounds-{index}"),
+            source.as_bytes(),
+            b"",
+        );
+        assert!(!result.status.success(), "{source}: {result:?}");
+        assert!(
+            !String::from_utf8_lossy(&result.stderr).contains("compilation failed"),
+            "{source}: {result:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn oversized_static_bytes_do_not_start_runtime() {
+    let temp = TestDir::new();
+    // Exceed the entire 24 KiB arena, while keeping the source framing valid.
+    let source = format!("?=42 .DATA:=[\"{}\"]", "A".repeat(25_000));
+    let result = run_program_with_input(&temp, "static-arena-full", source.as_bytes(), b"");
+    assert!(!result.status.success(), "{result:?}");
+    assert!(result.stdout.is_empty(), "{result:?}");
+    assert!(
+        String::from_utf8_lossy(&result.stderr).contains("compilation failed"),
+        "{result:?}"
+    );
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn dotted_constant_errors_do_not_start_runtime() {
     let temp = TestDir::new();
     let cases = [

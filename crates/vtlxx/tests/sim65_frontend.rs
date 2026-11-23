@@ -499,6 +499,9 @@ fn invalid_constant_does_not_publish_a_partial_entry() {
         ".BAD:=1+2",
         ".BAD:=32768",
         ".BAD:=1A=2",
+        ".BAD:=[1,]",
+        ".BAD:=[1]X=2",
+        ".BAD:=[\"unfinished",
         ".GOOD:=2",
         ".BAD :=",
     ] {
@@ -533,7 +536,7 @@ fn full_constant_table_survives_failed_declarations_and_references() {
         (128, ".EXTRA:=1"),
     ] {
         let check = format!(
-            "@failed:\n    lda constant_count\n    cmp #{count}\n    bne @table_corrupt\n    ldx #0\n@check_entry:\n    stx constant_slot\n    jsr constant_address\n    ldy #0\n@find_end:\n    lda (constant_ptr),y\n    beq @check_value\n    iny\n    cpy #17\n    bcc @find_end\n    bcs @table_corrupt\n@check_value:\n    iny\n    txa\n    cmp (constant_ptr),y\n    bne @table_corrupt\n    iny\n    lda (constant_ptr),y\n    bne @table_corrupt\n    inx\n    cpx #{count}\n    bne @check_entry\n    jmp @table_intact\n@table_corrupt:\n    lda #99\n    jmp halt\n@table_intact:\n    ; Abort only an active temporary source save."
+            "@failed:\n    lda constant_count\n    cmp #{count}\n    bne @table_corrupt\n    ldx #0\n@check_entry:\n    stx constant_slot\n    jsr constant_address\n    ldy #0\n@find_end:\n    lda (constant_ptr),y\n    beq @check_value\n    iny\n    cpy #17\n    bcc @find_end\n    bcs @table_corrupt\n@check_value:\n    ldy #17\n    lda (constant_ptr),y\n    bne @table_corrupt\n    iny\n    txa\n    cmp (constant_ptr),y\n    bne @table_corrupt\n    iny\n    lda (constant_ptr),y\n    bne @table_corrupt\n    inx\n    cpx #{count}\n    bne @check_entry\n    jmp @table_intact\n@table_corrupt:\n    lda #99\n    jmp halt\n@table_intact:\n    ; Abort only an active temporary source save."
         );
         let basic = original.replacen(
             "@failed:\n    ; Abort only an active temporary source save.",
@@ -1064,4 +1067,19 @@ fn compile_stack_guard_accepts_201_byte_fixture_and_observes_headroom() {
     assert!((25..132).contains(&minimum), "{result:?}");
     assert_eq!(result.stdout, b"0");
     eprintln!("201-byte fixture: minimum guard S={minimum}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn compile_stack_guard_observes_nested_static_reads() {
+    let source = format!(".DATA:=[0] ?={}0{}", ".DATA(".repeat(16), ")".repeat(16));
+    let basic = stack_probe_basic().replace(
+        "@returned:\n",
+        "@returned:\n    lda audit_min\n    jmp halt\n",
+    );
+    let result = run_stack_probe(&source, &basic);
+    let minimum = result.status.code().unwrap();
+    assert!((25..255).contains(&minimum), "{result:?}");
+    assert_eq!(result.stdout, b"0");
+    eprintln!("16 nested static reads: minimum guard S={minimum}");
 }
