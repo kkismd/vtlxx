@@ -339,7 +339,23 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 
 定義後の RHS 式、数値ラベルの `^=` と `#=` から参照できます。手続きや anonymous block の中で定義することはできません。未定義名の参照と同名の再定義は compile error です。異なる名前に同じ値を指定できます。`^=` / `#=` で使う値には既存のラベル範囲 `0..32767` が適用されます。
 
-定数表は compile-run の source processing 中だけ存在し、runtime に定数名や表を残しません。Rust の `execute_source` では呼び出し1回ごとに表を作ります。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで定数名を再利用するには再定義が必要です。6502 の現行 sim65 構成は compile-run あたり最大128件の定数宣言を受け付け、Rust reference はこの件数上限を設けません（採用 ADR [#528](https://github.com/kkismd/vtlxx/issues/528)）。
+名前表は compile-run の source processing 中だけ存在し、runtime に名前や表を残しません。Rust の `execute_source` では呼び出し1回ごとに表を作ります。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで名前を再利用するには再定義が必要です。6502 は整数と後述の静的バイト列を合わせて compile-run あたり最大128件受け付け、Rust reference はこの件数上限を設けません。
+
+### 名前付き静的バイト列
+
+トップレベルで `.NAME := [...]` と定義し、定義後に `.NAME(index)` で読みます。整数と同じ名前規則・名前空間を使い、重複、前方参照、種類の異なる参照は compile error です。`.NAME()` による長さ取得はありません。
+
+```vtl
+.WIDTH := 5
+.LEVEL := ["#####" "# @ #" "#$ .#"]
+$=.LEVEL(0) $=.LEVEL(.WIDTH+2) ?=()
+```
+
+これは `#@` と改行を出力します。要素は十進数 `0..255` または印字可能 ASCII の二重引用文字列で、空列も使えます。空白・改行または comma で区切り、文字列外の `;` は行末までコメントです。文字列に escape や改行は使えません。要素はそのまま連結され、改行や終端 byte は追加されません。`[` は `:=` と同じ物理行に置き、内容は複数行にできます。長さは最大 32768 byte で、実際の target 容量にも制限されます。
+
+添字は 0 始まりで、読み取った byte は符号なし `0..255` の Cell になります。負の添字、長さ以上の添字、空列の読み取りは runtime error です。失敗した読み取りは添字を含む stack を変更しません（添字式の先行する副作用は残ります）。可変 Cell の循環 storage `@` と異なり、静的バイト列は書き換えや循環を行いません。
+
+Rust では完成済み手続きが元のデータを保持し、別の `execute_source` で同名を再定義しても参照先は変わりません。6502 はコードとデータを共有する 24 KiB の生成イメージに private に格納し、容量不足を compile failure とします。6502 は source 全体の compile が失敗すると実行を開始しません。仕様は採用 ADR [#618](https://github.com/kkismd/vtlxx/issues/618) を参照してください。
 
 ### Comma operand
 

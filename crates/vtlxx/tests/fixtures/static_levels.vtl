@@ -1,0 +1,17 @@
+.WIDTH:=5 .FIRST:=0 .SECOND:=15
+.LEVELS:=[
+  "#####"
+  "# @ #"
+  "#$ .#"
+  "#####"
+  "# . #"
+  "# $@#"
+]
+.EMPTY:=[]
+.VALUES:=[0,127,128,255,"A",32]
+.INNER:=[1]
+.OUTER:=[40,41]
+&=p [ $=.LEVELS(.FIRST) $=.LEVELS(.FIRST+.WIDTH) $=.LEVELS(7) $=.LEVELS(8) $=.LEVELS(11) $=.LEVELS(13) $=.LEVELS(14) ]
+p=() ?=()
+$=.LEVELS(.SECOND) $=.LEVELS(.SECOND+.WIDTH) $=.LEVELS(22) $=.LEVELS(23) $=.LEVELS(27) $=.LEVELS(28) $=.LEVELS(29) ?=()
+?=.VALUES(0) ?="," ?=.VALUES(1) ?="," ?=.VALUES(2) ?="," ?=.VALUES(3) ?="," ?=.VALUES(4) ?="," ?=.VALUES(5) ?="," ?=.OUTER(.INNER(0)) ?=()

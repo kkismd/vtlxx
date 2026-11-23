@@ -207,6 +207,63 @@ fn product_engines_match_on_shared_programs() {
 }
 
 #[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn static_data_fixture_and_failures_match_all_engines() {
+    let temp = TestDir::new();
+    let cases: &[(&[u8], bool, &[u8])] = &[
+        (
+            include_bytes!("fixtures/static_levels.vtl"),
+            true,
+            include_bytes!("fixtures/static_levels.txt"),
+        ),
+        (b"A=.MISSING(0)", false, b""),
+        (b".DATA:=[1] .DATA:=2", false, b""),
+        (b".DATA:=1 A=.DATA(0)", false, b""),
+        (b".DATA:=[1] #=.DATA", false, b""),
+        (b".DATA:=[256]", false, b""),
+        (b".DATA:=[1", false, b""),
+        (".DATA:=[\"é\"]".as_bytes(), false, b""),
+        (b".DATA:=[1,,2]", false, b""),
+        (b".DATA:=[1] A=.DATA(-1)", false, b""),
+        (b".DATA:=[1] A=.DATA(1)", false, b""),
+        (b".DATA:=[] A=.DATA(0)", false, b""),
+    ];
+    for &(source, success, expected) in cases {
+        let path = temp.source(source);
+        let reference = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert_eq!(
+            reference.status.success(),
+            success,
+            "{source:?}: {reference:?}"
+        );
+        assert_eq!(reference.stdout, expected, "{source:?}");
+        for engine in ["sim65", "mos6502"] {
+            let output = cli()
+                .arg(&path)
+                .args(["--engine", engine, "--cycle-limit", "200000000"])
+                .output()
+                .unwrap();
+            assert_eq!(
+                output.status.success(),
+                success,
+                "{engine}: {source:?}: {output:?}"
+            );
+            assert_eq!(output.stdout, expected, "{engine}: {source:?}");
+        }
+    }
+    // Whole-program compilation must suppress even an earlier output statement.
+    for engine in ["sim65", "mos6502"] {
+        let path = temp.source(b"?=42 .DATA:=[256]");
+        let output = cli().arg(path).args(["--engine", engine]).output().unwrap();
+        assert!(!output.status.success(), "{engine}: {output:?}");
+        assert!(output.stdout.is_empty(), "{engine}: {output:?}");
+    }
+}
+
+#[test]
 #[ignore = "requires ca65 and ld65; run with --ignored"]
 fn default_and_explicit_mos_match_on_cycle_limit() {
     let temp = TestDir::new();
