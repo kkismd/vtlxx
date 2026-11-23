@@ -240,7 +240,7 @@ fn entropy_primary_read_returns_the_xorshift16_sequence() {
         (i16::MAX, [24479, 18391, 11649, 6775, 18023, 26781]),
         (-21279, [27015, 30930, 2970, 32697, 2984, 6343]),
     ] {
-        let source = (0..6).map(|_| "?='").collect::<Vec<_>>().join(" ");
+        let source = (0..6).map(|_| "?=!").collect::<Vec<_>>().join(" ");
         let mut input = (source.len() as u16).to_le_bytes().to_vec();
         input.extend_from_slice(source.as_bytes());
         let result = build_and_run_custom(
@@ -254,7 +254,7 @@ fn entropy_primary_read_returns_the_xorshift16_sequence() {
         assert_eq!(result.stdout, expected.as_bytes(), "{raw}: {result:?}");
     }
 
-    let source = b"@=192,' ?=@(192)";
+    let source = b"@=192,! ?=@(192)";
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(source);
     let result = build_and_run_custom(
@@ -266,7 +266,7 @@ fn entropy_primary_read_returns_the_xorshift16_sequence() {
     assert_eq!(result.status.code(), Some(0), "{result:?}");
     assert_eq!(result.stdout, b"16576", "{result:?}");
 
-    let source = b"?='+'";
+    let source = b"?=!+!";
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(source);
     let result = build_and_run_custom(
@@ -282,9 +282,9 @@ fn entropy_primary_read_returns_the_xorshift16_sequence() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn each_entropy_evaluation_calls_the_adapter_once() {
-    let source = b"?=' ?='";
+    let source = [b'?', b'=', b'!', b' ', b'?', b'=', b'!'];
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
-    input.extend_from_slice(source);
+    input.extend_from_slice(&source);
     let output = build_and_run_custom_configured(
         &input,
         "tests/fixtures/sim65/frontend_basic.s",
@@ -298,14 +298,87 @@ fn each_entropy_evaluation_calls_the_adapter_once() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn unavailable_entropy_is_fatal_and_apostrophe_rhs_forms_are_rejected() {
+fn unavailable_entropy_is_fatal_and_old_apostrophe_forms_are_rejected() {
     let mut input = (3u16).to_le_bytes().to_vec();
-    input.extend_from_slice(b"?='");
+    input.extend_from_slice(b"?=!");
     let result = build_and_run_input(&input);
     assert_eq!(result.status.code(), Some(5), "{result:?}");
     assert!(result.stdout.is_empty(), "{result:?}");
 
-    for source in ["?='=1", "?='(1)"] {
+    for source in ["?='", "?='=1", "?='(1)"] {
+        let result = build_and_run(source.as_bytes(), b"");
+        assert_eq!(result.status.code(), Some(2), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn bang_primary_read_binds_in_value_positions() {
+    // Entropy raw value 1 yields the fixed xorshift16 sequence starting at
+    // 16576, exactly as the old apostrophe spelling did.
+    for (source, expected) in [
+        ("?=!", "16576"),
+        ("A=! ?=A", "16576"),
+        ("A=!!=0 ?=A", "1"),
+        ("A=1!=! ?=A", "1"),
+        ("A=!+1 ?=A", "16577"),
+        ("A=(!) ?=A", "16576"),
+        ("A=1,! ?=A", "16576"),
+        ("@=192,! ?=@(192)", "16576"),
+        ("&=p [ A=! ] p=() ?=A", "16576"),
+        ("%=!!=0 [ ?=7 ]", "7"),
+        ("A=0 *=A<1 [ A=! ] ?=A", "16576"),
+    ] {
+        let mut input = (source.len() as u16).to_le_bytes().to_vec();
+        input.extend_from_slice(source.as_bytes());
+        let result = build_and_run_custom(
+            &input,
+            "tests/fixtures/sim65/frontend_basic.s",
+            None,
+            Some(1),
+        );
+        assert_eq!(result.status.code(), Some(0), "{source}: {result:?}");
+        assert_eq!(result.stdout, expected.as_bytes(), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn char_literals_lower_to_ascii_values() {
+    expect("?='A'", 0, b"65Z");
+    expect("?='0'", 0, b"48Z");
+    expect("?=' '", 0, b"32Z");
+    expect("?=';'", 0, b"59Z");
+    expect("?='\"'", 0, b"34Z");
+    expect("?='.'", 0, b"46Z");
+    expect("?='!'", 0, b"33Z");
+    expect("?='='", 0, b"61Z");
+    expect("?='[' ?=']'", 0, b"9193Z");
+    expect("?='(' ?=')'", 0, b"4041Z");
+    expect("?=','", 0, b"44Z");
+    expect("?='\\'", 0, b"92Z");
+    // Payload bytes are never reparsed as separators or structure, and a
+    // statement on the same line after a literal still compiles.
+    expect("A=';' ?=A B=' ' ?=B", 0, b"5932Z");
+    expect("A=('(') ?=A", 0, b"40Z");
+    expect("A='A'+2 ?=A", 0, b"67Z");
+    // Named constants coexist with literals; '.' inside quotes is a value.
+    expect(".MAX:=100\nA='A'+.MAX ?=A", 0, b"165Z");
+    expect("C='Q' %=C=='Q' [ ?=1 ]", 0, b"1Z");
+    // A quote inside a string literal is still string content.
+    expect("?=\"'\"", 0, b"'Z");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn malformed_char_literals_and_old_entropy_spelling_are_compile_errors() {
+    for source in [
+        "A='", "A=''", "A='AB'", "A='é'", "A='\\n'", "A='A", "A=' ", "A='A\"", "?='",
+        // A compile failure anywhere suppresses all runtime output, even
+        // from statements that appear earlier in the source.
+        "?=1 A='",
+    ] {
         let result = build_and_run(source.as_bytes(), b"");
         assert_eq!(result.status.code(), Some(2), "{source}: {result:?}");
         assert!(result.stdout.is_empty(), "{source}: {result:?}");
