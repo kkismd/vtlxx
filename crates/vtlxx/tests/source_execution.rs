@@ -1235,3 +1235,378 @@ fn bang_entropy_and_not_equal_coexist_in_source() {
     assert_eq!(machine.register(3), Some(1));
     assert!(machine.stack().is_empty());
 }
+
+#[test]
+fn static_byte_arrays_declare_and_read_by_zero_origin_index() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".DATA := [10,20,255]\nA=.DATA(0) B=.DATA(1) C=.DATA(2)")
+        .unwrap();
+    assert_eq!(
+        (
+            machine.register(0),
+            machine.register(1),
+            machine.register(2)
+        ),
+        (Some(10), Some(20), Some(255))
+    );
+    assert!(machine.stack().is_empty());
+
+    // Boundary byte values come back as unsigned Cells.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".VALS := [0,127,128,255] A=.VALS(0) B=.VALS(1) C=.VALS(2) D=.VALS(3)")
+        .unwrap();
+    assert_eq!(
+        (
+            machine.register(0),
+            machine.register(1),
+            machine.register(2),
+            machine.register(3)
+        ),
+        (Some(0), Some(127), Some(128), Some(255))
+    );
+
+    // A successful read replaces exactly the index Cell.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".DATA := [10,20] ~=1,.DATA(1)")
+        .unwrap();
+    assert_eq!(machine.stack(), &[1, 20]);
+}
+
+#[test]
+fn static_byte_arrays_span_lines_and_mix_strings_and_numbers() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".MAP := [\n  \"AB\"\n  \"CD\"\n]\nA=.MAP(0) B=.MAP(1) C=.MAP(2) D=.MAP(3)")
+        .unwrap();
+    assert_eq!(
+        (
+            machine.register(0),
+            machine.register(1),
+            machine.register(2),
+            machine.register(3)
+        ),
+        (Some(65), Some(66), Some(67), Some(68))
+    );
+
+    // Strings and numbers concatenate in source order; nothing is appended.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(
+            ".MIX := [\"NEWLINE\",10,\"TERMINATE\",0] A=.MIX(0) B=.MIX(7) C=.MIX(8) D=.MIX(17)",
+        )
+        .unwrap();
+    assert_eq!(
+        (
+            machine.register(0),
+            machine.register(1),
+            machine.register(2),
+            machine.register(3)
+        ),
+        (Some(78), Some(10), Some(84), Some(0))
+    );
+    // Index 18 is one past the last byte: no terminator was appended.
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source(".MIX := [\"NEWLINE\",10,\"TERMINATE\",0] E=.MIX(18)"),
+        Err(SourceError::Runtime(RuntimeError::StaticDataOutOfBounds))
+    );
+    assert_eq!(machine.stack(), &[18]);
+
+    // Spaces and semicolons inside quotes are data bytes, not separators.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".STR := [\"A B;C\"] A=.STR(1) B=.STR(3)")
+        .unwrap();
+    assert_eq!(
+        (machine.register(0), machine.register(1)),
+        (Some(32), Some(59))
+    );
+}
+
+#[test]
+fn static_byte_array_declaration_forms() {
+    // Empty array, several names on one line, and a statement following the
+    // closing bracket on the same line.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".EMPTY := [] .DATA := [10,20,255] A=.DATA(2)")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(255));
+
+    // A procedure defined after the declaration reads the completed body.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".DATA := [7,8]\n&=p [ A=.DATA(0) B=.DATA(1) ]\np=()")
+        .unwrap();
+    assert_eq!(
+        (machine.register(0), machine.register(1)),
+        (Some(7), Some(8))
+    );
+
+    // Comments run to the end of the line, even when they contain `]`.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".DATA := [1, ; ] not the end\n 2] A=.DATA(1)")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(2));
+
+    // Tabs and line crossings separate elements without commas.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".DATA:=[1\t2\n3] A=.DATA(2)")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(3));
+}
+
+#[test]
+fn static_byte_array_length_limit_is_32768() {
+    let longest = format!(".BIG := [{}] A=.BIG(32767)", "0,".repeat(32767) + "0");
+    let mut machine = Machine::new();
+    machine.execute_source(&longest).unwrap();
+    assert_eq!(machine.register(0), Some(0));
+
+    let too_long = format!(".BIG := [{}]", "0,".repeat(32768) + "0");
+    assert!(matches!(
+        Machine::new().execute_source(&too_long),
+        Err(SourceError::Compile(_))
+    ));
+}
+
+#[test]
+fn static_byte_reads_work_in_expression_contexts() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".WIDTH:=3 .TABLE := [10,20,30] A=.WIDTH+.TABLE(2)")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(33));
+
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".MAP := [5,6,7] I=1 A=.MAP(I+1)")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(7));
+
+    // If and While conditions, with reads inside the loop body.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(
+            ".TABLE := [10,20,30] %=.TABLE(0)==10 [ A=1 ] I=0 S=0 *=I<3 [ S=S+.TABLE(I) I=I+1 ]",
+        )
+        .unwrap();
+    assert_eq!(machine.register(0), Some(1));
+    assert_eq!(machine.register(18), Some(60));
+
+    // Grouping.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".TABLE := [10,20,30] A=(.TABLE(0)+.TABLE(1))*.TABLE(2)")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(900));
+
+    // A Write argument.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".TABLE := [10,20,30] ?=.TABLE(1)")
+        .unwrap();
+    assert_eq!(machine.output(), b"20");
+
+    // A data read inside an AppliedRead index, and an AppliedRead inside a
+    // data-read index.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".PTR := [3] .TABLE := [10,20,30] @=3,77 @=0,2 A=@(.PTR(0)) B=.TABLE(@(0))")
+        .unwrap();
+    assert_eq!(
+        (machine.register(0), machine.register(1)),
+        (Some(77), Some(30))
+    );
+
+    // Character literals, comparisons, integer names, and output strings
+    // keep their existing behavior alongside data reads.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".WD := [65] .ONE:=1 A=.WD(0)=='A' B='Q'+.ONE ?=\"A\"")
+        .unwrap();
+    assert_eq!(
+        (machine.register(0), machine.register(1)),
+        (Some(1), Some(82))
+    );
+    assert_eq!(machine.output(), b"A");
+}
+
+#[test]
+fn static_byte_name_resolution_rejections_are_compile_errors() {
+    for source in [
+        "A=.MISSING(0)",
+        "A=.LATER(0)\n.LATER := [1]",
+        ".XX:=1\n.XX := [1]",
+        ".XX := [1]\n.XX:=1",
+        ".XX := [1]\n.XX := [2]",
+        ".WIDTH:=3\nA=.WIDTH(0)",
+        ".DATA := [1]\nA=.DATA",
+        ".DATA := [1]\nA=.DATA()",
+        ".DATA := [1]\nA=.DATA(0,1)",
+        ".DATA := [1]\n#=.DATA",
+        ".DATA := [1]\n^=.DATA",
+        ".DATA := [1]\n#=.DATA(0)",
+    ] {
+        let mut machine = Machine::new();
+        assert!(
+            matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+    }
+    for rhs in ["1.DATA", ".WIDTH.DATA", "A.DATA"] {
+        let mut machine = Machine::new();
+        let source = format!(".WIDTH:=1 .DATA := [2] A={rhs}");
+        assert!(
+            matches!(
+                machine.execute_source(&source),
+                Err(SourceError::Compile(_))
+            ),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn static_byte_declaration_failures_are_compile_errors_and_register_nothing() {
+    for source in [
+        "&=p [ .DATA := [1] ]",
+        "%=1 [ .DATA := [1] ]",
+        ".DATA := [256]",
+        ".DATA := [300]",
+        ".DATA := [-1]",
+        ".DATA := [1,]",
+        ".DATA := [,1]",
+        ".DATA := [1,,2]",
+        ".DATA := [1\"AB\"]",
+        ".DATA := [\"A\"\"B\"]",
+        ".DATA := [\"ABC]",
+        ".DATA := [\"AB\nCD\"]",
+        ".DATA := [\"é\"]",
+        ".DATA := [1,2",
+        ".DATA := [",
+        ".DATA :=\n[1]",
+        ".DATA = [1]",
+        ".D := [1]",
+        ".DATA := [1]A=1",
+        ".DATA := [1] .DATA := [2]",
+    ] {
+        let mut machine = Machine::new();
+        assert!(
+            matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+    }
+
+    // A failed declaration leaves the name free for a later source.
+    let mut machine = Machine::new();
+    assert!(matches!(
+        machine.execute_source(".DATA := [256]"),
+        Err(SourceError::Compile(_))
+    ));
+    machine.execute_source(".DATA := [7] A=.DATA(0)").unwrap();
+    assert_eq!(machine.register(0), Some(7));
+}
+
+#[test]
+fn static_byte_bodies_are_fixed_at_compile_completion() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".DATA := [10,20]\n&=p [ A=.DATA(0) B=.DATA(1) ]")
+        .unwrap();
+    // A later source may redefine the same name for its own compilation;
+    // the completed procedure keeps reading the original body.
+    machine
+        .execute_source(".DATA := [99,98]\nC=.DATA(0) D=.DATA(1)")
+        .unwrap();
+    assert_eq!(
+        (machine.register(2), machine.register(3)),
+        (Some(99), Some(98))
+    );
+    machine.execute_source("p=()").unwrap();
+    assert_eq!(
+        (machine.register(0), machine.register(1)),
+        (Some(10), Some(20))
+    );
+
+    // A failed redefinition does not disturb the completed procedure.
+    assert!(matches!(
+        machine.execute_source(".DATA := [256]"),
+        Err(SourceError::Compile(_))
+    ));
+    machine.execute_source("p=()").unwrap();
+    assert_eq!(
+        (machine.register(0), machine.register(1)),
+        (Some(10), Some(20))
+    );
+
+    // A procedure whose body fails to compile is not published.
+    let mut machine = Machine::new();
+    assert!(matches!(
+        machine.execute_source("&=q [ A=.NOPE(0) ]"),
+        Err(SourceError::Compile(_))
+    ));
+    assert_eq!(
+        machine.execute_source("q=()"),
+        Err(SourceError::Compile(CompileError::UndefinedBinding))
+    );
+}
+
+#[test]
+fn static_byte_read_bounds_errors_preserve_the_stack() {
+    // Negative index: the index stays on the stack and the store to A
+    // never runs.
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source(".DATA := [10,20] A=.DATA(-1)"),
+        Err(SourceError::Runtime(RuntimeError::StaticDataOutOfBounds))
+    );
+    assert_eq!(machine.stack(), &[-1]);
+    assert_eq!(machine.register(0), Some(0));
+
+    // Index equal to the length.
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source(".DATA := [10,20] A=.DATA(2)"),
+        Err(SourceError::Runtime(RuntimeError::StaticDataOutOfBounds))
+    );
+    assert_eq!(machine.stack(), &[2]);
+    assert_eq!(machine.register(0), Some(0));
+
+    // Any index into an empty array.
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source(".EMPTY := [] A=.EMPTY(0)"),
+        Err(SourceError::Runtime(RuntimeError::StaticDataOutOfBounds))
+    );
+    assert_eq!(machine.stack(), &[0]);
+
+    // Combined with ordinary stack operands in the same statement.
+    let mut machine = Machine::new();
+    assert_eq!(
+        machine.execute_source(".DATA := [1] ~=1,.DATA(5)"),
+        Err(SourceError::Runtime(RuntimeError::StaticDataOutOfBounds))
+    );
+    assert_eq!(machine.stack(), &[1, 5]);
+
+    // Pre-existing stack content survives, the index expression's own
+    // evaluation is not rolled back, and registers/storage are untouched
+    // by the failed read itself.
+    let mut machine = Machine::new();
+    machine.execute_source("~=7 B=42 @=1,9").unwrap();
+    assert_eq!(
+        machine.execute_source(".DATA := [1] A=.DATA(B+1)"),
+        Err(SourceError::Runtime(RuntimeError::StaticDataOutOfBounds))
+    );
+    assert_eq!(machine.stack(), &[7, 43]);
+    assert_eq!(machine.register(0), Some(0));
+    assert_eq!(machine.register(1), Some(42));
+    assert_eq!(machine.storage(1), 9);
+    machine.execute_source("C=1").unwrap();
+    assert_eq!(machine.register(2), Some(1));
+}

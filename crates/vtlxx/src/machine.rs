@@ -7,7 +7,9 @@ use crate::{
     Cell,
     binding::{BindingError, Bindings, SourceRole},
     builder::CompletedBody,
-    executable::{Executable, ExecutableBody, ExecutableId, Instruction, RuntimeError},
+    executable::{
+        Executable, ExecutableBody, ExecutableId, Instruction, RuntimeError, StaticDataId,
+    },
     primitive::Primitive,
     source::{SourceError, execute_source},
 };
@@ -79,6 +81,7 @@ pub struct Machine {
     pub(crate) storage: Box<[Cell; STORAGE_SIZE]>,
     pub(crate) value_stack: Vec<Cell>,
     executables: Vec<Executable>,
+    static_data: Vec<Box<[u8]>>,
     bindings: Bindings,
     long_writes: HashMap<String, ExecutableId>,
     builtins: Vec<(Primitive, ExecutableId)>,
@@ -107,6 +110,7 @@ impl Machine {
             storage: Box::new([0; STORAGE_SIZE]),
             value_stack: Vec::new(),
             executables: Vec::new(),
+            static_data: Vec::new(),
             bindings: Bindings::default(),
             long_writes: HashMap::new(),
             builtins: Vec::new(),
@@ -268,6 +272,39 @@ impl Machine {
         self.install_body(ExecutableBody::Compiled(body.into_instructions()))
     }
 
+    /// Take ownership of one fully validated static byte body and return its
+    /// private ID. Bodies are immutable and never removed, so an ID embedded
+    /// in a completed body keeps reading the same bytes even when a later
+    /// source redefines the same source name (ADR #618).
+    pub(crate) fn install_static_data(&mut self, bytes: Vec<u8>) -> StaticDataId {
+        let id = StaticDataId(self.static_data.len());
+        self.static_data.push(bytes.into_boxed_slice());
+        id
+    }
+
+    /// Execute one static byte read: `( index -- value )`. The index Cell is
+    /// replaced by the unsigned byte only when `0 <= index < len`; any other
+    /// index (including every index into an empty body) is a bounds error
+    /// that leaves the stack, including the index, unchanged.
+    pub(crate) fn read_static_data(&mut self, id: StaticDataId) -> Result<(), RuntimeError> {
+        let index = *self
+            .value_stack
+            .last()
+            .ok_or(RuntimeError::StackUnderflow)?;
+        let byte = {
+            let data = self
+                .static_data
+                .get(id.0)
+                .ok_or(RuntimeError::InvalidExecutable)?;
+            if index < 0 || index as usize >= data.len() {
+                return Err(RuntimeError::StaticDataOutOfBounds);
+            }
+            data[index as usize]
+        };
+        *self.value_stack.last_mut().expect("index was read above") = Cell::from(byte);
+        Ok(())
+    }
+
     pub(crate) fn resolve(&self, identity: char, role: SourceRole) -> Option<ExecutableId> {
         self.bindings.resolve(identity, role)
     }
@@ -404,6 +441,10 @@ impl Machine {
                     match next {
                         Instruction::PushConst(value) => {
                             self.value_stack.push(value);
+                            instruction += 1;
+                        }
+                        Instruction::ReadStaticByte(id) => {
+                            self.read_static_data(id)?;
                             instruction += 1;
                         }
                         Instruction::Call(target) => {

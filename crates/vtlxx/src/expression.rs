@@ -1,17 +1,24 @@
 use crate::{
-    Cell, binding::SourceRole, builder::CodeBuilder, executable::Instruction, machine::Machine,
-    primitive::Primitive, source::CompileError,
+    Cell,
+    binding::SourceRole,
+    builder::CodeBuilder,
+    executable::Instruction,
+    machine::Machine,
+    primitive::Primitive,
+    source::{CompileError, NameTable, NamedValue},
 };
 
 pub(crate) fn compile_rhs(
     source: &str,
     machine: &Machine,
+    names: &NameTable,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     let mut parser = Parser {
         chars: source.chars().collect(),
         position: 0,
         machine,
+        names,
         instructions: Vec::new(),
     };
     let seeded = parser.consume('~');
@@ -25,6 +32,7 @@ struct Parser<'a> {
     chars: Vec<char>,
     position: usize,
     machine: &'a Machine,
+    names: &'a NameTable,
     instructions: Vec<Instruction>,
 }
 
@@ -88,6 +96,9 @@ impl Parser<'_> {
         if current == '\'' {
             return self.char_literal();
         }
+        if current == '.' {
+            return self.named_value();
+        }
         if current.is_ascii_digit()
             || (current == '-'
                 && self
@@ -113,6 +124,46 @@ impl Parser<'_> {
             .ok_or(CompileError::UndefinedBinding)?;
         self.instructions.push(Instruction::Call(id));
         Ok(())
+    }
+
+    /// A `.NAME` reference resolves directly against the compile-local name
+    /// table (ADR #618): an integer name is a plain value and must not be
+    /// followed by `(`, while a byte-data name must be followed by exactly
+    /// one parenthesized Cell expression and lowers to a byte read carrying
+    /// only the private data ID. The name is read with maximal munch over
+    /// the same characters the declaration scanner accepts, so a lowercase
+    /// operator still ends the name.
+    fn named_value(&mut self) -> Result<(), CompileError> {
+        self.position += 1;
+        let start = self.position;
+        while self
+            .peek()
+            .is_some_and(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+        {
+            self.position += 1;
+        }
+        let name: String = self.chars[start..self.position].iter().collect();
+        match self.names.lookup(&name) {
+            Some(NamedValue::Integer(value)) => {
+                if self.peek() == Some('(') {
+                    return Err(CompileError::Syntax);
+                }
+                self.instructions.push(Instruction::PushConst(value));
+                Ok(())
+            }
+            Some(NamedValue::ByteData(id)) => {
+                if !self.consume('(') {
+                    return Err(CompileError::Syntax);
+                }
+                self.operand(Some(')'), false)?;
+                if !self.consume(')') {
+                    return Err(CompileError::Syntax);
+                }
+                self.instructions.push(Instruction::ReadStaticByte(id));
+                Ok(())
+            }
+            None => Err(CompileError::Syntax),
+        }
     }
 
     /// A character literal is exactly one printable ASCII byte other than
@@ -183,7 +234,7 @@ mod tests {
 
     fn instructions(machine: &Machine, source: &str) -> Vec<Instruction> {
         let mut builder = CodeBuilder::new();
-        compile_rhs(source, machine, &mut builder).unwrap();
+        compile_rhs(source, machine, &NameTable::default(), &mut builder).unwrap();
         builder.finish().unwrap().into_instructions()
     }
 
@@ -259,7 +310,7 @@ mod tests {
         );
         let mut builder = CodeBuilder::new();
         assert_eq!(
-            compile_rhs("a(B)(C)", &machine, &mut builder),
+            compile_rhs("a(B)(C)", &machine, &NameTable::default(), &mut builder),
             Err(CompileError::Syntax)
         );
     }
@@ -338,7 +389,7 @@ mod tests {
         for source in ["'", "''", "'AB'", "'é'", "'A", "'\\n'", "'A\"", "1+'"] {
             let mut builder = CodeBuilder::new();
             assert_eq!(
-                compile_rhs(source, &machine, &mut builder),
+                compile_rhs(source, &machine, &NameTable::default(), &mut builder),
                 Err(CompileError::Syntax),
                 "{source}"
             );
@@ -392,7 +443,7 @@ mod tests {
         );
         // `!` has no applied-read or write role.
         let mut builder = CodeBuilder::new();
-        assert!(compile_rhs("!(1)", &machine, &mut builder).is_err());
+        assert!(compile_rhs("!(1)", &machine, &NameTable::default(), &mut builder).is_err());
     }
 
     #[test]
@@ -406,7 +457,10 @@ mod tests {
         ] {
             let mut parent = CodeBuilder::new();
             parent.emit(Instruction::PushConst(99)).unwrap();
-            assert_eq!(compile_rhs(source, &machine, &mut parent), Err(error));
+            assert_eq!(
+                compile_rhs(source, &machine, &NameTable::default(), &mut parent),
+                Err(error)
+            );
             assert_eq!(
                 parent.finish().unwrap().into_instructions(),
                 vec![Instruction::PushConst(99), Instruction::Return],
