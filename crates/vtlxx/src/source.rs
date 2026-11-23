@@ -1,7 +1,7 @@
 use crate::{
     binding::SourceRole,
     builder::CodeBuilder,
-    executable::{Instruction, RuntimeError},
+    executable::{Instruction, RuntimeError, StaticDataId},
     expression::compile_rhs,
     machine::Machine,
 };
@@ -24,13 +24,29 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
     let mut has_statements = false;
     let mut reader = SourceReader::new(source);
     // This namespace belongs to one source compilation, not to Machine.
-    let mut constants = Constants::default();
+    let mut names = NameTable::default();
     while let Some(token) = reader.next().map_err(SourceError::Compile)? {
-        if let Some(definition) = token.text.strip_prefix('.') {
-            constants.define(definition).map_err(SourceError::Compile)?;
+        let text = match token {
+            Token::ByteData { name, elements } => {
+                // The reader has fully validated the declaration; only a
+                // complete, valid declaration installs its body and
+                // registers the name (ADR #618).
+                names
+                    .validate_new_name(name)
+                    .map_err(SourceError::Compile)?;
+                let id = machine.install_static_data(elements);
+                names.register_byte_data(name, id);
+                continue;
+            }
+            Token::Text(text) => text,
+        };
+        if let Some(definition) = text.strip_prefix('.') {
+            names
+                .define_integer(definition)
+                .map_err(SourceError::Compile)?;
             continue;
         }
-        let (target, rhs) = split_statement(token.text).map_err(SourceError::Compile)?;
+        let (target, rhs) = split_statement(text).map_err(SourceError::Compile)?;
         if target == "&" {
             if !valid_write_name(rhs) {
                 return Err(SourceError::Compile(CompileError::Syntax));
@@ -45,7 +61,7 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
                 return Err(SourceError::Compile(CompileError::Syntax));
             }
             let mut definition_builder = CodeBuilder::new();
-            compile_required_block(&mut reader, machine, &constants, &mut definition_builder)
+            compile_required_block(&mut reader, machine, &names, &mut definition_builder)
                 .map_err(SourceError::Compile)?;
             let completed = definition_builder
                 .finish()
@@ -54,18 +70,38 @@ pub(crate) fn execute_source(machine: &mut Machine, source: &str) -> Result<(), 
                 .publish_write(rhs, completed)
                 .map_err(|_| SourceError::Compile(CompileError::Syntax))?;
         } else {
-            compile_source_statement(token, &mut reader, machine, &constants, &mut builder)
-                .map_err(SourceError::Compile)?;
+            compile_source_statement(
+                Token::Text(text),
+                &mut reader,
+                machine,
+                &names,
+                &mut builder,
+            )
+            .map_err(SourceError::Compile)?;
             has_statements = true;
         }
     }
     flush_top_level(machine, builder, has_statements)
 }
 
-#[derive(Default)]
-struct Constants(Vec<(String, i16)>);
+/// The value a compile-local name is bound to. Source names and kinds are
+/// compile-time only: expressions resolve them directly to a constant or to
+/// a private static-data ID, and nothing here reaches runtime objects.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NamedValue {
+    Integer(i16),
+    ByteData(StaticDataId),
+}
 
-impl Constants {
+/// The single compile-local namespace shared by named integers and named
+/// static byte arrays (ADR #618, successor of the integer-only table).
+/// One lookup serves both kinds, a name may be defined once per
+/// `execute_source` call regardless of kind, and only names defined
+/// earlier in the same source are visible.
+#[derive(Default)]
+pub(crate) struct NameTable(Vec<(String, NamedValue)>);
+
+impl NameTable {
     fn valid_name(name: &str) -> bool {
         (2..=16).contains(&name.len())
             && name.is_ascii()
@@ -75,12 +111,18 @@ impl Constants {
                 .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
     }
 
-    fn define(&mut self, definition: &str) -> Result<(), CompileError> {
+    fn validate_new_name(&self, name: &str) -> Result<(), CompileError> {
+        if !Self::valid_name(name) || self.0.iter().any(|(existing, _)| existing == name) {
+            return Err(CompileError::Syntax);
+        }
+        Ok(())
+    }
+
+    fn define_integer(&mut self, definition: &str) -> Result<(), CompileError> {
         let (name, value) = definition.split_once(":=").ok_or(CompileError::Syntax)?;
         let name = name.trim_end_matches([' ', '\t']);
         let value = value.trim_matches([' ', '\t']);
-        if !Self::valid_name(name)
-            || self.0.iter().any(|(existing, _)| existing == name)
+        if self.validate_new_name(name).is_err()
             || value.is_empty()
             || value == "-"
             || !value
@@ -92,125 +134,62 @@ impl Constants {
             return Err(CompileError::Syntax);
         }
         let value = value.parse::<i16>().map_err(|_| CompileError::Syntax)?;
-        self.0.push((name.to_owned(), value));
+        self.0.push((name.to_owned(), NamedValue::Integer(value)));
         Ok(())
     }
 
-    fn resolve(&self, name: &str) -> Result<i16, CompileError> {
-        if !Self::valid_name(name) {
-            return Err(CompileError::Syntax);
-        }
+    /// Register a byte-array name whose body the Machine has already taken
+    /// ownership of. Callers validate with `validate_new_name` first, so a
+    /// failed declaration never installs a body or registers the name.
+    fn register_byte_data(&mut self, name: &str, id: StaticDataId) {
+        debug_assert!(self.validate_new_name(name).is_ok());
+        self.0.push((name.to_owned(), NamedValue::ByteData(id)));
+    }
+
+    /// The one name lookup used by expression resolution. Undefined and
+    /// not-yet-defined names are indistinguishable here, which is what makes
+    /// forward references compile errors.
+    pub(crate) fn lookup(&self, name: &str) -> Option<NamedValue> {
         self.0
             .iter()
             .find(|(candidate, _)| candidate == name)
             .map(|(_, value)| *value)
-            .ok_or(CompileError::Syntax)
     }
 
-    fn expand_rhs(&self, rhs: &str, machine: &Machine) -> Result<String, CompileError> {
-        let mut expanded = String::new();
-        let mut offset = 0;
-        while offset < rhs.len() {
-            let byte = rhs.as_bytes()[offset];
-            if byte == b'\'' {
-                // A character literal is one value lexeme owned by the
-                // expression parser; copy it verbatim so a `.` payload is not
-                // mistaken for a constant reference and quoted parentheses do
-                // not affect grouping depth. Malformed literals are rejected
-                // here because their extent cannot be determined.
-                let bytes = rhs.as_bytes();
-                let payload = bytes.get(offset + 1).copied().ok_or(CompileError::Syntax)?;
-                if !(0x20..=0x7e).contains(&payload) || payload == b'\'' {
-                    return Err(CompileError::Syntax);
-                }
-                if bytes.get(offset + 2) != Some(&b'\'') {
-                    return Err(CompileError::Syntax);
-                }
-                expanded.push_str(&rhs[offset..offset + 3]);
-                offset += 3;
-            } else if byte == b'.' {
-                // A completed prefix cannot be followed by another value. Closing
-                // open groups lets the existing expression parser check prefixes
-                // within nested operands without teaching it constant names.
-                let depth = grouping_depth(&expanded);
-                let mut prefix = expanded.clone();
-                prefix.extend(std::iter::repeat_n(')', depth));
-                if !prefix.is_empty()
-                    && compile_rhs(&prefix, machine, &mut CodeBuilder::new()).is_ok()
-                {
-                    return Err(CompileError::Syntax);
-                }
-                // Parenthesized literals must not turn an adjacent primary
-                // identity into an applied-read call (e.g. `a.TWO` -> `a(2)`).
-                if let Some((index, identity)) = expanded.char_indices().next_back()
-                    && machine.resolve(identity, SourceRole::AppliedRead).is_some()
-                {
-                    let mut before_identity = expanded[..index].to_owned();
-                    before_identity.extend(std::iter::repeat_n(')', depth));
-                    if before_identity.is_empty()
-                        || compile_rhs(&before_identity, machine, &mut CodeBuilder::new()).is_err()
-                    {
-                        return Err(CompileError::Syntax);
-                    }
-                }
-                offset += 1;
-                let start = offset;
-                while offset < rhs.len()
-                    && (rhs.as_bytes()[offset].is_ascii_uppercase()
-                        || rhs.as_bytes()[offset].is_ascii_digit()
-                        || rhs.as_bytes()[offset] == b'_')
-                {
-                    offset += 1;
-                }
-                let name = &rhs[start..offset];
-                expanded.push('(');
-                expanded.push_str(&self.resolve(name)?.to_string());
-                expanded.push(')');
-            } else {
-                let ch = rhs[offset..].chars().next().ok_or(CompileError::Syntax)?;
-                expanded.push(ch);
-                offset += ch.len_utf8();
-            }
+    /// Integer-only resolution kept for the `^=`/`#=` numeric-label operand.
+    /// A byte-data name is not a label and is rejected here; this path never
+    /// expands into an expression string.
+    fn resolve_integer(&self, name: &str) -> Result<i16, CompileError> {
+        if !Self::valid_name(name) {
+            return Err(CompileError::Syntax);
         }
-        Ok(expanded)
-    }
-}
-
-/// Grouping depth of an expanded RHS prefix, ignoring parentheses that are
-/// character-literal payloads such as `'('` or `')'`.
-fn grouping_depth(expanded: &str) -> usize {
-    let bytes = expanded.as_bytes();
-    let mut depth = 0usize;
-    let mut index = 0;
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\'' => index += 3,
-            b'(' => {
-                depth += 1;
-                index += 1;
-            }
-            b')' => {
-                depth = depth.saturating_sub(1);
-                index += 1;
-            }
-            _ => index += 1,
+        match self.lookup(name) {
+            Some(NamedValue::Integer(value)) => Ok(value),
+            _ => Err(CompileError::Syntax),
         }
     }
-    depth
 }
 
-fn compile_resolved_rhs(
-    rhs: &str,
-    machine: &Machine,
-    constants: &Constants,
-    builder: &mut CodeBuilder,
-) -> Result<(), CompileError> {
-    compile_rhs(&constants.expand_rhs(rhs, machine)?, machine, builder)
+/// One lexical unit of a source. Ordinary statements and integer
+/// declarations stay borrowed line text; a byte-array declaration is
+/// validated and materialized by the reader because its body may span
+/// several physical lines (ADR #618).
+enum Token<'a> {
+    Text(&'a str),
+    ByteData { name: &'a str, elements: Vec<u8> },
 }
 
-#[derive(Clone, Copy)]
-struct Token<'a> {
-    text: &'a str,
+impl<'a> Token<'a> {
+    /// The borrowed text for ordinary tokens. A byte-array declaration has
+    /// no single-line text; consumers that only compare against `[` / `]`
+    /// or split a statement see an empty string and reject it, which keeps
+    /// declarations out of blocks and other non-top-level positions.
+    fn text(&self) -> &'a str {
+        match self {
+            Token::Text(text) => text,
+            Token::ByteData { .. } => "",
+        }
+    }
 }
 
 struct SourceReader<'a> {
@@ -232,9 +211,12 @@ impl<'a> SourceReader<'a> {
     }
 
     fn next(&mut self) -> Result<Option<Token<'a>>, CompileError> {
-        while let Some(line) = self.lines.get(self.line) {
+        while let Some(line) = self.lines.get(self.line).copied() {
+            if let Some(token) = self.next_byte_declaration()? {
+                return Ok(Some(token));
+            }
             if let Some(text) = next_source_token(line, &mut self.offset)? {
-                return Ok(Some(Token { text }));
+                return Ok(Some(Token::Text(text)));
             }
             self.line += 1;
             self.offset = 0;
@@ -243,18 +225,202 @@ impl<'a> SourceReader<'a> {
     }
 
     fn peek(&self) -> Result<Option<Token<'a>>, CompileError> {
-        let mut line_index = self.line;
-        let mut offset = self.offset;
-        while let Some(line) = self.lines.get(line_index) {
-            if let Some(text) = next_source_token(line, &mut offset)? {
-                return Ok(Some(Token { text }));
-            }
-            line_index += 1;
-            offset = 0;
+        let mut scratch = SourceReader {
+            lines: self.lines.clone(),
+            line: self.line,
+            offset: self.offset,
+        };
+        scratch.next()
+    }
+
+    /// If the next token on the current line is a byte-array declaration
+    /// header (`.NAME := [` with `[` on the same physical line as `:=`),
+    /// consume the whole declaration, validating its elements across as
+    /// many lines as the body spans. Anything else is left for the ordinary
+    /// per-line tokenizer, including malformed `.` forms whose errors it
+    /// owns.
+    fn next_byte_declaration(&mut self) -> Result<Option<Token<'a>>, CompileError> {
+        let line = self.lines[self.line];
+        let bytes = line.as_bytes();
+        let mut index = self.offset;
+        while index < bytes.len() && matches!(bytes[index], b' ' | b'\t') {
+            index += 1;
         }
-        Ok(None)
+        if bytes.get(index) != Some(&b'.') {
+            return Ok(None);
+        }
+        let name_start = index + 1;
+        let mut end = name_start;
+        while end < bytes.len()
+            && (bytes[end].is_ascii_uppercase()
+                || bytes[end].is_ascii_digit()
+                || bytes[end] == b'_')
+        {
+            end += 1;
+        }
+        if end == name_start {
+            return Ok(None);
+        }
+        let mut after_name = end;
+        while after_name < bytes.len() && matches!(bytes[after_name], b' ' | b'\t') {
+            after_name += 1;
+        }
+        if bytes.get(after_name..after_name + 2) != Some(b":=") {
+            return Ok(None);
+        }
+        let mut open = after_name + 2;
+        while open < bytes.len() && matches!(bytes[open], b' ' | b'\t') {
+            open += 1;
+        }
+        if bytes.get(open) != Some(&b'[') {
+            return Ok(None);
+        }
+        let name = &line[name_start..end];
+        self.offset = open + 1;
+        let elements = self.read_byte_array()?;
+        Ok(Some(Token::ByteData { name, elements }))
+    }
+
+    /// The byte under the array cursor. Crossing a physical line boundary
+    /// reads as one `\n`, so whitespace, comments, and the ban on newlines
+    /// inside quoted elements all follow from the ordinary byte rules.
+    fn array_byte(&self) -> Option<u8> {
+        let line = self.lines.get(self.line)?;
+        match line.as_bytes().get(self.offset) {
+            Some(byte) => Some(*byte),
+            None if self.line + 1 < self.lines.len() => Some(b'\n'),
+            None => None,
+        }
+    }
+
+    fn bump_array_byte(&mut self) {
+        let line = self.lines[self.line];
+        if self.offset >= line.len() {
+            self.line += 1;
+            self.offset = 0;
+        } else {
+            self.offset += 1;
+        }
+    }
+
+    /// Consume array whitespace (space, tab, CR, line crossings) and
+    /// `;`-to-end-of-line comments outside quotes. Returns whether anything
+    /// was consumed, which is what separates two adjacent elements.
+    fn skip_array_space(&mut self) -> bool {
+        let mut skipped = false;
+        loop {
+            match self.array_byte() {
+                Some(b' ' | b'\t' | b'\r' | b'\n') => {
+                    self.bump_array_byte();
+                    skipped = true;
+                }
+                Some(b';') => {
+                    self.offset = self.lines[self.line].len();
+                    skipped = true;
+                }
+                _ => return skipped,
+            }
+        }
+    }
+
+    fn read_byte_array(&mut self) -> Result<Vec<u8>, CompileError> {
+        #[derive(PartialEq)]
+        enum Last {
+            Start,
+            Element,
+            Comma,
+        }
+        let mut elements = Vec::new();
+        let mut last = Last::Start;
+        loop {
+            let separated = self.skip_array_space();
+            match self.array_byte() {
+                None => return Err(CompileError::Syntax),
+                Some(b']') => {
+                    if last == Last::Comma {
+                        return Err(CompileError::Syntax);
+                    }
+                    self.bump_array_byte();
+                    // After `]` only an existing statement separator or the
+                    // end of the line may follow (ADR #618).
+                    match self
+                        .lines
+                        .get(self.line)
+                        .and_then(|line| line.as_bytes().get(self.offset))
+                    {
+                        None | Some(b' ' | b'\t' | b';') => return Ok(elements),
+                        Some(_) => return Err(CompileError::Syntax),
+                    }
+                }
+                Some(b',') => {
+                    if last != Last::Element {
+                        return Err(CompileError::Syntax);
+                    }
+                    self.bump_array_byte();
+                    last = Last::Comma;
+                }
+                Some(b'"') => {
+                    if last == Last::Element && !separated {
+                        return Err(CompileError::Syntax);
+                    }
+                    self.read_array_string(&mut elements)?;
+                    last = Last::Element;
+                }
+                Some(byte) if byte.is_ascii_digit() => {
+                    if last == Last::Element && !separated {
+                        return Err(CompileError::Syntax);
+                    }
+                    self.read_array_number(&mut elements)?;
+                    last = Last::Element;
+                }
+                Some(_) => return Err(CompileError::Syntax),
+            }
+        }
+    }
+
+    fn read_array_string(&mut self, elements: &mut Vec<u8>) -> Result<(), CompileError> {
+        self.bump_array_byte();
+        loop {
+            match self.array_byte() {
+                Some(b'"') => {
+                    self.bump_array_byte();
+                    return Ok(());
+                }
+                Some(byte) if (0x20..=0x7e).contains(&byte) => {
+                    elements.push(byte);
+                    if elements.len() > MAX_STATIC_DATA_LEN {
+                        return Err(CompileError::Syntax);
+                    }
+                    self.bump_array_byte();
+                }
+                _ => return Err(CompileError::Syntax),
+            }
+        }
+    }
+
+    fn read_array_number(&mut self, elements: &mut Vec<u8>) -> Result<(), CompileError> {
+        let mut value: u32 = 0;
+        while let Some(byte) = self.array_byte() {
+            if !byte.is_ascii_digit() {
+                break;
+            }
+            value = value * 10 + u32::from(byte - b'0');
+            if value > 255 {
+                return Err(CompileError::Syntax);
+            }
+            self.bump_array_byte();
+        }
+        elements.push(value as u8);
+        if elements.len() > MAX_STATIC_DATA_LEN {
+            return Err(CompileError::Syntax);
+        }
+        Ok(())
     }
 }
+
+/// Logical length limit of one static byte body (ADR #618). Target arena
+/// capacity is a separate, target-owned resource limit.
+const MAX_STATIC_DATA_LEN: usize = 32768;
 
 fn next_source_token<'a>(
     line: &'a str,
@@ -303,10 +469,15 @@ fn compile_source_statement(
     token: Token<'_>,
     reader: &mut SourceReader<'_>,
     machine: &Machine,
-    constants: &Constants,
+    names: &NameTable,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
-    let (target, rhs) = split_statement(token.text)?;
+    // A byte-array declaration is a top-level form only; anywhere a
+    // statement is expected it is a compile error (ADR #618).
+    let Token::Text(text) = token else {
+        return Err(CompileError::Syntax);
+    };
+    let (target, rhs) = split_statement(text)?;
     if target == "*" {
         if rhs.is_empty() || rhs == "()" {
             return Err(CompileError::Syntax);
@@ -319,11 +490,11 @@ fn compile_source_statement(
         staged
             .complete_target(loop_target)
             .map_err(|_| CompileError::Builder)?;
-        compile_resolved_rhs(rhs, machine, constants, &mut staged)?;
+        compile_rhs(rhs, machine, names, &mut staged)?;
         staged
             .emit_jump_if_zero(end_target)
             .map_err(|_| CompileError::Builder)?;
-        compile_required_block(reader, machine, constants, &mut staged)?;
+        compile_required_block(reader, machine, names, &mut staged)?;
         staged
             .emit_jump(loop_target)
             .map_err(|_| CompileError::Builder)?;
@@ -336,13 +507,13 @@ fn compile_source_statement(
     if target == "%" {
         // The complete form belongs to the surrounding code and label owner.
         let mut staged = builder.clone();
-        compile_resolved_rhs(rhs, machine, constants, &mut staged)?;
+        compile_rhs(rhs, machine, names, &mut staged)?;
         let false_target = staged.new_target();
         staged
             .emit_jump_if_zero(false_target)
             .map_err(|_| CompileError::Builder)?;
-        compile_required_block(reader, machine, constants, &mut staged)?;
-        if reader.peek()?.is_some_and(|next| next.text == "[") {
+        compile_required_block(reader, machine, names, &mut staged)?;
+        if reader.peek()?.is_some_and(|next| next.text() == "[") {
             let end_target = staged.new_target();
             staged
                 .emit_jump(end_target)
@@ -350,7 +521,7 @@ fn compile_source_statement(
             staged
                 .complete_target(false_target)
                 .map_err(|_| CompileError::Builder)?;
-            compile_required_block(reader, machine, constants, &mut staged)?;
+            compile_required_block(reader, machine, names, &mut staged)?;
             staged
                 .complete_target(end_target)
                 .map_err(|_| CompileError::Builder)?;
@@ -362,32 +533,32 @@ fn compile_source_statement(
         *builder = staged;
         return Ok(());
     }
-    compile_statement(token.text, machine, constants, builder)
+    compile_statement(text, machine, names, builder)
 }
 
 fn compile_required_block(
     reader: &mut SourceReader<'_>,
     machine: &Machine,
-    constants: &Constants,
+    names: &NameTable,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
-    if reader.next()?.ok_or(CompileError::Syntax)?.text != "[" {
+    if reader.next()?.ok_or(CompileError::Syntax)?.text() != "[" {
         return Err(CompileError::Syntax);
     }
-    compile_block(reader, machine, constants, builder)
+    compile_block(reader, machine, names, builder)
 }
 
 fn compile_block(
     reader: &mut SourceReader<'_>,
     machine: &Machine,
-    constants: &Constants,
+    names: &NameTable,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     while let Some(token) = reader.next()? {
-        if token.text == "]" {
+        if token.text() == "]" {
             return Ok(());
         }
-        compile_source_statement(token, reader, machine, constants, builder)?;
+        compile_source_statement(token, reader, machine, names, builder)?;
     }
     Err(CompileError::Syntax)
 }
@@ -473,7 +644,7 @@ fn scan_line(line: &str) -> Result<Vec<&str>, CompileError> {
 fn compile_statement(
     statement: &str,
     machine: &Machine,
-    constants: &Constants,
+    names: &NameTable,
     builder: &mut CodeBuilder,
 ) -> Result<(), CompileError> {
     let (target, rhs) = split_statement(statement)?;
@@ -491,7 +662,9 @@ fn compile_statement(
             let label: i32 = if rhs.bytes().all(|byte| byte.is_ascii_digit()) && !rhs.is_empty() {
                 rhs.parse().map_err(|_| CompileError::Syntax)?
             } else {
-                i32::from(constants.resolve(rhs.strip_prefix('.').ok_or(CompileError::Syntax)?)?)
+                i32::from(
+                    names.resolve_integer(rhs.strip_prefix('.').ok_or(CompileError::Syntax)?)?,
+                )
             };
             let result = if target == "^" {
                 builder.define_numeric_label(label)
@@ -528,10 +701,10 @@ fn compile_statement(
                 .map_err(|_| CompileError::Builder)?;
             builder.emit_call(output);
         }
-        "~" => compile_resolved_rhs(rhs, machine, constants, builder)?,
+        "~" => compile_rhs(rhs, machine, names, builder)?,
         _ => {
             if rhs != "()" {
-                compile_resolved_rhs(rhs, machine, constants, builder)?;
+                compile_rhs(rhs, machine, names, builder)?;
             }
             let id = machine
                 .resolve_write(target)
@@ -614,17 +787,6 @@ mod tests {
     }
 
     #[test]
-    fn grouping_depth_ignores_quoted_parentheses() {
-        assert_eq!(grouping_depth("'('"), 0);
-        assert_eq!(grouping_depth("')'"), 0);
-        assert_eq!(grouping_depth("('(')"), 0);
-        assert_eq!(grouping_depth("('(')+"), 0);
-        assert_eq!(grouping_depth("('('+"), 1);
-        assert_eq!(grouping_depth("(('(')"), 1);
-        assert_eq!(grouping_depth(""), 0);
-    }
-
-    #[test]
     fn compile_failure_never_produces_completed_body() {
         let mut machine = Machine::new();
         assert_eq!(
@@ -652,7 +814,7 @@ mod tests {
                 token,
                 &mut reader,
                 &machine,
-                &Constants::default(),
+                &NameTable::default(),
                 &mut builder
             ),
             Err(CompileError::Syntax)
@@ -701,7 +863,7 @@ mod tests {
                     token,
                     &mut reader,
                     &machine,
-                    &Constants::default(),
+                    &NameTable::default(),
                     &mut builder
                 )
                 .is_err(),
@@ -751,7 +913,7 @@ mod tests {
                     token,
                     &mut reader,
                     &machine,
-                    &Constants::default(),
+                    &NameTable::default(),
                     &mut builder
                 )
                 .is_err(),
@@ -786,10 +948,10 @@ mod tests {
             token,
             &mut reader,
             &machine,
-            &Constants::default(),
+            &NameTable::default(),
             &mut builder,
         )
         .unwrap();
-        assert_eq!(reader.peek().unwrap().unwrap().text, "B=2");
+        assert_eq!(reader.peek().unwrap().unwrap().text(), "B=2");
     }
 }
