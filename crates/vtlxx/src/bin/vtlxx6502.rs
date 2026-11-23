@@ -899,7 +899,7 @@ mod tests {
             .unwrap()
         };
         assert!(run("unused.vtl", b"A=1").status.success());
-        assert_eq!(run("used.vtl", b"A=' ?=A").status.code(), Some(5));
+        assert_eq!(run("used.vtl", b"A=! ?=A").status.code(), Some(5));
         assert_eq!(run("compile-error.vtl", b"A=").status.code(), Some(130));
     }
 

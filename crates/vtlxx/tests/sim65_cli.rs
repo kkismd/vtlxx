@@ -174,7 +174,7 @@ fn cycle_limit_option_is_passed_to_sim65() {
 fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
     let temp = TestDir::new();
     let source = temp.0.join("random.vtl");
-    fs::write(&source, b"A=' B=' C=' D=' E=' F=' ?=A ?=B ?=C ?=D ?=E ?=F").unwrap();
+    fs::write(&source, b"A=! B=! C=! D=! E=! F=! ?=A ?=B ?=C ?=D ?=E ?=F").unwrap();
     let cases = [
         (0, "270153093029703269729846343"),
         (1, "16576123042990058932324727857"),
@@ -214,10 +214,10 @@ fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn cli_without_seed_uses_os_entropy_for_apostrophe() {
+fn cli_without_seed_uses_os_entropy_for_bang() {
     let temp = TestDir::new();
     let source = temp.0.join("os-entropy.vtl");
-    fs::write(&source, b"A=' ?=A").unwrap();
+    fs::write(&source, b"A=! ?=A").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
         .arg(&source)
         .output()
