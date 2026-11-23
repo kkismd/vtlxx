@@ -113,6 +113,7 @@ fn cli(temp: &TestDir, name: &str, source: &[u8]) -> Output {
     let path = temp.0.join(format!("{name}.vtl"));
     fs::write(&path, source).unwrap();
     Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .arg(path)
         .args(["--cycle-limit", CYCLE_LIMIT])
         .output()

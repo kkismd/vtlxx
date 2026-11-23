@@ -114,15 +114,15 @@ cargo test -p vtlxx --test sim65_frontend -- --ignored
 
 `target/sim65_cli.s` は CLI 専用entryで、`_main` から `fe_compile_run` を一度呼ぶ。compile成功時は既にfrontendが実行したruntimeの後で `halt(0)` し、compile error時は `fe_compile_status` を `$80` と OR したtarget statusで終了する。test probe用entryとは分離し、追加serial readやsentinel出力を行わない。
 
-crate root の `vtlxx6502` host binary は source を raw bytes で読み、長さを u16（最大65,535 bytes）で検証し、little-endian length header を付ける。`ca65` / `ld65` と `sim6502.lib` が必要で、実行ごとに選択した engine 用 adapter を他の target code と別途組み立てて link する。一時 directory は各実行で作成し、終了時に削除する。既定は標準 `sim65`、`--engine sim65` も同じ経路である。Linux では `--engine mos6502` で VTLXX 専用 host を選べる。新 host は Linux 以外では未対応で、汎用 sim6502 emulator ではなく、この CLI が必要とする service のみを実装する。両 engine の image を共用しない。
+crate root の `vtlxx6502` host binary は source を raw bytes で読み、長さを u16（最大65,535 bytes）で検証し、little-endian length header を付ける。`ca65` / `ld65` と `sim6502.lib` が必要で、実行ごとに選択した engine 用 adapter を他の target code と別途組み立てて link する。一時 directory は各実行で作成し、終了時に削除する。既定は `mos6502` コアを使用する VTLXX 専用 host で、`--engine mos6502` も同じ経路である。正式なホスト動作保証は Linux であり、Linux 以外の暗黙・明示 mos6502 要求は source 読込前に拒否し、sim65 へ fallback しない。host は汎用 sim6502 emulator ではなく、この CLI が必要とする service のみを実装する。標準 sim65 は `--engine sim65` で明示できるが、Linux 以外の動作保証はない。両 engine の image を共用しない。
 
-repository root からの例（`ca65`、`ld65`、`sim65` を PATH に用意）:
+repository root からの例（`ca65`、`ld65` とリンク用 `sim6502.lib` が必要。`sim65` 実行ファイルは明示 sim65 の場合のみ必要）:
 
 ```sh
 printf 'A=$ ?=A' > /tmp/input.vtl
 printf 'A' > /tmp/input.bin
 cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --runtime-input /tmp/input.bin
-cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --engine mos6502 --runtime-input /tmp/input.bin --seed 123 --cycle-limit 4000000
+cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --engine sim65 --runtime-input /tmp/input.bin --seed 123 --cycle-limit 4000000
 ```
 
 どちらも `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `'` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれず、両 engine の cycle 値の完全一致は保証しない。
@@ -130,14 +130,14 @@ cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --engine mos6502 --runtime-
 対話では runtime 入力と出力を標準入出力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
 
 ```sh
-cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --engine mos6502 --interactive
+cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --interactive
 ```
 
 逐字入力が必要な場合は Linux の TTY 上で raw mode を明示する。次の例では Try がその時点の入力を一度だけ読み、その後 Wait が次の文字を待つ。
 
 ```sh
 printf '?=` ?=$' > /tmp/try.vtl
-cargo run -p vtlxx --bin vtlxx6502 -- /tmp/try.vtl --engine mos6502 --interactive --raw-tty
+cargo run -p vtlxx --bin vtlxx6502 -- /tmp/try.vtl --interactive --raw-tty
 ```
 
 `--raw-tty` は mos6502 の `--interactive` と TTY stdin が必要で、echo を無効にする。正常終了・エラーおよび SIGINT / SIGTERM / SIGHUP / SIGQUIT では端末設定を復元する。SIGTSTP では停止前に復元し、SIGCONT 後に再適用する。捕捉できない SIGKILL / SIGSTOP ではこの復元を保証できない。

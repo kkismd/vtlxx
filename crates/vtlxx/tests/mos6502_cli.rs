@@ -65,12 +65,14 @@ fn argument_errors_precede_source_read() {
     assert!(help.status.success());
     let text = String::from_utf8_lossy(&help.stdout);
     assert!(text.contains("--engine") && text.contains("--raw-tty"));
+    assert!(text.contains("mos6502") && text.contains("Linux"));
     for args in [
         vec!["missing.vtl", "--engine"],
         vec!["missing.vtl", "--engine", "bad"],
         vec!["missing.vtl", "--engine", "sim65", "--engine", "mos6502"],
         vec!["missing.vtl", "--raw-tty"],
         vec!["missing.vtl", "--raw-tty", "--raw-tty"],
+        vec!["missing.vtl", "--interactive", "--raw-tty"],
         vec![
             "missing.vtl",
             "--engine",
@@ -199,9 +201,29 @@ fn product_engines_match_on_shared_programs() {
             }
             outputs.push(output);
         }
-        assert_eq!(outputs[0].stdout, outputs[1].stdout);
-        assert_eq!(outputs[0].stderr, outputs[1].stderr);
+        assert_eq!(outputs[0].stdout, outputs[2].stdout);
+        assert_eq!(outputs[0].stderr, outputs[2].stderr);
     }
+}
+
+#[test]
+#[ignore = "requires ca65 and ld65; run with --ignored"]
+fn default_and_explicit_mos_match_on_cycle_limit() {
+    let temp = TestDir::new();
+    let source = temp.source(b".LOOP:=1 ^=.LOOP #=.LOOP");
+    let mut outputs = Vec::new();
+    for engine in [None, Some("mos6502")] {
+        let mut command = cli();
+        command.arg(&source).args(["--cycle-limit", "100000"]);
+        if let Some(engine) = engine {
+            command.args(["--engine", engine]);
+        }
+        outputs.push(command.output().unwrap());
+    }
+    assert_eq!(outputs[0].status.code(), Some(126));
+    assert_eq!(outputs[0].status.code(), outputs[1].status.code());
+    assert_eq!(outputs[0].stdout, outputs[1].stdout);
+    assert_eq!(outputs[0].stderr, outputs[1].stderr);
 }
 
 #[test]
@@ -212,13 +234,7 @@ fn busy_try_obeys_cycle_limit() {
     let mut child = TimedChild(
         cli()
             .arg(source)
-            .args([
-                "--engine",
-                "mos6502",
-                "--interactive",
-                "--cycle-limit",
-                "2000000",
-            ])
+            .args(["--interactive", "--cycle-limit", "2000000"])
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -254,7 +270,7 @@ fn interactive_try_then_wait_streams_before_input() {
     let mut child = TimedChild(
         cli()
             .arg(source)
-            .args(["--engine", "mos6502", "--interactive"])
+            .arg("--interactive")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())

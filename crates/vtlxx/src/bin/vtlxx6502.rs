@@ -21,13 +21,13 @@ const MAX_SOURCE_LEN: usize = u16::MAX as usize;
 static NEXT_TEMP_ID: AtomicU64 = AtomicU64::new(0);
 
 const USAGE: &str = "Usage: vtlxx6502 <source.vtl> [--runtime-input <path> | --interactive] [--cycle-limit <cycles>] [--seed <signed16>] [--engine sim65|mos6502] [--raw-tty]\n\
-Compile VTLXX source with the NMOS 6502 target and run it with sim65.\n\
+Compile VTLXX source with the NMOS 6502 target and run it on Linux.\n\
 Options:\n\
-  --engine <engine>       Select sim65 (default) or mos6502\n\
+  --engine <engine>       Select mos6502 (default, Linux only) or sim65\n\
   --raw-tty               Enable raw terminal input (mos6502 interactive only)\n\
   --runtime-input <path>  Supply raw runtime input bytes\n\
   --interactive           Connect runtime input and output to standard I/O\n\
-  --cycle-limit <cycles>  Set sim65 cycle limit (default: 4000000; unlimited in interactive mode)\n\
+  --cycle-limit <cycles>  Set guest cycle limit (default: 4000000; unlimited in interactive mode)\n\
   --seed <signed16>       Set the initial PRNG seed (default: OS entropy)\n\
   -h, --help              Show this help\n";
 
@@ -183,11 +183,12 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
     if interactive && runtime_input.is_some() {
         return Err("--interactive and --runtime-input are mutually exclusive".into());
     }
-    if raw_tty && (engine != Some(Engine::Mos6502) || !interactive) {
-        return Err("--raw-tty requires --engine mos6502 --interactive".into());
+    let engine = engine.unwrap_or(Engine::Mos6502);
+    if raw_tty && (engine != Engine::Mos6502 || !interactive) {
+        return Err("--raw-tty requires the mos6502 engine and --interactive".into());
     }
     #[cfg(not(target_os = "linux"))]
-    if engine == Some(Engine::Mos6502) {
+    if engine == Engine::Mos6502 {
         return Err("mos6502 engine is supported only on Linux".into());
     }
     #[cfg(target_os = "linux")]
@@ -204,7 +205,7 @@ fn parse_arguments(args: impl IntoIterator<Item = OsString>) -> Result<ParsedArg
         cycle_limit,
         seed,
         interactive,
-        engine: engine.unwrap_or(Engine::Sim65),
+        engine,
         raw_tty,
     }))
 }
@@ -830,6 +831,7 @@ mod tests {
         match parse_arguments(["source.vtl".into()]).unwrap() {
             ParsedArguments::Run(arguments) => {
                 assert_eq!(arguments.cycle_limit, Some(DEFAULT_CYCLE_LIMIT));
+                assert_eq!(arguments.engine, Engine::Mos6502);
             }
             ParsedArguments::Help => panic!("expected run arguments"),
         }
@@ -857,6 +859,19 @@ mod tests {
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    #[cfg(not(target_os = "linux"))]
+    fn mos_engines_are_rejected_before_source_access() {
+        for args in [
+            vec!["missing.vtl"],
+            vec!["missing.vtl", "--engine", "mos6502"],
+        ] {
+            let error = parse_arguments(args.into_iter().map(OsString::from)).unwrap_err();
+            assert!(error.contains("supported only on Linux"));
+        }
+        assert!(parse_arguments(["missing.vtl", "--engine", "sim65"].map(OsString::from)).is_ok());
     }
 
     #[test]

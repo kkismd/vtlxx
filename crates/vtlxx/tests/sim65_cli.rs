@@ -38,6 +38,7 @@ impl Drop for TestDir {
 
 fn run_cli(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .args(args)
         .output()
         .unwrap()
@@ -50,6 +51,7 @@ fn run_program_with_input(temp: &TestDir, name: &str, source: &[u8], input: &[u8
     fs::write(&input_path, input).unwrap();
 
     Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .arg(&source_path)
         .arg("--runtime-input")
         .arg(&input_path)
@@ -139,6 +141,7 @@ fn compiles_native_source_and_reads_binary_runtime_input() {
     fs::write(&input, [0, 0xff, 65]).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .arg(&source)
         .arg("--runtime-input")
         .arg(&input)
@@ -160,6 +163,7 @@ fn cycle_limit_option_is_passed_to_sim65() {
     fs::write(&source, b"A=1").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .arg(&source)
         .args(["--cycle-limit", "1"])
         .output()
@@ -185,6 +189,7 @@ fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
     ];
     for (seed, expected) in cases {
         let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .args(["--engine", "sim65"])
             .arg(&source)
             .args(["--seed", &seed.to_string(), "--cycle-limit", "200000000"])
             .output()
@@ -203,6 +208,7 @@ fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
         assert!(rust.status.success(), "seed={seed}: {rust:?}");
         assert_eq!(output.stdout, rust.stdout, "Rust/sim65 seed={seed}");
         let repeated = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .args(["--engine", "sim65"])
             .arg(&source)
             .args(["--seed", &seed.to_string(), "--cycle-limit", "200000000"])
             .output()
@@ -219,6 +225,7 @@ fn cli_without_seed_uses_os_entropy_for_apostrophe() {
     let source = temp.0.join("os-entropy.vtl");
     fs::write(&source, b"A=' ?=A").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .arg(&source)
         .output()
         .unwrap();
@@ -335,6 +342,7 @@ fn constant_table_accepts_128_entries_and_rejects_129() {
             .collect();
         fs::write(&path, format!("{definitions}{references}")).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .args(["--engine", "sim65"])
             .arg(&path)
             .args(["--cycle-limit", "200000000"])
             .output()
@@ -345,6 +353,7 @@ fn constant_table_accepts_128_entries_and_rejects_129() {
     }
     fs::write(&path, format!("?=42\n{definitions}.EXTRA:=1\n")).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .arg(&path)
         .args(["--cycle-limit", "200000000"])
         .output()
@@ -476,6 +485,7 @@ fn oversized_source_is_rejected_before_toolchain_start() {
     let source = temp.0.join("oversized.vtl");
     fs::write(&source, vec![b' '; u16::MAX as usize + 1]).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .arg(&source)
         .output()
         .unwrap();
@@ -656,6 +666,7 @@ fn interactive_prompts_are_visible_before_each_input() {
     fs::write(&source, b"$=62 $=32 A=$ ?=A $=62 $=32 B=$ ?=B").unwrap();
     let mut child = TimedChild(
         Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .args(["--engine", "sim65"])
             .arg(&source)
             .arg("--interactive")
             .stdin(Stdio::piped())
@@ -701,6 +712,7 @@ fn interactive_literal_prompt_precedes_input() {
     .unwrap();
     let mut child = TimedChild(
         Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .args(["--engine", "sim65"])
             .arg(&source)
             .arg("--interactive")
             .stdin(Stdio::piped())
@@ -744,6 +756,7 @@ fn interactive_input_bytes_eof_and_output_match_batch() {
     fs::write(&source, source_bytes).unwrap();
     let mut child = TimedChild(
         Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .args(["--engine", "sim65"])
             .arg(&source)
             .arg("--interactive")
             .stdin(Stdio::piped())
@@ -774,6 +787,7 @@ fn interactive_early_exit_compile_failure_and_cycle_limit() {
     fs::write(&source, b"?=42").unwrap();
     let mut child = TimedChild(
         Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .args(["--engine", "sim65"])
             .arg(&source)
             .arg("--interactive")
             .stdin(Stdio::piped())
@@ -795,6 +809,7 @@ fn interactive_early_exit_compile_failure_and_cycle_limit() {
     assert_eq!(output, b"42");
 
     let limited = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .arg(&source)
         .args(["--interactive", "--cycle-limit", "1"])
         .stdin(Stdio::null())
@@ -806,6 +821,7 @@ fn interactive_early_exit_compile_failure_and_cycle_limit() {
 
     fs::write(&source, b"A=").unwrap();
     let invalid = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .args(["--engine", "sim65"])
         .arg(&source)
         .arg("--interactive")
         .stdin(Stdio::null())
@@ -853,6 +869,7 @@ fn interactive_cycle_limit_arguments_are_forwarded_only_when_requested() {
         (vec![], Some("4000000")),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .args(["--engine", "sim65"])
             .arg(&source)
             .args(extra)
             .env("PATH", &path)

@@ -242,6 +242,9 @@ fn run(
 ) -> Result<Output, String> {
     let mut command = Command::new(binary);
     command.arg(source);
+    if target {
+        command.args(["--engine", "sim65"]);
+    }
     if source
         .file_name()
         .is_some_and(|name| name == "micro_trek.vtl")
