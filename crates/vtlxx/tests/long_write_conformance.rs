@@ -72,6 +72,7 @@ fn sim65_shared_sources_match_expected_bytes_and_failure_profile() {
         let file = SourceFile::new(source);
         Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
             .arg(&file.0)
+            .args(["--engine", "sim65"])
             .args(["--cycle-limit", "200000000"])
             .output()
             .unwrap()

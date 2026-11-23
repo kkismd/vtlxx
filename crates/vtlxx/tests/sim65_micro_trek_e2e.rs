@@ -51,6 +51,7 @@ fn run(target: bool, seed: i16, input: &[u8]) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if target {
+        command.args(["--engine", "sim65"]);
         fs::write(&path, input).unwrap();
         command
             .arg("--runtime-input")
@@ -159,6 +160,7 @@ fn initial_eof_matches_after_startup() {
 fn interactive_prompt_is_visible_before_input() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"));
     command.process_group(0);
+    command.args(["--engine", "sim65"]);
     let mut child = Guard(
         command
             .arg(SOURCE)

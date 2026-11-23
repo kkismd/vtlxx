@@ -56,16 +56,21 @@ impl Terminal {
         self.spawn_mode(source, true)
     }
     fn spawn_mode(&self, source: &str, raw: bool) -> Child {
+        self.spawn_with_engine(source, raw, true)
+    }
+    fn spawn_with_engine(&self, source: &str, raw: bool, explicit_engine: bool) -> Child {
         fs::write(&self.path, source).unwrap();
         let fd = unsafe { libc::dup(self.slave.as_raw_fd()) };
         assert!(fd >= 0);
-        let child = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-            .arg(&self.path)
-            .args(if raw {
-                vec!["--engine", "mos6502", "--interactive", "--raw-tty"]
-            } else {
-                vec!["--engine", "mos6502", "--interactive"]
-            })
+        let mut command = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"));
+        command.arg(&self.path).arg("--interactive");
+        if explicit_engine {
+            command.args(["--engine", "mos6502"]);
+        }
+        if raw {
+            command.arg("--raw-tty");
+        }
+        let child = command
             .stdin(unsafe { Stdio::from(OwnedFd::from_raw_fd(fd)) })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -74,6 +79,23 @@ impl Terminal {
         // The child still needs to read the source file.
         child
     }
+}
+#[test]
+#[ignore = "requires ca65 and ld65 and a Linux PTY"]
+fn default_engine_raw_terminal_restores_after_input() {
+    let mut tty = Terminal::new();
+    let mut child = tty.spawn_with_engine("?=\">\" A=$ ?=A", true, false);
+    let output = read_prompt(&mut child);
+    assert_eq!(
+        attributes(tty.slave.as_raw_fd()).c_lflag & (libc::ICANON | libc::ECHO),
+        0
+    );
+    tty.master.write_all(&[0, 65]).unwrap();
+    for byte in b"65" {
+        assert_eq!(output.recv_timeout(Duration::from_secs(20)).unwrap(), *byte);
+    }
+    assert!(wait(&mut child).success());
+    tty.restored();
 }
 impl Drop for Terminal {
     fn drop(&mut self) {
