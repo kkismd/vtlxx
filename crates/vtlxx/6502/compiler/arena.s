@@ -177,6 +177,14 @@ cc_patch:
     bcc @write
     bne @bad
 @write:
+    ; Only unresolved operands may be patched, never arbitrary data bytes.
+    lda cc_ptr
+    ldx cc_ptr+1
+    jsr cc_patch_bit_address
+    ldy #0
+    lda (cc_bit_index),y
+    and cc_bit_mask
+    beq @bad
     ldy #0
     lda cc_arg
     sta (cc_ptr),y

@@ -3,6 +3,7 @@
 
 .export rt_init, rt_push, rt_pop_condition, rt_load_reg, rt_store_reg
 .export rt_load_storage, rt_store_storage
+.export rt_read_static
 .export rt_need_one, rt_need_two, rt_commit_binary
 .export rt_underflow, rt_overflow, rt_div_zero, rt_rem_zero, rt_entropy_unavailable, rt_input_failure
 .export rt_rng_state
@@ -209,6 +210,47 @@ rt_store_storage:
     dec rt_depth
     rts
 
+; Target-private read: rt_lhs is the absolute data start, rt_rhs its length.
+; Replace the signed index on top with an unsigned byte only after validation.
+rt_read_static:
+    jsr rt_need_one
+    lda rt_depth
+    sec
+    sbc #1
+    asl a
+    tay
+    lda rt_stack+1,y
+    bmi @bounds
+    cmp rt_rhs+1
+    bcc @valid
+    bne @bounds
+    lda rt_stack,y
+    cmp rt_rhs
+    bcs @bounds
+@valid:
+    clc
+    lda rt_lhs
+    adc rt_stack,y
+    sta rt_result
+    lda rt_lhs+1
+    adc rt_stack+1,y
+    sta rt_result+1
+    ldy #0
+    lda (rt_result),y
+    pha
+    lda rt_depth
+    sec
+    sbc #1
+    asl a
+    tay
+    pla
+    sta rt_stack,y
+    lda #0
+    sta rt_stack+1,y
+    rts
+@bounds:
+    jmp rt_static_bounds
+
 rt_underflow:
 .ifdef RT_TEST_PROBE
     jsr rt_test_probe
@@ -244,4 +286,10 @@ rt_input_failure:
     jsr rt_test_probe
 .endif
     lda #6
+    jmp halt
+rt_static_bounds:
+.ifdef RT_TEST_PROBE
+    jsr rt_test_probe
+.endif
+    lda #7
     jmp halt
