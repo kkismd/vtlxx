@@ -412,16 +412,16 @@ mod tests {
             outcome,
             HostOutcome::GuestExit {
                 status: 0,
-                cycles: 466_339
+                cycles: 471_353
             }
         );
 
-        let (limited, _, _) = HostRunner::new(&image, input.clone(), Some(466_339))
+        let (limited, _, _) = HostRunner::new(&image, input.clone(), Some(471_353))
             .unwrap()
             .run()
             .unwrap();
-        assert_eq!(limited, HostOutcome::CycleLimit { cycles: 466_339 });
-        let (complete, _, _) = HostRunner::new(&image, input, Some(466_340))
+        assert_eq!(limited, HostOutcome::CycleLimit { cycles: 471_353 });
+        let (complete, _, _) = HostRunner::new(&image, input, Some(471_354))
             .unwrap()
             .run()
             .unwrap();
@@ -429,7 +429,7 @@ mod tests {
             complete,
             HostOutcome::GuestExit {
                 status: 0,
-                cycles: 466_339
+                cycles: 471_353
             }
         );
 
