@@ -282,9 +282,9 @@ fn entropy_primary_read_returns_the_xorshift16_sequence() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn each_entropy_evaluation_calls_the_adapter_once() {
-    let source = [b'?', b'=', b'!', b' ', b'?', b'=', b'!'];
+    let source = b"?=! ?=!";
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
-    input.extend_from_slice(&source);
+    input.extend_from_slice(source);
     let output = build_and_run_custom_configured(
         &input,
         "tests/fixtures/sim65/frontend_basic.s",
