@@ -730,41 +730,48 @@ mod tests {
 
     #[test]
     fn argument_errors_are_classified() {
+        let parse = |args: Vec<OsString>| {
+            parse_arguments(
+                [OsString::from("--engine"), OsString::from("sim65")]
+                    .into_iter()
+                    .chain(args),
+            )
+        };
         assert!(
-            parse_arguments(Vec::<OsString>::new())
+            parse(Vec::<OsString>::new())
                 .unwrap_err()
                 .contains("source file")
         );
         assert!(
-            parse_arguments(["source.vtl".into(), "--wat".into()])
+            parse(vec!["source.vtl".into(), "--wat".into()])
                 .unwrap_err()
                 .contains("unknown option")
         );
         assert!(
-            parse_arguments(["one.vtl".into(), "two.vtl".into()])
+            parse(vec!["one.vtl".into(), "two.vtl".into()])
                 .unwrap_err()
                 .contains("exactly one")
         );
         assert!(
-            parse_arguments(["source.vtl".into(), "--runtime-input".into()])
+            parse(vec!["source.vtl".into(), "--runtime-input".into()])
                 .unwrap_err()
                 .contains("requires a path")
         );
         for value in ["", "+", "1x", "32768", "-32769"] {
             assert!(
-                parse_arguments(["source.vtl".into(), "--seed".into(), value.into()]).is_err(),
+                parse(vec!["source.vtl".into(), "--seed".into(), value.into()]).is_err(),
                 "accepted invalid seed {value:?}"
             );
         }
         for seed in ["0", "1", "+1", "-1", "-32768", "32767"] {
             assert!(matches!(
-                parse_arguments(["source.vtl".into(), "--seed".into(), seed.into()]),
+                parse(vec!["source.vtl".into(), "--seed".into(), seed.into()]),
                 Ok(ParsedArguments::Run(Arguments { seed: Some(_), .. }))
             ));
         }
-        assert!(parse_arguments(["source.vtl".into(), "--seed".into()]).is_err());
+        assert!(parse(vec!["source.vtl".into(), "--seed".into()]).is_err());
         assert!(
-            parse_arguments([
+            parse(vec![
                 "source.vtl".into(),
                 "--seed".into(),
                 "1".into(),
@@ -773,7 +780,7 @@ mod tests {
             ])
             .is_err()
         );
-        match parse_arguments([
+        match parse(vec![
             "source.vtl".into(),
             "--seed".into(),
             "-32768".into(),
@@ -792,18 +799,22 @@ mod tests {
         }
         for value in ["0", "-1", "", "12x", "4294967296"] {
             assert!(
-                parse_arguments(["source.vtl".into(), "--cycle-limit".into(), value.into()])
-                    .is_err(),
+                parse(vec![
+                    "source.vtl".into(),
+                    "--cycle-limit".into(),
+                    value.into()
+                ])
+                .is_err(),
                 "accepted invalid cycle limit {value:?}"
             );
         }
         assert!(
-            parse_arguments(["source.vtl".into(), "--cycle-limit".into()])
+            parse(vec!["source.vtl".into(), "--cycle-limit".into()])
                 .unwrap_err()
                 .contains("requires")
         );
         assert!(
-            parse_arguments([
+            parse(vec![
                 "source.vtl".into(),
                 "--cycle-limit".into(),
                 "100".into(),
@@ -813,7 +824,7 @@ mod tests {
             .unwrap_err()
             .contains("only once")
         );
-        match parse_arguments([
+        match parse(vec![
             "source.vtl".into(),
             "--cycle-limit".into(),
             "256000000".into(),
@@ -828,14 +839,14 @@ mod tests {
             }
             ParsedArguments::Help => panic!("expected run arguments"),
         }
-        match parse_arguments(["source.vtl".into()]).unwrap() {
+        match parse(vec!["source.vtl".into()]).unwrap() {
             ParsedArguments::Run(arguments) => {
                 assert_eq!(arguments.cycle_limit, Some(DEFAULT_CYCLE_LIMIT));
-                assert_eq!(arguments.engine, Engine::Mos6502);
+                assert_eq!(arguments.engine, Engine::Sim65);
             }
             ParsedArguments::Help => panic!("expected run arguments"),
         }
-        match parse_arguments(["source.vtl".into(), "--interactive".into()]).unwrap() {
+        match parse(vec!["source.vtl".into(), "--interactive".into()]).unwrap() {
             ParsedArguments::Run(arguments) => {
                 assert!(arguments.interactive);
                 assert_eq!(arguments.cycle_limit, None);
@@ -843,7 +854,7 @@ mod tests {
             ParsedArguments::Help => panic!("expected run arguments"),
         }
         assert!(
-            parse_arguments([
+            parse(vec![
                 "source.vtl".into(),
                 "--interactive".into(),
                 "--runtime-input".into(),
@@ -852,13 +863,22 @@ mod tests {
             .is_err()
         );
         assert!(
-            parse_arguments([
+            parse(vec![
                 "source.vtl".into(),
                 "--interactive".into(),
                 "--interactive".into()
             ])
             .is_err()
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn default_engine_is_mos6502() {
+        match parse_arguments(["source.vtl".into()]).unwrap() {
+            ParsedArguments::Run(arguments) => assert_eq!(arguments.engine, Engine::Mos6502),
+            ParsedArguments::Help => panic!("expected run arguments"),
+        }
     }
 
     #[test]
