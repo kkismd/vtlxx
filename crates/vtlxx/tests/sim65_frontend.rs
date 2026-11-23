@@ -240,7 +240,7 @@ fn entropy_primary_read_returns_the_xorshift16_sequence() {
         (i16::MAX, [24479, 18391, 11649, 6775, 18023, 26781]),
         (-21279, [27015, 30930, 2970, 32697, 2984, 6343]),
     ] {
-        let source = (0..6).map(|_| "?=!").collect::<Vec<_>>().join(" ");
+        let source = (0..6).map(|_| "?='").collect::<Vec<_>>().join(" ");
         let mut input = (source.len() as u16).to_le_bytes().to_vec();
         input.extend_from_slice(source.as_bytes());
         let result = build_and_run_custom(
@@ -254,7 +254,7 @@ fn entropy_primary_read_returns_the_xorshift16_sequence() {
         assert_eq!(result.stdout, expected.as_bytes(), "{raw}: {result:?}");
     }
 
-    let source = b"@=192,! ?=@(192)";
+    let source = b"@=192,' ?=@(192)";
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(source);
     let result = build_and_run_custom(
@@ -266,7 +266,7 @@ fn entropy_primary_read_returns_the_xorshift16_sequence() {
     assert_eq!(result.status.code(), Some(0), "{result:?}");
     assert_eq!(result.stdout, b"16576", "{result:?}");
 
-    let source = b"?=!+!";
+    let source = b"?='+'";
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(source);
     let result = build_and_run_custom(
@@ -282,7 +282,7 @@ fn entropy_primary_read_returns_the_xorshift16_sequence() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn each_entropy_evaluation_calls_the_adapter_once() {
-    let source = b"?=! ?=!";
+    let source = b"?=' ?='";
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(source);
     let output = build_and_run_custom_configured(
@@ -300,12 +300,12 @@ fn each_entropy_evaluation_calls_the_adapter_once() {
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn unavailable_entropy_is_fatal_and_apostrophe_rhs_forms_are_rejected() {
     let mut input = (3u16).to_le_bytes().to_vec();
-    input.extend_from_slice(b"?=!");
+    input.extend_from_slice(b"?='");
     let result = build_and_run_input(&input);
     assert_eq!(result.status.code(), Some(5), "{result:?}");
     assert!(result.stdout.is_empty(), "{result:?}");
 
-    for source in ["?='", "?='=1", "?='(1)"] {
+    for source in ["?='=1", "?='(1)"] {
         let result = build_and_run(source.as_bytes(), b"");
         assert_eq!(result.status.code(), Some(2), "{source}: {result:?}");
         assert!(result.stdout.is_empty(), "{source}: {result:?}");

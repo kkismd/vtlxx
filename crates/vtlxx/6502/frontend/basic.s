@@ -1381,7 +1381,7 @@ value:
     jeq @read_char
     cmp #$60
     jeq @try_read_char
-    cmp #'!'
+    cmp #$27
     jeq @read_entropy
     cmp #'0'
     bcc @minus

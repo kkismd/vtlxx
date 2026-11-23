@@ -147,7 +147,7 @@ fn fixed_seed_vector_matches_reference() {
     let temp = TestDir::new();
     let result = run(
         &temp,
-        b"A=! B=! C=! D=! E=! F=! ?=A ?=B ?=C ?=D ?=E ?=F",
+        b"A=' B=' C=' D=' E=' F=' ?=A ?=B ?=C ?=D ?=E ?=F",
         b"",
         &["--seed", "1"],
     );
@@ -165,7 +165,7 @@ fn product_engines_match_on_shared_programs() {
         ("?=65", 0, &b"65"[..]),
         ("A=$ ?=A", 0, &b"65"[..]),
         (".NUM:=4 &=p [ ?=.NUM ?=\"!\" ] p=()", 0, &b"4!"[..]),
-        ("A=! B=! ?=A ?=B", 0, &b"1657612304"[..]),
+        ("A=' B=' ?=A ?=B", 0, &b"1657612304"[..]),
         ("?=42 A=", 130, &b""[..]),
     ] {
         let path = temp.source(source.as_bytes());
