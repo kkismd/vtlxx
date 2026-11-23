@@ -34,7 +34,7 @@ sim65 では、全 source の compile と driver 完成の後に `rt_init` へ�
 
 helper は A/X/Y と processor flags を保存しない。`rt_push` の引数と register helper の X 以外に CPU register の入力契約はない。Cell は little-endian の signed 16-bit、stack は 16 Cell、A-Z は 26 Cell、storage は下位8 bitで選ぶ256 Cellの ring。A-Z と stack は zero page、storage は通常 RAM に置く。`rt_init` は register、storage、stack depth を初期化する。
 
-fatal status は underflow = 1、overflow = 2、division by zero = 3、remainder by zero = 4、entropy unavailable = 5、input failure = 6 とし、いずれも #273 の `halt` へ移る。これは sim65 fixture が success と runtime error を区別するための target 内の値である。error 検出前に stack operand を消費しない。
+fatal status は underflow = 1、overflow = 2、division by zero = 3、remainder by zero = 4、entropy unavailable = 5、input failure = 6、static byte bounds = 7 とし、いずれも #273 の `halt` へ移る。これは sim65 fixture が success と runtime error を区別するための target 内の値である。error 検出前に stack operand を消費しない。
 
 sim65 の失敗時状態確認だけに `RT_TEST_PROBE` を指定すると、HALT 直前に fixture の `rt_test_probe` を呼ぶ。通常の target build にはこの hook は入らない。
 
@@ -52,11 +52,17 @@ sim65 の失敗時状態確認だけに `RT_TEST_PROBE` を指定すると、HAL
 cargo test -p vtlxx --test sim65_runtime -- --ignored
 ```
 
+## 静的byte列のbackend契約（#620）
+
+`cc_static_begin` は実行中のownerに追跡付きskipを出力し、`cc_static_byte` は検証済みraw byteをAで順次受け取る。`cc_static_finish` が成功した場合のみ `cc_static_start` と `cc_static_length` の各2 byteを完成済みの絶対位置と長さとして保存できる。失敗時はcompile-run全体を破棄する。frontendはtop-levelでのみ呼び、名前管理と式の入れ子中の値保持を担当する。読出しのemit時は保存済みの組を同じ領域へ設定して `cc_static_read` を呼ぶ。生成コードは `rt_read_static` に位置と長さを渡し、stack topのsigned indexを範囲検査してunsigned byteへ置換する。未解決skipはowner完成を妨げ、patchは追跡中のoperandに限られる。
+
+正式sim65 CLIの同一moduleを変更前後でリンクした結果、CODEは6711→6992 B、BSSは34907→34915 B、ZEROPAGEは132 Bで不変。arenaは24576 B、patch/completed bitsetは各3072 Bで不変。compile時の既存patch経路は追加JSRの深さが従来のuntrack呼出しと同じであり、既存guardを変更しない。新しいbackend入口は未接続で、frontend接続時に呼出し元を含むguard監査が必要。runtimeのreadはJSRに加え一時PHAを1 B使用する。IRQ/NMIを含む実機の動的高水位は未測定。
+
 ## Native compiler backend（#275）
 
-`compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 24,576 B のコード専用 arena、binding、owner を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。compiler の失敗は `cc_status` に保持し、後続の compile-run driver が runtime を開始せず HALT する。
+`compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 24,576 B のコード・静的byte列共有 arena、binding、owner を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。compiler の失敗は `cc_status` に保持し、後続の compile-run driver が runtime を開始せず HALT する。
 
-`compiler/arena.s` は生成コード専用の24,576 B arenaと、arena全域のbyte位置を追跡する`patch_bits`・`completed_bits`（各3,072 B）を保持する。手続テンプレートのsource保存領域や仮想readerは廃止済みであり、通常のsource frameは`frontend/source.s`が読み取る。コードの予約・patch・owner完成と、完成済みbindingのみ公開する順序は維持する。
+`compiler/arena.s` は生成コードと静的byte列の24,576 B arenaと、arena全域のbyte位置を追跡する`patch_bits`・`completed_bits`（各3,072 B）を保持する。手続テンプレートのsource保存領域や仮想readerは廃止済みであり、通常のsource frameは`frontend/source.s`が読み取る。コードの予約・patch・owner完成と、完成済みbindingのみ公開する順序は維持する。
 
 target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_is_bound`、`cc_publish`、`cc_resolve` は `cc_name_len` と `cc_name` に入れた ASCII 小文字1〜8文字の通常 Write 名を取る。`cc_is_bound` は bound なら carry set、unbound なら carry clear を返し、有効な問い合わせでは `cc_status` と binding table を変更しない。`cc_publish` は `cc_arg`=completed target を取り、`cc_resolve` は完全名から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
 
@@ -148,7 +154,7 @@ mos6502 host は標準の [`mos6502` 0.10.1](https://crates.io/crates/mos6502/0.
 
 ## 現行の6502資源構成
 
-現在のsim65用コンパイラは、生成コードだけを保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。現在のpatch追跡・完成済み位置のbitsetは各3,072 Bで、ownerの完成・公開とコード境界の検査を維持している。
+現在のsim65用コンパイラは、生成コードと不変の静的byte列を保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。現在のpatch追跡・完成済み位置のbitsetは各3,072 Bで、ownerの完成・公開とコード境界の検査を維持している。
 
 最新の正式sim65 CLIの静的リンク計測（[#524 / PR #537](https://github.com/kkismd/vtlxx/pull/537)、`ca65`/`ld65`のmap）:
 
@@ -163,7 +169,7 @@ mos6502 host は標準の [`mos6502` 0.10.1](https://crates.io/crates/mos6502/0.
 
 ## 過去の計測記録: Micro TREK の sim65 E2E と資源（#513）
 
-この節のアドレス、領域、cycles、stackに関する記述は **#513で計測した当時の構成を保存する歴史的記録** である。現在のarenaはコード専用で、汎用work stackはすでに削除されている。以下のテストや測定スクリプトを最新`main`で実行しても、当時の配置やcyclesが再現されるとは限らない。現行の値は上節と最新の実装・計測PRを参照する。
+この節のアドレス、領域、cycles、stackに関する記述は **#513で計測した当時の構成を保存する歴史的記録** である。現在のarenaはコードと静的byte列を共有し、汎用work stackはすでに削除されている。以下のテストや測定スクリプトを最新`main`で実行しても、当時の配置やcyclesが再現されるとは限らない。現行の値は上節と最新の実装・計測PRを参照する。
 
 基準 main `07350a863c450529d098fbd5f2bf896deb9d00cf`、Ubuntu cc65 package 2.19-1 の ca65/ld65/sim65 V2.18 で測定。正本 `examples/micro_trek.vtl` を変更せず固定 seed 0 で使う。以下は repository root から実行する。
 
@@ -179,5 +185,5 @@ E2E は Rust 側の 5 テストに対応する 7 入力系列を raw stdout/stde
 
 上記 script は production と同じ module の link map/labels を生成し、sim65 `-c` で総 cycles を別実行で取得する。EOF 30,211,835、表示後 X 31,352,775、2 回敗北・RETRY 47,418,752 cycles。compile/runtime 相別は未計測。script は別途 frontend の一時コピーに成功した `fe_build_driver` の直後、runtime 開始前の `cc_cursor` を出力して停止する診断を挿入する。診断 binary の arena は `$2bad`、cursor は `$687f`、生成量 15,570 B、残り 9,006 B。ゲームは P0a を使わない。この値は診断 binary の測定であり production CLI の直接観測ではない。
 
-動的 CPU S、value/work stack、cc65 software SP の最大使用量は本測定では未計測で、全経路の動的安全性は未証明。静的非重複はその証明ではない。compile guard は S < 25 を検出するが runtime や IRQ/NMI に適用しない。この測定時点の共有 arena と template 専用テストは #528 によって廃止された。現行の code-only arena と owner の検証は `sim65_backend` を参照。EC09 #463 の完了判定には、未測定の stack と相別 cycles、および実 CLI 勝利未到達を含めて評価が必要。
+動的 CPU S、value/work stack、cc65 software SP の最大使用量は本測定では未計測で、全経路の動的安全性は未証明。静的非重複はその証明ではない。compile guard は S < 25 を検出するが runtime や IRQ/NMI に適用しない。この測定時点の共有 arena と template 専用テストは #528 によって廃止された。現行の arena と owner の検証は `sim65_backend` を参照。EC09 #463 の完了判定には、未測定の stack と相別 cycles、および実 CLI 勝利未到達を含めて評価が必要。
 

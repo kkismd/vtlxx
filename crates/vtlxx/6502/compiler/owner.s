@@ -2,9 +2,9 @@
 .setcpu "6502"
 
 .export cc_init, cc_begin_owner, cc_complete_owner
-.export cc_define_label, cc_label_jump, cc_is_completed
+.export cc_define_label, cc_label_jump, cc_is_completed, owner_require_active
 .import cc_arena_reset, cc_patch_reset, cc_freeze, cc_mark, cc_return, cc_jump, cc_jump_placeholder, cc_patch
-.import cc_binding_reset
+.import cc_binding_reset, cc_static_reset
 .import cc_arena
 .importzp cc_status, cc_arg, cc_pending_count
 
@@ -40,6 +40,7 @@ cc_init:
     jsr cc_arena_reset
     jsr cc_patch_reset
     jsr cc_binding_reset
+    jsr cc_static_reset
     lda #0
     lda #<completed_bits
     sta owner_offset

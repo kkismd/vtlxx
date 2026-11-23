@@ -7,6 +7,8 @@
 .import cc_jump_placeholder, cc_jz_placeholder, cc_patch_here, cc_jump_to
 .import cc_begin_owner, cc_complete_owner, cc_is_bound, cc_is_completed, cc_publish, cc_resolve
 .import cc_define_label, cc_label_jump
+.import cc_static_begin, cc_static_byte, cc_static_finish, cc_static_read
+.import cc_static_start, cc_static_length
 .import cc_name_len, cc_name
 .import cc_arena
 .import rt_init, rt_print_number, rt_print_char, rt_push
@@ -880,6 +882,98 @@ _main:
     lda patch_two
     ldx patch_two+1
     jsr cc_is_completed
+    ERROR
+ .elseif TEST_CASE = 29
+    jsr cc_begin_owner
+    sta entry
+    stx entry+1
+    WORD 65
+    jsr cc_push_const
+    WORD rt_print_char
+    jsr cc_call
+    jsr cc_static_begin
+    lda #$00              ; BRK must never execute
+    jsr cc_static_byte
+    lda #$ff
+    jsr cc_static_byte
+    jsr cc_static_finish
+    OK
+    lda cc_static_length
+    cmp #2
+    bne bad
+    WORD 1
+    jsr cc_push_const
+    jsr cc_static_read
+    WORD rt_print_number
+    jsr cc_call
+    jsr cc_static_begin   ; empty and terminal payloads
+    jsr cc_static_finish
+    jsr cc_static_begin
+    lda #0
+    jsr cc_static_byte
+    jsr cc_static_finish
+    jsr cc_complete_owner
+    OK
+    jsr rt_init
+    jsr invoke
+.elseif TEST_CASE = 30
+    jsr cc_begin_owner
+    jsr cc_static_begin
+    ldx #0
+@bytes:
+    txa
+    pha
+    jsr cc_static_byte
+    pla
+    tax
+    inx
+    bne @bytes
+    lda #42
+    jsr cc_static_byte
+    jsr cc_static_finish
+    OK
+    lda cc_static_length
+    cmp #1
+    bne bad
+    lda cc_static_length+1
+    cmp #1
+    bne bad
+    jsr cc_complete_owner
+    OK
+.elseif TEST_CASE = 31
+    jsr cc_begin_owner
+    jsr cc_static_begin
+    lda #1
+    jsr cc_static_byte
+    jsr cc_complete_owner ; outstanding skip prevents completion
+    ERROR
+.elseif TEST_CASE = 32
+    jsr cc_begin_owner
+    jsr cc_static_begin
+    lda #1
+    jsr cc_static_byte
+    lda #2
+    jsr cc_static_byte
+    jsr cc_static_finish
+    OK
+    lda cc_static_start
+    ldx cc_static_start+1
+    jsr cc_patch          ; payload is not a tracked operand
+    ERROR
+.elseif TEST_CASE = 33
+    jsr cc_begin_owner
+    lda #<(cc_arena+$5ffc)
+    sta cc_cursor
+    lda #>(cc_arena+$5ffc)
+    sta cc_cursor+1
+    jsr cc_static_begin
+    lda #42
+    jsr cc_static_byte    ; exactly fills the arena
+    OK
+    lda #43
+    jsr cc_static_byte
+    ERROR
+    jsr cc_complete_owner
     ERROR
 .else
     .error "unknown backend probe case"

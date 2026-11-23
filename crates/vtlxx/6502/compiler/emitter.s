@@ -5,8 +5,13 @@
 .export cc_load_reg, cc_store_reg
 .export cc_jump_placeholder, cc_jz_placeholder, cc_patch_here, cc_jump_to
 .export cc_literal_output_begin, cc_literal_output_byte, cc_literal_output_finish
+.export cc_static_reset, cc_static_begin, cc_static_byte, cc_static_finish, cc_static_read
+.export cc_static_start, cc_static_length
 .import cc_reserve, cc_write_byte_raw, cc_emit_byte, cc_mark, cc_patch, cc_track_patch
 .import rt_push, rt_pop_condition, rt_load_reg, rt_store_reg, rt_print_bytes
+.import rt_read_static
+.importzp rt_lhs, rt_rhs
+.import owner_require_active
 .importzp cc_status, cc_arg, cc_cursor
 
 .importzp zp_phase
@@ -19,8 +24,121 @@ literal_patch: .res 2
 literal_start: .res 2
 literal_count: .res 1
 literal_byte:  .res 1
+cc_static_start: .res 2
+cc_static_length: .res 2
+static_patch: .res 2
+static_active: .res 1
+static_byte: .res 1
 
 .segment "CODE"
+ ; Static payload operations are sequential and require an active top-level
+; owner. On any failure cc_status poisons the compile-run; only successful
+; finish exposes cc_static_start/cc_static_length to the frontend.
+cc_static_reset:
+    lda #0
+    sta static_active
+    rts
+
+cc_static_begin:
+    jsr owner_require_active
+    lda cc_status
+    bne @done
+    lda static_active
+    bne @bad
+    jsr cc_jump_placeholder
+    sta static_patch
+    stx static_patch+1
+    lda cc_status
+    bne @done
+    jsr cc_mark
+    sta cc_static_start
+    stx cc_static_start+1
+    lda #0
+    sta cc_static_length
+    sta cc_static_length+1
+    lda #1
+    sta static_active
+@done:
+    rts
+@bad:
+    lda #3
+    sta cc_status
+    rts
+
+cc_static_byte:
+    sta static_byte
+    lda cc_status
+    bne @done
+    lda static_active
+    beq @bad
+    ; Length 32768 is the largest useful payload.
+    lda cc_static_length+1
+    cmp #$80
+    bcs @bad
+    lda static_byte
+    jsr cc_emit_byte
+    lda cc_status
+    bne @done
+    inc cc_static_length
+    bne @done
+    inc cc_static_length+1
+@done:
+    rts
+@bad:
+    lda #3
+    sta cc_status
+    rts
+
+cc_static_finish:
+    lda cc_status
+    bne @done
+    lda static_active
+    beq @bad
+    lda static_patch
+    ldx static_patch+1
+    jsr cc_patch_here
+    lda cc_status
+    bne @done
+    lda #0
+    sta static_active
+@done:
+    rts
+@bad:
+    lda #3
+    sta cc_status
+    rts
+
+; Caller sets cc_static_start and cc_static_length to a finished payload.
+; Emit four immediate stores followed by the bounds-checked helper call.
+cc_static_read:
+    lda #19
+    jsr cc_reserve
+    lda cc_status
+    bne @done
+    ldx #0
+@loop:
+    lda #$a9
+    jsr cc_write_byte_raw
+    lda cc_static_start,x
+    jsr cc_write_byte_raw
+    lda #$85
+    jsr cc_write_byte_raw
+    txa
+    clc
+    adc #<rt_lhs
+    jsr cc_write_byte_raw
+    inx
+    cpx #4
+    bne @loop
+    lda #$20
+    jsr cc_write_byte_raw
+    lda #<rt_read_static
+    jsr cc_write_byte_raw
+    lda #>rt_read_static
+    jsr cc_write_byte_raw
+@done:
+    rts
+
 ; Stream bytes into code arena chunks, with a tracked jump over each payload.
 ; An empty literal emits nothing. State is private to this sequential emitter.
 cc_literal_output_begin:

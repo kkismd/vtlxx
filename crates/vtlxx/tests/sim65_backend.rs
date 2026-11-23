@@ -173,3 +173,12 @@ fn code_arena_u16_wrap_and_full_range_bitsets() {
     expect(22, b"K");
     expect(28, b"K");
 }
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn static_data_skip_read_and_completion_guards() {
+    expect(29, b"A255K");
+    for case in 30..=33 {
+        expect(case, b"K");
+    }
+}
