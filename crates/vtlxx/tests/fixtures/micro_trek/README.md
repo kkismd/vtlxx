@@ -47,7 +47,7 @@ cargo test --workspace
 
 ## 範囲付き乱数
 
-ゲーム本体の `random` は組み込み `'` から1値を読み、`1..n`へ変換する。
+ゲーム本体の `random` は組み込み `!` から1値を読み、`1..n`へ変換する。
 ゲームsourceはPRNG stateを所有せず、storage[192]を書き換えない。
 固定seedはRust Machine providerまたは汎用CLIの `--seed N` で与える。
 `micro_trek_prng.rs` は独立したX16モデル、値域、1呼出し1 draw、Machine内の継続、

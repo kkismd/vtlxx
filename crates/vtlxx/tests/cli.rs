@@ -480,7 +480,7 @@ fn empty_machine_output_stays_empty() {
 
 #[test]
 fn fixed_seed_initializes_a_reproducible_xorshift_sequence() {
-    let source = SourceFile::new(b"A=' B=' C=' D=' E=' F=' ?=A ?=B ?=C ?=D ?=E ?=F");
+    let source = SourceFile::new(b"A=! B=! C=! D=! E=! F=! ?=A ?=B ?=C ?=D ?=E ?=F");
     let expected = [
         (-32768, "2460826648200102368722344753"),
         (-1, "16319122392551518160439927244"),
@@ -503,7 +503,7 @@ fn fixed_seed_initializes_a_reproducible_xorshift_sequence() {
 
 #[test]
 fn entropy_read_works_without_a_fixed_seed_and_stays_in_range() {
-    let source = SourceFile::new(b"A=' ?=A");
+    let source = SourceFile::new(b"A=! ?=A");
     let output = vtlxx(&[source.0.as_os_str()]);
     assert!(output.status.success(), "{:?}", output.stderr);
     let value = std::str::from_utf8(&output.stdout)

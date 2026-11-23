@@ -133,7 +133,7 @@ impl Machine {
         self.input_eof = false;
     }
 
-    /// Replace the source used to initialize this machine's `'` sequence.
+    /// Replace the source used to initialize this machine's `!` sequence.
     /// It is called only when the first runtime evaluation needs a seed.
     pub fn set_entropy_source(&mut self, source: impl FnMut() -> io::Result<Cell> + 'static) {
         self.entropy_source = Box::new(source);
@@ -345,10 +345,7 @@ impl Machine {
             (Primitive::PrintNumber, Some(('?', SourceRole::Write))),
             (Primitive::ReadChar, Some(('$', SourceRole::PrimaryRead))),
             (Primitive::TryReadChar, Some(('`', SourceRole::PrimaryRead))),
-            (
-                Primitive::ReadEntropy,
-                Some(('\'', SourceRole::PrimaryRead)),
-            ),
+            (Primitive::ReadEntropy, Some(('!', SourceRole::PrimaryRead))),
             (Primitive::PrintChar, Some(('$', SourceRole::Write))),
             (Primitive::Add, Some(('+', SourceRole::BinaryOperator))),
             (Primitive::Sub, Some(('-', SourceRole::BinaryOperator))),
@@ -496,6 +493,7 @@ mod tests {
             ('?', SourceRole::Write, Primitive::PrintNumber),
             ('$', SourceRole::Write, Primitive::PrintChar),
             ('$', SourceRole::PrimaryRead, Primitive::ReadChar),
+            ('!', SourceRole::PrimaryRead, Primitive::ReadEntropy),
             ('+', SourceRole::BinaryOperator, Primitive::Add),
             ('-', SourceRole::BinaryOperator, Primitive::Sub),
             ('*', SourceRole::BinaryOperator, Primitive::Mul),
@@ -524,6 +522,10 @@ mod tests {
         }
         assert_eq!(machine.resolve('?', SourceRole::PrimaryRead), None);
         assert_eq!(machine.resolve('@', SourceRole::PrimaryRead), None);
+        // The old PRNG spelling is not kept as an alias (ADR #613).
+        assert_eq!(machine.resolve('\'', SourceRole::PrimaryRead), None);
+        assert_eq!(machine.resolve('!', SourceRole::Write), None);
+        assert_eq!(machine.resolve('!', SourceRole::AppliedRead), None);
     }
 
     #[test]

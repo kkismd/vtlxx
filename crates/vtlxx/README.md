@@ -58,10 +58,10 @@ cargo test --workspace
 
 Rust reference の `Machine` は `set_input` で待機入力用の `std::io::Read` を受け取り、`set_runtime_input` で待機・非ブロッキング両方に対応する `RuntimeInput` を受け取ります。`$` は NUL を読み捨てて `1..255` または EOF の `-1` を返します。バッククォートは一度だけ入力を試し、文字は `1..255`、物理 NUL と未入力は `0`、EOF は `-1` を返します。両者は同じ入力位置とEOF状態を共有し、入力エラーは runtime error になります。未設定時は両方とも EOF です。通常の `set_input(Read)` は待機入力専用で、バッククォートを実行すると入力を読まず runtime error になります。Unix の Rust CLI は stdin の単一 fd を使い、backtick の即時読取と `$` の OS 待機を行います。既定のTTYでは従来どおり行単位入力・echoを使い、`--raw-tty` を明示すると TTY から1文字ずつ読み、終了時に端末設定を戻します。canonical TTYでは backtick は行が確定するまで `0` を返すことがあります。非Unix CLIでは従来の待機入力を維持し、`--raw-tty` は未対応、backtick は runtime input error になります。stdoutは逐次出力します（#313）。
 
-`'` はMachineごとのxorshift16 PRNGから値を読む PrimaryRead です。最初の評価時だけ環境providerからraw16初期値を取得し、各評価で状態を1 step更新して上位15bit（0..32767）を返します。同じMachineで続けて実行したsource間でも状態は継続します。seed 0は内部で`0xACE1`に正規化されます。取得できない場合は致命的な `EntropyError` になります。Rust `Machine` の `set_entropy_source` で初期値providerを差し替えられます。CLIはOSの乱数源を使い、再現実行には `--seed N`（signed 16bit十進数）を指定できます。指定値は初期seedとして一度だけ使われ、通常の stdin には追加されません。
+`!` はMachineごとのxorshift16 PRNGから値を読む PrimaryRead です。最初の評価時だけ環境providerからraw16初期値を取得し、各評価で状態を1 step更新して上位15bit（0..32767）を返します。同じMachineで続けて実行したsource間でも状態は継続します。seed 0は内部で`0xACE1`に正規化されます。取得できない場合は致命的な `EntropyError` になります。Rust `Machine` の `set_entropy_source` で初期値providerを差し替えられます。CLIはOSの乱数源を使い、再現実行には `--seed N`（signed 16bit十進数）を指定できます。指定値は初期seedとして一度だけ使われ、通常の stdin には追加されません。
 
 ```vtl
-A='
+A=!
 ```
 
 ```sh
@@ -117,7 +117,7 @@ cargo run -p vtlxx --bin vtlxx6502 -- \
   path/to/program.vtl --cycle-limit 256000000
 ```
 
-6502実行でも `--seed N`（signed 16bit十進数）で初期PRNG seedを固定できます。省略時はhost OSからraw16 seedを取得し、取得できない場合は`'`を実行した時点でruntime status 5になります。`'`を使わないsourceはそのまま実行できます。seedはsource/runtime入力へ追加されず、固定seedではRust CLIと同じ乱数系列になります。
+6502実行でも `--seed N`（signed 16bit十進数）で初期PRNG seedを固定できます。省略時はhost OSからraw16 seedを取得し、取得できない場合は`!`を実行した時点でruntime status 5になります。`!`を使わないsourceはそのまま実行できます。seedはsource/runtime入力へ追加されず、固定seedではRust CLIと同じ乱数系列になります。
 
 ```sh
 cargo run -p vtlxx --bin vtlxx6502 -- \
@@ -263,7 +263,8 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 | --- | --- |
 | `123`, `-7` | integer literal |
 | `A` .. `Z` | register read |
-| `'` | environment から16bit初期値を読む |
+| `!` | PRNG PrimaryRead（xorshift16 から次の値を読む） |
+| `'c'` | ASCII文字リテラル（文字 `c` の byte 値） |
 | `@(expr)` | storage read |
 | `(expr)` | grouping |
 
@@ -278,6 +279,19 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 | `%` | remainder |
 | `==`, `!=` | equality |
 | `<`, `<=`, `>`, `>=` | comparison |
+
+`!` は value 位置では PRNG PrimaryRead、operator 位置の `!=` は not-equal で、両者は位置で区別されます（例: `A=!!=0` は PRNG 読取と比較、`A=1!=!` は比較の右辺での PRNG 読取）。
+
+### ASCII文字リテラル `'c'`
+
+`'c'` は、引用符で囲んだ印字可能 ASCII 1文字を、その byte 値の整数リテラルとして書く surface です。payload は `0x20`〜`0x7E` の1 byteで、`'` 自身は payload にできません（値 39 が必要な場合は整数 `39` と書きます）。escape syntax はありません。`'\'` は backslash 1文字（92）です。
+
+```vtl
+  $='.'
+  C='Q' R=C=='Q'
+```
+
+`'c'` は式の中で使える通常の整数値です。`?="..."` の string output sugar とは異なり、string は出力専用の sugar で runtime value にはなりません。
 
 ### Operator precedence
 

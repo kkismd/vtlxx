@@ -1120,3 +1120,118 @@ fn runtime_failure_before_header_prevents_publication() {
         Err(SourceError::Compile(CompileError::UndefinedBinding))
     );
 }
+
+#[test]
+fn character_literals_work_in_value_positions() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(
+            "A='A' B='0' C=' ' D=';' E='\"' F='.' G='!' H='=' I='[' J=']' K='(' L=')' M=',' N='\\'",
+        )
+        .unwrap();
+    let expected = [65, 48, 32, 59, 34, 46, 33, 61, 91, 93, 40, 41, 44, 92];
+    for (index, value) in expected.iter().enumerate() {
+        assert_eq!(machine.register(index), Some(*value), "register {index}");
+    }
+    assert!(machine.stack().is_empty());
+
+    // Output through the character write, comparison results, an If
+    // condition, a storage write argument, and grouping.
+    let mut machine = Machine::new();
+    machine
+        .execute_source("$='.' C='Q' R=C=='Q' %=C=='Q' [ A=1 ] @=192,'!' B=(('('))")
+        .unwrap();
+    assert_eq!(machine.output(), b".");
+    assert_eq!(machine.register(17), Some(1));
+    assert_eq!(machine.register(0), Some(1));
+    assert_eq!(machine.storage(192), 33);
+    assert_eq!(machine.register(1), Some(40));
+    machine.execute_source("@=65,7 A=@('A') ?='A'").unwrap();
+    assert_eq!(machine.register(0), Some(7));
+    assert_eq!(machine.output(), b".65");
+}
+
+#[test]
+fn character_literals_coexist_with_output_strings_on_one_line() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("A=';' ?=\"'\" B=' ' ?=\"a;b\" C=3")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(59));
+    assert_eq!(machine.register(1), Some(32));
+    assert_eq!(machine.register(2), Some(3));
+    assert_eq!(machine.output(), b"'a;b");
+}
+
+#[test]
+fn character_literals_and_named_integers_interact_by_the_existing_rules() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".MAX:=100\nA='A'+.MAX B=.MAX")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(165));
+    assert_eq!(machine.register(1), Some(100));
+
+    // A literal is a completed value, so directly adjacent constant
+    // references stay rejected, and quoted parentheses do not open groups.
+    for source in [
+        ".MAX:=100\nA='A'.MAX",
+        ".MAX:=100\nA=1.MAX",
+        ".MAX:=100\nA='.'.MAX",
+        ".MAX:=100\nA='('.MAX",
+        ".MAX:=100\nA='A'+.MISSING",
+        ".MAX:=100\nA=.MAXIMUM",
+    ] {
+        let mut machine = Machine::new();
+        assert!(
+            matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+        assert_eq!(machine.register(0), Some(0), "{source}");
+    }
+
+    // Quoted parentheses inside a group do not change its depth, so a
+    // constant reference after them still resolves.
+    let mut machine = Machine::new();
+    machine
+        .execute_source(".MAX:=100\nA=('(')+.MAX B=(')')+.MAX")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(140));
+    assert_eq!(machine.register(1), Some(141));
+}
+
+#[test]
+fn malformed_character_literals_and_old_entropy_spelling_are_compile_errors() {
+    for source in [
+        "A='",
+        "A=''",
+        "A='AB'",
+        "A='é'",
+        "A='A",
+        "A='\\n'",
+        "A='A\"",
+        "A=1 ' B=2",
+        "A=' A=1",
+    ] {
+        let mut machine = Machine::new();
+        assert!(
+            matches!(machine.execute_source(source), Err(SourceError::Compile(_))),
+            "{source}"
+        );
+        assert_eq!(machine.register(0), Some(0), "{source}");
+        assert!(machine.stack().is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn bang_entropy_and_not_equal_coexist_in_source() {
+    let mut machine = Machine::new();
+    machine.set_entropy_source(|| Ok(1));
+    machine.execute_source("A=! B=!+1 C=1!=! D=!!=0").unwrap();
+    // Seed 1 xorshift16 steps, consumed left to right: the first three
+    // registers use successive reads, and D compares a fourth read with 0.
+    assert_eq!(machine.register(0), Some(16576));
+    assert_eq!(machine.register(1), Some(12305));
+    assert_eq!(machine.register(3), Some(1));
+    assert!(machine.stack().is_empty());
+}
