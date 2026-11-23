@@ -12,7 +12,7 @@ cargo test -p vtlxx --test sim65_6502 -- --ignored
 
 通常の `cargo test --workspace` は cc65 を必要としない。
 
-`entropy16` は target-private adapter symbol で、成功時は carry clear / A=low / X=high、取得不可は carry setを返す。`vtlxx6502` はOS由来raw16値または `--seed` のraw16値を選択したadapterのprivate assemble定数として渡す。OS取得に失敗した場合は取得不可adapterをlinkし、`'`未使用sourceの実行を妨げない。実機adapterは同じsymbol/ABIを実装して差し替える。
+`entropy16` は target-private adapter symbol で、成功時は carry clear / A=low / X=high、取得不可は carry setを返す。`vtlxx6502` はOS由来raw16値または `--seed` のraw16値を選択したadapterのprivate assemble定数として渡す。OS取得に失敗した場合は取得不可adapterをlinkし、`!`未使用sourceの実行を妨げない。実機adapterは同じsymbol/ABIを実装して差し替える。
 
 ## Runtime helper（#274）
 
@@ -44,7 +44,7 @@ sim65 の失敗時状態確認だけに `RT_TEST_PROBE` を指定すると、HAL
 
 #336変更前後の`ca65` object比較ではfrontend CODE +17 B、runtime primitives CODE +53 B、runtime state CODE +5 B。合計production CODE +75 Bで、Zero Page、BSS、RODATAは増加しない。scripted adapterの呼出回数probeはCODE +3 B、DATA +1 B。`rt_try_read_char`は常駐Zero Page scratchを使わず、provider callのJSR段数は既存`rt_read_char`と同じ。追加PHAやhardware-stack guardはない。
 
-`rt_read_entropy` は `'` PrimaryRead の固定runtime targetである。16 Cell容量を先に検査し、PRNG stateが未初期化の場合だけ `entropy16` からseedを一度取得する。seed 0は`$ACE1`へ正規化し、各評価で16bit xorshift `<<7, >>9, <<8` を順に適用して、更新後stateの上位15bitを1 Cell pushする。stateのゼロ値を未初期化sentinelとして使い、`rt_init`でクリアする。取得失敗はstatus 5でHALTし、sentinel、stack、他の言語stateを変更しない。adapterを差し替えない共通runtime fixtureは引き続き取得不可を返す。
+`rt_read_entropy` は `!` PrimaryRead の固定runtime targetである。16 Cell容量を先に検査し、PRNG stateが未初期化の場合だけ `entropy16` からseedを一度取得する。seed 0は`$ACE1`へ正規化し、各評価で16bit xorshift `<<7, >>9, <<8` を順に適用して、更新後stateの上位15bitを1 Cell pushする。stateのゼロ値を未初期化sentinelとして使い、`rt_init`でクリアする。取得失敗はstatus 5でHALTし、sentinel、stack、他の言語stateを変更しない。adapterを差し替えない共通runtime fixtureは引き続き取得不可を返す。
 
 変更前の`main`と`ca65` object segment sizeを比較すると、frontend CODE +17 B、runtime primitives CODE +298 B、runtime state CODE +11 B、sim65 adapter CODE +2 B、合計CODE +328 B。runtime state BSS +2 B（16bit state）、primitives BSS +2 B（16bit scratch）、合計BSS +4 B。ZPとRODATAは増加せず、100 B phase shareも変更しない。初回adapter呼出しのJSR return addressは2 Bで、既存`$` readと同じruntime呼出し段数。追加のPHAやhardware-stack guard経路はない。CPU stack高水位の実測・実機上限保証は行っていない。サイズは変更前後の各module object segmentの差であり、リンク後の総配置比較ではない。
 
@@ -125,7 +125,7 @@ cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --runtime-input /tmp/input.
 cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --engine mos6502 --runtime-input /tmp/input.bin --seed 123 --cycle-limit 4000000
 ```
 
-どちらも `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `'` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれず、両 engine の cycle 値の完全一致は保証しない。
+どちらも `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `!` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれず、両 engine の cycle 値の完全一致は保証しない。
 
 対話では runtime 入力と出力を標準入出力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
 

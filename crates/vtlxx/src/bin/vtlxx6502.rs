@@ -879,7 +879,7 @@ mod tests {
 
     #[test]
     #[ignore = "requires ca65, ld65, and sim65"]
-    fn failed_os_entropy_only_fails_when_apostrophe_executes() {
+    fn failed_os_entropy_only_fails_when_bang_executes() {
         let temp = TempDir::new().unwrap();
         let run = |name: &str, source: &[u8]| {
             let path = temp.0.join(name);
@@ -899,7 +899,7 @@ mod tests {
             .unwrap()
         };
         assert!(run("unused.vtl", b"A=1").status.success());
-        assert_eq!(run("used.vtl", b"A=' ?=A").status.code(), Some(5));
+        assert_eq!(run("used.vtl", b"A=! ?=A").status.code(), Some(5));
         assert_eq!(run("compile-error.vtl", b"A=").status.code(), Some(130));
     }
 
