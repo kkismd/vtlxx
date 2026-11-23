@@ -112,15 +112,27 @@ impl Constants {
         let mut offset = 0;
         while offset < rhs.len() {
             let byte = rhs.as_bytes()[offset];
-            if byte == b'.' {
+            if byte == b'\'' {
+                // A character literal is one value lexeme owned by the
+                // expression parser; copy it verbatim so a `.` payload is not
+                // mistaken for a constant reference and quoted parentheses do
+                // not affect grouping depth. Malformed literals are rejected
+                // here because their extent cannot be determined.
+                let bytes = rhs.as_bytes();
+                let payload = bytes.get(offset + 1).copied().ok_or(CompileError::Syntax)?;
+                if !(0x20..=0x7e).contains(&payload) || payload == b'\'' {
+                    return Err(CompileError::Syntax);
+                }
+                if bytes.get(offset + 2) != Some(&b'\'') {
+                    return Err(CompileError::Syntax);
+                }
+                expanded.push_str(&rhs[offset..offset + 3]);
+                offset += 3;
+            } else if byte == b'.' {
                 // A completed prefix cannot be followed by another value. Closing
                 // open groups lets the existing expression parser check prefixes
                 // within nested operands without teaching it constant names.
-                let depth = expanded.bytes().fold(0usize, |depth, byte| match byte {
-                    b'(' => depth + 1,
-                    b')' => depth.saturating_sub(1),
-                    _ => depth,
-                });
+                let depth = grouping_depth(&expanded);
                 let mut prefix = expanded.clone();
                 prefix.extend(std::iter::repeat_n(')', depth));
                 if !prefix.is_empty()
@@ -162,6 +174,29 @@ impl Constants {
         }
         Ok(expanded)
     }
+}
+
+/// Grouping depth of an expanded RHS prefix, ignoring parentheses that are
+/// character-literal payloads such as `'('` or `')'`.
+fn grouping_depth(expanded: &str) -> usize {
+    let bytes = expanded.as_bytes();
+    let mut depth = 0usize;
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\'' => index += 3,
+            b'(' => {
+                depth += 1;
+                index += 1;
+            }
+            b')' => {
+                depth = depth.saturating_sub(1);
+                index += 1;
+            }
+            _ => index += 1,
+        }
+    }
+    depth
 }
 
 fn compile_resolved_rhs(
@@ -396,18 +431,30 @@ fn next_statement<'a>(line: &'a str, offset: &mut usize) -> Result<Option<&'a st
         return Ok(None);
     }
     let start = *offset;
-    let mut quoted = false;
+    // The first quote character seen decides the quoted region: a `'` inside
+    // a `?="..."` output string is string content, and a `"` inside an RHS
+    // character literal such as `'"'` is literal content. Bytes inside a
+    // character literal (`' '`, `';'`) are neither separators nor comments.
+    let mut quote: Option<u8> = None;
     while *offset < bytes.len() {
         let byte = bytes[*offset];
-        if byte == b'"' {
-            quoted = !quoted;
-        }
-        if !quoted && matches!(byte, b' ' | b'\t' | b';') {
-            break;
+        match quote {
+            Some(open) => {
+                if byte == open {
+                    quote = None;
+                }
+            }
+            None => {
+                if matches!(byte, b'"' | b'\'') {
+                    quote = Some(byte);
+                } else if matches!(byte, b' ' | b'\t' | b';') {
+                    break;
+                }
+            }
         }
         *offset += 1;
     }
-    if quoted {
+    if quote.is_some() {
         return Err(CompileError::Syntax);
     }
     Ok(Some(&line[start..*offset]))
@@ -551,6 +598,30 @@ mod tests {
             vec!["A=1", "?=\"a b;c\"", "B=2"]
         );
         assert_eq!(scan_line("?=\"unfinished"), Err(CompileError::Syntax));
+    }
+
+    #[test]
+    fn scan_protects_character_literal_bytes() {
+        // Spaces, comment starts, and string quotes inside a character
+        // literal do not split or comment out the statement, while a `'`
+        // inside a double-quoted string stays string content.
+        assert_eq!(
+            scan_line("A=' ' B=';' C='\"' ?=\"'\" D=1 ; comment").unwrap(),
+            vec!["A=' '", "B=';'", "C='\"'", "?=\"'\"", "D=1"]
+        );
+        assert_eq!(scan_line("A='"), Err(CompileError::Syntax));
+        assert_eq!(scan_line("A='A"), Err(CompileError::Syntax));
+    }
+
+    #[test]
+    fn grouping_depth_ignores_quoted_parentheses() {
+        assert_eq!(grouping_depth("'('"), 0);
+        assert_eq!(grouping_depth("')'"), 0);
+        assert_eq!(grouping_depth("('(')"), 0);
+        assert_eq!(grouping_depth("('(')+"), 0);
+        assert_eq!(grouping_depth("('('+"), 1);
+        assert_eq!(grouping_depth("(('(')"), 1);
+        assert_eq!(grouping_depth(""), 0);
     }
 
     #[test]

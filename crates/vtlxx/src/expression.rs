@@ -85,6 +85,9 @@ impl Parser<'_> {
             }
             return Ok(());
         }
+        if current == '\'' {
+            return self.char_literal();
+        }
         if current.is_ascii_digit()
             || (current == '-'
                 && self
@@ -109,6 +112,27 @@ impl Parser<'_> {
             .resolve(current, role)
             .ok_or(CompileError::UndefinedBinding)?;
         self.instructions.push(Instruction::Call(id));
+        Ok(())
+    }
+
+    /// A character literal is exactly one printable ASCII byte other than
+    /// `'` itself between single quotes, with no escape syntax (ADR #613).
+    /// It lowers to the same `PushConst` as a decimal integer literal.
+    fn char_literal(&mut self) -> Result<(), CompileError> {
+        let payload = self
+            .chars
+            .get(self.position + 1)
+            .copied()
+            .ok_or(CompileError::Syntax)?;
+        if !payload.is_ascii() || !('\u{20}'..='\u{7e}').contains(&payload) || payload == '\'' {
+            return Err(CompileError::Syntax);
+        }
+        if self.chars.get(self.position + 2) != Some(&'\'') {
+            return Err(CompileError::Syntax);
+        }
+        self.position += 3;
+        self.instructions
+            .push(Instruction::PushConst(Cell::from(payload as u8)));
         Ok(())
     }
 
@@ -264,6 +288,111 @@ mod tests {
                 Instruction::Call(machine.builtin_id(expected).unwrap())
             );
         }
+    }
+
+    #[test]
+    fn character_literals_lower_to_push_const() {
+        let machine = Machine::new();
+        for (source, expected) in [
+            ("'A'", 65),
+            ("'0'", 48),
+            ("' '", 32),
+            ("';'", 59),
+            ("'\"'", 34),
+            ("'.'", 46),
+            ("'!'", 33),
+            ("'='", 61),
+            ("'['", 91),
+            ("']'", 93),
+            ("'('", 40),
+            ("')'", 41),
+            ("','", 44),
+            ("'\\'", 92),
+        ] {
+            assert_eq!(
+                instructions(&machine, source),
+                vec![Instruction::PushConst(expected), Instruction::Return],
+                "{source}"
+            );
+        }
+        // A quoted parenthesis is a value, not grouping.
+        assert_eq!(
+            instructions(&machine, "('(')"),
+            vec![Instruction::PushConst(40), Instruction::Return]
+        );
+        let add = machine.resolve('+', SourceRole::BinaryOperator).unwrap();
+        assert_eq!(
+            instructions(&machine, "'A'+1"),
+            vec![
+                Instruction::PushConst(65),
+                Instruction::PushConst(1),
+                Instruction::Call(add),
+                Instruction::Return,
+            ]
+        );
+    }
+
+    #[test]
+    fn malformed_character_literals_are_syntax_errors() {
+        let machine = Machine::new();
+        for source in ["'", "''", "'AB'", "'é'", "'A", "'\\n'", "'A\"", "1+'"] {
+            let mut builder = CodeBuilder::new();
+            assert_eq!(
+                compile_rhs(source, &machine, &mut builder),
+                Err(CompileError::Syntax),
+                "{source}"
+            );
+        }
+    }
+
+    #[test]
+    fn bang_reads_entropy_and_coexists_with_not_equal() {
+        let machine = Machine::new();
+        let entropy = machine.builtin_id(Primitive::ReadEntropy).unwrap();
+        assert_eq!(machine.resolve('!', SourceRole::PrimaryRead), Some(entropy));
+        assert_eq!(machine.resolve('\'', SourceRole::PrimaryRead), None);
+        let ne = machine.builtin_id(Primitive::Ne).unwrap();
+        let eq = machine.builtin_id(Primitive::Eq).unwrap();
+        assert_eq!(
+            instructions(&machine, "!!=0"),
+            vec![
+                Instruction::Call(entropy),
+                Instruction::PushConst(0),
+                Instruction::Call(ne),
+                Instruction::Return,
+            ]
+        );
+        assert_eq!(
+            instructions(&machine, "1!=!"),
+            vec![
+                Instruction::PushConst(1),
+                Instruction::Call(entropy),
+                Instruction::Call(ne),
+                Instruction::Return,
+            ]
+        );
+        let add = machine.resolve('+', SourceRole::BinaryOperator).unwrap();
+        assert_eq!(
+            instructions(&machine, "!+1"),
+            vec![
+                Instruction::Call(entropy),
+                Instruction::PushConst(1),
+                Instruction::Call(add),
+                Instruction::Return,
+            ]
+        );
+        assert_eq!(
+            instructions(&machine, "1==!"),
+            vec![
+                Instruction::PushConst(1),
+                Instruction::Call(entropy),
+                Instruction::Call(eq),
+                Instruction::Return,
+            ]
+        );
+        // `!` has no applied-read or write role.
+        let mut builder = CodeBuilder::new();
+        assert!(compile_rhs("!(1)", &machine, &mut builder).is_err());
     }
 
     #[test]
