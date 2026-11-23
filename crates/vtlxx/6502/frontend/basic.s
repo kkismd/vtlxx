@@ -1381,8 +1381,10 @@ value:
     jeq @read_char
     cmp #$60
     jeq @try_read_char
-    cmp #$27
+    cmp #$21
     jeq @read_entropy
+    cmp #$27
+    jeq char_literal
     cmp #'0'
     bcc @minus
     cmp #'9'+1
@@ -1495,6 +1497,46 @@ value:
     dec nesting
 @done:
     rts
+
+; Character literal reader, entered by a long branch from value: with the
+; opening quote as the lookahead byte. 'c' is exactly one printable ASCII
+; byte other than ' itself between single quotes, with no escape syntax
+; (ADR #613). The payload and the closing quote are both validated before
+; anything is emitted, then the byte lowers to the same cc_push_const as a
+; decimal literal. `digit` is free scratch here: it is only live inside
+; parse_literal. Payload bytes such as ';', ' ' or '(' are consumed here,
+; never reparsed as separators, comments or structure. This block lives
+; outside value: so value:'s short branches keep their audited ranges.
+char_literal:
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #$20
+    jcc syntax_error
+    cmp #$7f
+    jcs syntax_error
+    cmp #$27
+    jeq syntax_error
+    sta digit
+    jsr take
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne syntax_error
+    lda look_byte
+    cmp #$27
+    jne syntax_error
+    jsr take
+    lda digit
+    ldx #0
+    jmp cc_push_const
 
 enter_nesting:
     inc nesting
