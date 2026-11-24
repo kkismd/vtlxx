@@ -1,6 +1,34 @@
-use std::io::Cursor;
+use std::collections::VecDeque;
+use std::io;
 use std::process::{Command, Stdio};
-use vtlxx::Machine;
+use std::sync::{Arc, Mutex};
+use vtlxx::{InputEvent, Machine, ReadMode, RuntimeError, RuntimeInput, SourceError};
+
+struct ScriptedInput {
+    events: VecDeque<io::Result<InputEvent>>,
+    calls: Arc<Mutex<usize>>,
+}
+impl RuntimeInput for ScriptedInput {
+    fn read_event(&mut self, mode: ReadMode) -> io::Result<InputEvent> {
+        assert_eq!(mode, ReadMode::Try);
+        *self.calls.lock().unwrap() += 1;
+        self.events.pop_front().expect("input script exhausted")
+    }
+}
+fn input(m: &mut Machine, bytes: &[u8]) -> Arc<Mutex<usize>> {
+    let calls = Arc::new(Mutex::new(0));
+    let events = bytes
+        .iter()
+        .copied()
+        .map(|b| Ok(InputEvent::Byte(b)))
+        .chain(std::iter::once(Ok(InputEvent::Eof)))
+        .collect();
+    m.set_runtime_input(ScriptedInput {
+        events,
+        calls: calls.clone(),
+    });
+    calls
+}
 
 const SOURCE: &str = include_str!("../examples/1024.vtl");
 const MARKER: &str = "; GAME1024_TEST_DEFINITIONS_END";
@@ -51,22 +79,14 @@ fn initial_draws_and_initialization_are_independent_expectations() {
         assert_eq!(m.storage(20), state);
     }
     set(&mut m, 20, 12345);
-    set(&mut m, 26, 1);
     call(&mut m, "newgame=()");
     assert_eq!(board(&m), [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
     assert_eq!(
-        (
-            m.storage(20),
-            m.storage(21),
-            m.storage(22),
-            m.storage(23),
-            m.storage(26)
-        ),
-        (-22907, 0, 0, 0, 1)
+        (m.storage(20), m.storage(21), m.storage(22), m.storage(23)),
+        (-22907, 0, 0, 0)
     );
     call(&mut m, "newgame=()");
     assert_ne!(m.storage(20), -22907);
-    assert_eq!(m.storage(26), 1);
 }
 
 #[test]
@@ -134,21 +154,13 @@ fn availability_checks_empty_and_equal_neighbors() {
 }
 
 #[test]
-fn input_lines_handle_crlf_cr_empty_and_incomplete_eof() {
-    for (input, expected) in [
-        (&b"W\r\nA\n"[..], vec![87, 65, -1]),
-        (&b"W\rA\n"[..], vec![87, 65, -1]),
-        (&b"\n\r\n\r\n"[..], vec![0, 0, 0, -1]),
-        (&b"R\r\nQ\n"[..], vec![82, 81, -1]),
-        (&b"wxyz\n?bad\na\nD"[..], vec![87, 0, 65, -1]),
-    ] {
-        let mut m = machine();
-        m.set_input(Cursor::new(input.to_vec()));
-        for value in expected {
-            m.execute_source("readcmd=()").unwrap();
-            assert_eq!(m.pop().unwrap(), value, "input {input:?}");
-            assert_eq!(m.stack(), PREFIX);
-        }
+fn readcmd_classifies_each_byte() {
+    let mut m = machine();
+    input(&mut m, b"hJkLrQ\r\nwasd?\0");
+    for expected in [72, 74, 75, 76, 82, 81, 0, 0, -2, -2, -2, -2, -2, 0, -1] {
+        m.execute_source("readcmd=()").unwrap();
+        assert_eq!(m.pop().unwrap(), expected);
+        assert_eq!(m.stack(), PREFIX);
     }
 }
 
@@ -166,6 +178,7 @@ fn cell_centering_and_score_rendering() {
     assert!(m.output().starts_with(b"1024\nSCORE: 10001  MOVES: 0\n\n"));
 }
 
+#[cfg(unix)]
 #[test]
 fn initial_cli_stdout_is_exact() {
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
@@ -184,45 +197,36 @@ fn initial_cli_stdout_is_exact() {
         "+-------+-------+-------+-------+\n|       |       |       |       |\n|   .   |   .   |   1   |   .   |\n|       |       |       |       |\n",
         "+-------+-------+-------+-------+\n|       |       |       |       |\n|   .   |   .   |   .   |   .   |\n|       |       |       |       |\n",
         "+-------+-------+-------+-------+\n|       |       |       |       |\n|   .   |   .   |   .   |   .   |\n|       |       |       |       |\n",
-        "+-------+-------+-------+-------+\n\nWASD MOVE  R RESTART  Q QUIT\n> "
+        "+-------+-------+-------+-------+\n\nHJKL MOVE  R RESTART  Q QUIT\n> "
     );
     assert_eq!(output.stdout, expected.as_bytes());
 }
 
-fn run_game(input: &[u8]) -> Machine {
+fn run_game(bytes: &[u8]) -> Machine {
     let mut m = machine();
-    m.set_input(Cursor::new(input.to_vec()));
+    input(&mut m, bytes);
     set(&mut m, 20, 12345);
-    set(&mut m, 26, 0);
     call(&mut m, "gameloop=()");
     m
 }
 
 #[test]
-fn invalid_lines_and_incomplete_eof_leave_game_state_unchanged() {
-    let initial = run_game(b"Q\n");
-    for input in [&b"?\n\nQ\n"[..], &b"A"[..]] {
-        let actual = run_game(input);
-        for i in 0..=25 {
-            assert_eq!(
-                actual.storage(i),
-                initial.storage(i),
-                "storage {i}, input {input:?}"
-            );
-        }
-        if input.starts_with(b"?") {
-            let mut expected = initial.output().to_vec();
-            expected.extend_from_slice(b"INVALID COMMAND\n> INVALID COMMAND\n> ");
-            assert_eq!(actual.output(), expected);
-        } else {
-            assert_eq!(actual.output(), initial.output());
-        }
+fn invalid_bytes_leave_game_state_unchanged() {
+    let initial = run_game(b"Q");
+    let actual = run_game(b"?wasd\r\nQ");
+    for i in 0..=25 {
+        assert_eq!(actual.storage(i), initial.storage(i), "storage {i}");
     }
+    let mut expected = initial.output().to_vec();
+    for _ in 0..5 {
+        expected.extend_from_slice(b"INVALID COMMAND\n> ");
+    }
+    assert_eq!(actual.output(), expected);
 }
 
 #[test]
 fn successful_move_draws_twice_and_restart_continues_stream() {
-    let moved = run_game(b"A\nQ\n");
+    let moved = run_game(b"H\nQ\n");
     assert_eq!(
         board(&moved),
         [1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -236,7 +240,7 @@ fn successful_move_draws_twice_and_restart_continues_stream() {
         ),
         (-15869, 0, 0, 1)
     );
-    let restarted = run_game(b"A\nR\nQ\n");
+    let restarted = run_game(b"H\nR\nQ\n");
     assert_eq!(restarted.storage(20), -21713);
     assert_eq!(
         (
@@ -261,9 +265,9 @@ fn successful_move_draws_twice_and_restart_continues_stream() {
 
 #[test]
 fn repeated_no_op_does_not_redraw_or_change_state() {
-    let before = run_game(b"A\nA\nQ\n");
-    let after = run_game(b"A\nA\nA\nQ\n");
-    for i in (0..=15).chain(20..=23).chain(25..=26) {
+    let before = run_game(b"H\nH\nQ\n");
+    let after = run_game(b"H\nH\nH\nQ\n");
+    for i in (0..=15).chain(20..=23).chain(25..=25) {
         assert_eq!(after.storage(i), before.storage(i), "storage {i}");
     }
     let mut expected = before.output().to_vec();
@@ -285,7 +289,7 @@ fn procedures_preserve_registers_outside_transitive_clobbers() {
         ("gameloop=()", "ABCDEFGHIJKLMNOPVWXY", false),
     ] {
         let mut m = machine();
-        m.set_input(Cursor::new(b"Q\n".to_vec()));
+        input(&mut m, b"Q");
         for index in 0..26 {
             m.execute_source(&format!(
                 "{}={}",
@@ -314,7 +318,20 @@ fn procedures_preserve_registers_outside_transitive_clobbers() {
 
 // Inject only fixture setup after g's initial i call; all game decisions and
 // procedures remain the source under test.
-fn game_with_position(cells: [i16; 16], moves: i16, input: &[u8]) -> Machine {
+fn game_with_position(cells: [i16; 16], moves: i16, bytes: &[u8]) -> Machine {
+    let events = bytes
+        .iter()
+        .copied()
+        .map(|b| Ok(InputEvent::Byte(b)))
+        .collect();
+    game_with_position_events(cells, moves, events)
+}
+
+fn game_with_position_events(
+    cells: [i16; 16],
+    moves: i16,
+    events: Vec<io::Result<InputEvent>>,
+) -> Machine {
     let end = SOURCE.find(MARKER).unwrap();
     let mut setup = String::new();
     for (index, value) in cells.into_iter().enumerate() {
@@ -332,7 +349,10 @@ fn game_with_position(cells: [i16; 16], moves: i16, input: &[u8]) -> Machine {
     for &value in PREFIX {
         m.push(value);
     }
-    m.set_input(Cursor::new(input.to_vec()));
+    m.set_runtime_input(ScriptedInput {
+        events: events.into(),
+        calls: Arc::new(Mutex::new(0)),
+    });
     set(&mut m, 20, 12345);
     call(&mut m, "gameloop=()");
     m
@@ -341,7 +361,7 @@ fn game_with_position(cells: [i16; 16], moves: i16, input: &[u8]) -> Machine {
 #[test]
 fn winning_move_spawns_before_display_saturates_moves_and_locks_input() {
     let cells = [512, 512, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-    let won = game_with_position(cells, 32767, b"A\nQ\n");
+    let won = game_with_position(cells, 32767, b"H\nQ\n");
     assert_eq!(won.storage(0), 1024);
     assert_eq!(won.storage(23), 32767);
     assert_eq!(won.storage(25), 1);
@@ -352,14 +372,14 @@ fn winning_move_spawns_before_display_saturates_moves_and_locks_input() {
     let victory = output.rfind("YOU WIN!\n").unwrap();
     assert!(last_screen < victory);
     assert!(output[last_screen..victory].contains("1024"));
-    let locked = game_with_position(cells, 32767, b"A\nW\n?\nQ\n");
-    for i in (0..=15).chain(20..=26) {
+    let locked = game_with_position(cells, 32767, b"H\nK\n?\nQ\n");
+    for i in (0..=15).chain(20..=25) {
         assert_eq!(locked.storage(i), won.storage(i), "storage {i}");
     }
     let mut expected = won.output().to_vec();
     expected.extend_from_slice(b"R OR Q ONLY\n> R OR Q ONLY\n> ");
     assert_eq!(locked.output(), expected);
-    let restarted = game_with_position(cells, 32767, b"A\nR\nQ\n");
+    let restarted = game_with_position(cells, 32767, b"H\nR\nQ\n");
     assert_eq!(restarted.storage(20), -21713);
     assert_eq!(
         (
@@ -375,7 +395,7 @@ fn winning_move_spawns_before_display_saturates_moves_and_locks_input() {
 #[test]
 fn final_spawn_causes_game_over_and_terminal_input_is_locked() {
     let cells = [2, 1, 2, 0, 2, 1, 2, 1, 1, 2, 1, 2, 2, 1, 2, 1];
-    let lost = game_with_position(cells, 0, b"D\nQ\n");
+    let lost = game_with_position(cells, 0, b"L\nQ\n");
     assert_eq!(
         board(&lost),
         [1, 2, 1, 2, 2, 1, 2, 1, 1, 2, 1, 2, 2, 1, 2, 1]
@@ -387,8 +407,8 @@ fn final_spawn_causes_game_over_and_terminal_input_is_locked() {
             .windows(b"GAME OVER\n".len())
             .any(|w| w == b"GAME OVER\n")
     );
-    let locked = game_with_position(cells, 0, b"D\nA\nQ\n");
-    for i in (0..=15).chain(20..=26) {
+    let locked = game_with_position(cells, 0, b"L\nH\nQ\n");
+    for i in (0..=15).chain(20..=25) {
         assert_eq!(locked.storage(i), lost.storage(i), "storage {i}");
     }
     let mut expected = lost.output().to_vec();
@@ -399,11 +419,103 @@ fn final_spawn_causes_game_over_and_terminal_input_is_locked() {
 #[test]
 fn victory_takes_priority_when_final_board_has_no_moves() {
     let cells = [512, 512, 1, 2, 1, 2, 1, 2, 2, 1, 2, 1, 1, 2, 1, 2];
-    let won = game_with_position(cells, 0, b"A\nQ\n");
+    let won = game_with_position(cells, 0, b"H\nQ\n");
     assert_eq!(
         board(&won),
         [1024, 1, 2, 1, 1, 2, 1, 2, 2, 1, 2, 1, 1, 2, 1, 2]
     );
     assert!(won.output().windows(9).any(|w| w == b"YOU WIN!\n"));
     assert!(!won.output().windows(10).any(|w| w == b"GAME OVER\n"));
+}
+
+fn run_events(
+    events: Vec<io::Result<InputEvent>>,
+) -> (Machine, Result<(), SourceError>, Arc<Mutex<usize>>) {
+    let mut m = machine();
+    let calls = Arc::new(Mutex::new(0));
+    m.set_runtime_input(ScriptedInput {
+        events: events.into(),
+        calls: calls.clone(),
+    });
+    set(&mut m, 20, 12345);
+    let result = m.execute_source("gameloop=()");
+    (m, result, calls)
+}
+
+#[test]
+fn idle_and_nul_do_not_change_output_or_state_even_after_victory() {
+    let baseline = run_game(b"hlrq");
+    let (actual, result, calls) = run_events(vec![
+        Ok(InputEvent::NotReady),
+        Ok(InputEvent::Byte(0)),
+        Ok(InputEvent::Byte(b'h')),
+        Ok(InputEvent::NotReady),
+        Ok(InputEvent::NotReady),
+        Ok(InputEvent::Byte(b'l')),
+        Ok(InputEvent::Byte(0)),
+        Ok(InputEvent::Byte(b'r')),
+        Ok(InputEvent::Byte(b'q')),
+        Ok(InputEvent::Byte(b'h')),
+    ]);
+    assert_eq!(result, Ok(()));
+    assert_eq!(*calls.lock().unwrap(), 9);
+    for i in 0..=25 {
+        assert_eq!(actual.storage(i), baseline.storage(i), "storage {i}");
+    }
+    assert_eq!(actual.output(), baseline.output());
+    let cells = [512, 512, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    let normal = game_with_position(cells, 0, b"HQ");
+    let idle = game_with_position_events(
+        cells,
+        0,
+        vec![
+            Ok(InputEvent::Byte(b'H')),
+            Ok(InputEvent::NotReady),
+            Ok(InputEvent::NotReady),
+            Ok(InputEvent::Byte(0)),
+            Ok(InputEvent::Byte(b'\r')),
+            Ok(InputEvent::Byte(b'\n')),
+            Ok(InputEvent::Byte(b'Q')),
+        ],
+    );
+    assert_eq!(normal.output(), idle.output());
+    for i in 0..=25 {
+        assert_eq!(normal.storage(i), idle.storage(i));
+    }
+}
+
+#[test]
+fn fatal_input_preserves_prior_effects_and_stops_reading() {
+    let baseline = run_game(b"H");
+    let (actual, result, calls) = run_events(vec![
+        Ok(InputEvent::Byte(b'H')),
+        Err(io::Error::other("fatal")),
+        Ok(InputEvent::Byte(b'R')),
+    ]);
+    assert_eq!(result, Err(SourceError::Runtime(RuntimeError::InputError)));
+    assert_eq!(*calls.lock().unwrap(), 2);
+    assert_eq!(actual.output(), baseline.output());
+    for i in 0..=25 {
+        assert_eq!(actual.storage(i), baseline.storage(i));
+    }
+}
+
+#[test]
+fn directions_dispatch_in_both_cases_and_eof_follows_move() {
+    for (upper, lower, expected) in [
+        (b'H', b'h', [1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        (b'J', b'j', [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
+        (b'K', b'k', [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        (b'L', b'l', [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]),
+    ] {
+        let a = run_game(&[upper]);
+        let b = run_game(&[lower, b'Q']);
+        assert_eq!(a.output(), b.output());
+        for i in 0..=25 {
+            assert_eq!(a.storage(i), b.storage(i));
+        }
+        assert_eq!(board(&a), expected, "direction {}", upper as char);
+        assert_eq!(a.storage(23), 1, "direction {}", upper as char);
+    }
+    assert_eq!(run_game(b"").output(), run_game(b"Q").output());
 }

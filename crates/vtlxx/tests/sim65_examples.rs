@@ -23,12 +23,14 @@ enum Disposition {
 #[derive(Clone, Copy, Debug)]
 struct ExampleCase {
     name: &'static str,
+    engine: &'static str,
     disposition: Disposition,
 }
 
 const EXAMPLES: &[ExampleCase] = &[
     ExampleCase {
         name: "1024.vtl",
+        engine: "mos6502",
         disposition: Disposition::Portable {
             expected_stdout: None,
             cycle_limit: Some(256_000_000),
@@ -37,6 +39,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "eight_queens.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(include_bytes!("fixtures/eight_queens_example_output.txt")),
             cycle_limit: Some(256_000_000),
@@ -45,6 +48,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "eight_queens_storage.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(include_bytes!("fixtures/eight_queens_example_output.txt")),
             cycle_limit: Some(256_000_000),
@@ -53,6 +57,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "interactive_input.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"ENTER ONE CHARACTER: ASCII: 65\n"),
             cycle_limit: None,
@@ -61,6 +66,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "maze_dfs.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"7\n"),
             cycle_limit: None,
@@ -69,6 +75,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "micro_trek.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: None,
             cycle_limit: Some(4_000_000_000),
@@ -77,6 +84,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "rpn_evaluator.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"7\n"),
             cycle_limit: None,
@@ -85,6 +93,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "sim65_cli.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"42"),
             cycle_limit: None,
@@ -94,7 +103,7 @@ const EXAMPLES: &[ExampleCase] = &[
 ];
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires ca65, ld65, sim65, and Linux mos6502; run with --ignored"]
 fn registered_examples_match_the_rust_reference_when_portable() {
     let examples_dir = Path::new(EXAMPLES_DIR);
     let mut actual_names = fs::read_dir(examples_dir)
@@ -138,8 +147,27 @@ fn registered_examples_match_the_rust_reference_when_portable() {
             );
             continue;
         }
+        // The Rust CLI's Try input is supported on Unix only.
+        if case.name == "1024.vtl" && !cfg!(unix) {
+            println!("1024.vtl: Rust CLI Try input unsupported on this OS");
+            continue;
+        }
         if let Err(error) = check_example(case, examples_dir) {
             eprintln!("{error}");
+            failures.push(error);
+        }
+    }
+    if cfg!(unix) {
+        let moves = ExampleCase {
+            name: "1024.vtl",
+            engine: "mos6502",
+            disposition: Disposition::Portable {
+                expected_stdout: None,
+                cycle_limit: Some(256_000_000),
+                runtime_input: Some(include_bytes!("fixtures/1024_moves.txt")),
+            },
+        };
+        if let Err(error) = check_example(&moves, examples_dir) {
             failures.push(error);
         }
     }
@@ -166,7 +194,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
         &source,
         None,
         runtime_input,
-        false,
+        None,
     )
     .map_err(|error| format!("{}: {error}", case.name))?;
     if rust.status.code().is_none() {
@@ -186,7 +214,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
         &source,
         cycle_limit,
         runtime_input,
-        true,
+        Some(case.engine),
     )
     .map_err(|error| format!("{}: {error}", case.name))?;
     if target.status.code().is_none() {
@@ -238,12 +266,12 @@ fn run(
     source: &Path,
     cycle_limit: Option<u32>,
     runtime_input: Option<&[u8]>,
-    target: bool,
+    engine: Option<&str>,
 ) -> Result<Output, String> {
     let mut command = Command::new(binary);
     command.arg(source);
-    if target {
-        command.args(["--engine", "sim65"]);
+    if let Some(engine) = engine {
+        command.args(["--engine", engine]);
     }
     if source
         .file_name()
@@ -254,13 +282,15 @@ fn run(
     if let Some(cycle_limit) = cycle_limit {
         command.arg("--cycle-limit").arg(cycle_limit.to_string());
     }
-    if target && runtime_input.is_some() {
+    if engine.is_some() && runtime_input.is_some() {
         let fixture = if runtime_input
             == Some(include_bytes!("fixtures/interactive_input.txt").as_slice())
         {
             "interactive_input.txt"
         } else if runtime_input == Some(include_bytes!("fixtures/1024_quit.txt").as_slice()) {
             "1024_quit.txt"
+        } else if runtime_input == Some(include_bytes!("fixtures/1024_moves.txt").as_slice()) {
+            "1024_moves.txt"
         } else if runtime_input == Some(include_bytes!("fixtures/micro_trek_exit.txt").as_slice()) {
             "micro_trek_exit.txt"
         } else {
@@ -272,7 +302,9 @@ fn run(
                 .join(fixture),
         );
     }
-    if !target && let Some(input) = runtime_input {
+    if engine.is_none()
+        && let Some(input) = runtime_input
+    {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

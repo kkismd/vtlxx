@@ -1,6 +1,6 @@
 ; 1024: 4x4 sliding tile game. Board occupies storage 0..15,
 ; line buffer 16..19, PRNG 20, score high/low 21..22, moves 23,
-; changed 24, win 25, and CR continuation 26.
+; changed 24, and win 25.
 
 ; random: ( n -- value ); reads/writes storage[20]; clobbers A,B.
   &=random [
@@ -127,27 +127,13 @@
     ?="+-------+-------+-------+-------+" ?=() ?=()
   ]
 
-; readcmd: ( -- command ); reads input, reads/writes storage[26], clobbers X,Y.
+; readcmd: ( -- command ); reads one Try event, clobbers X,Y.
   &=readcmd [
-    X=$
-    %=@(26) [
-      @=26,0
-      %=X==10 [ X=$ ]
-    ]
-    Y=0
-    %=X==-1 [ Y=-1 ] [
-      %=(X==10)+(X==13) [
-        %=X==13 [ @=26,1 ]
-      ] [
-        Y=X
-        *=((X!=10)*(X!=13))*(X!=-1) [ X=$ ]
-        %=X==-1 [ Y=-1 ]
-        %=X==13 [ @=26,1 ]
-        %=Y>=97 [ %=Y<=122 [ Y=Y-32 ] ]
-        %=Y!=-1 [
-          %=(((((Y==87)+(Y==65))+(Y==83))+(Y==68))+(Y==82))+(Y==81)==0 [ Y=0 ]
-        ]
-      ]
+    X=` Y=X
+    %=(X==10)+(X==13) [ Y=0 ]
+    %=Y>=97 [ %=Y<=122 [ Y=Y-32 ] ]
+    %=(Y!=0)*(Y!=-1) [
+      %=(((((Y==72)+(Y==74))+(Y==75))+(Y==76))+(Y==82))+(Y==81)==0 [ Y=-2 ]
     ]
     ~=Y
   ]
@@ -165,7 +151,7 @@
   ]
 
 ; newgame: ( -- ); resets board, buffer, score, moves and flags, calls newtile twice;
-; reads/writes [20], preserves stream and [26], clobbers A..F.
+; reads/writes [20], preserves stream, clobbers A..F.
   &=newgame [
     C=0
     *=C<20 [ @=C,0 C=C+1 ]
@@ -174,46 +160,49 @@
   ]
 
 ; gameloop: ( -- ); owns game control and output, calls newgame,drawgame,readcmd,movegrid,newtile,canmove;
-; reads/writes storage[0..26], clobbers A..P,V..Y.
+; reads/writes storage[0..25], clobbers A..P,V..Y.
   &=gameloop [
     newgame=()
     drawgame=()
-    ?="WASD MOVE  R RESTART  Q QUIT" ?=()
+    ?="HJKL MOVE  R RESTART  Q QUIT" ?=()
     O=1
+    ?="> "
     *=O [
-      ?="> "
       readcmd=() N=~
       %=(N==-1)+(N==81) [ O=0 ] [
-        %=N==82 [
-          newgame=() drawgame=()
-          ?="WASD MOVE  R RESTART  Q QUIT" ?=()
-        ] [
-          canmove=() P=~
-          P=(P==0)+@(25)
-          %=P [ ?="R OR Q ONLY" ?=() ] [
-            %=N==0 [ ?="INVALID COMMAND" ?=() ] [
-              %=N==65 [ N=0 ]
-              %=N==68 [ N=1 ]
-              %=N==87 [ N=2 ]
-              %=N==83 [ N=3 ]
-              movegrid=N
-              %=@(24)==0 [ ?="NO MOVE" ?=() ] [
-                %=@(23)<32767 [ @=23,@(23)+1 ]
-                newtile=()
-                N=0
-                *=N<16 [ %=@(N)==1024 [ @=25,1 ] N=N+1 ]
-                drawgame=()
-                P=0
-                %=@(25) [ P=1 ?="YOU WIN!" ?=() ] [
-                  canmove=() N=~
-                  %=N==0 [ P=1 ?="GAME OVER" ?=() ]
-                ]
-                %=P [ ?="R RESTART  Q QUIT" ?=() ] [
-                  ?="WASD MOVE  R RESTART  Q QUIT" ?=()
+        %=N!=0 [
+          %=N==82 [
+            newgame=() drawgame=()
+            ?="HJKL MOVE  R RESTART  Q QUIT" ?=()
+          ] [
+            canmove=() P=~
+            P=(P==0)+@(25)
+            %=P [ ?="R OR Q ONLY" ?=() ] [
+              %=N==-2 [ ?="INVALID COMMAND" ?=() ] [
+                %=N==72 [ N=0 ]
+                %=N==76 [ N=1 ]
+                %=N==75 [ N=2 ]
+                %=N==74 [ N=3 ]
+                movegrid=N
+                %=@(24)==0 [ ?="NO MOVE" ?=() ] [
+                  %=@(23)<32767 [ @=23,@(23)+1 ]
+                  newtile=()
+                  N=0
+                  *=N<16 [ %=@(N)==1024 [ @=25,1 ] N=N+1 ]
+                  drawgame=()
+                  P=0
+                  %=@(25) [ P=1 ?="YOU WIN!" ?=() ] [
+                    canmove=() N=~
+                    %=N==0 [ P=1 ?="GAME OVER" ?=() ]
+                  ]
+                  %=P [ ?="R RESTART  Q QUIT" ?=() ] [
+                    ?="HJKL MOVE  R RESTART  Q QUIT" ?=()
+                  ]
                 ]
               ]
             ]
           ]
+          ?="> "
         ]
       ]
     ]
@@ -221,5 +210,4 @@
 
 ; GAME1024_TEST_DEFINITIONS_END
   @=20,12345
-  @=26,0
   gameloop=()
