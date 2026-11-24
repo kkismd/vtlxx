@@ -207,6 +207,109 @@ fn product_engines_match_on_shared_programs() {
 }
 
 #[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn static_data_fixture_and_failures_match_all_engines() {
+    #[derive(Clone, Copy, Debug)]
+    enum Expected {
+        Success(&'static [u8]),
+        CompileError,
+        BoundsError,
+    }
+    use Expected::{BoundsError, CompileError, Success};
+
+    let temp = TestDir::new();
+    let cases: &[(&[u8], Expected)] = &[
+        (
+            include_bytes!("fixtures/static_levels.vtl"),
+            Success(include_bytes!("fixtures/static_levels.txt")),
+        ),
+        (b"A=.MISSING(0)", CompileError),
+        (b".DATA:=[1] .DATA:=2", CompileError),
+        (b".DATA:=1 A=.DATA(0)", CompileError),
+        (b".DATA:=[1] #=.DATA", CompileError),
+        (b".DATA:=[256]", CompileError),
+        (b".DATA:=[1", CompileError),
+        (".DATA:=[\"é\"]".as_bytes(), CompileError),
+        (b".DATA:=[1,,2]", CompileError),
+        (b".DATA:=[1] A=.DATA(-1)", BoundsError),
+        (b".DATA:=[1] A=.DATA(1)", BoundsError),
+        (b".DATA:=[] A=.DATA(0)", BoundsError),
+    ];
+    for &(source, expected) in cases {
+        let path = temp.source(source);
+        let reference = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            .arg(&path)
+            .output()
+            .unwrap();
+        let reference_error = String::from_utf8_lossy(&reference.stderr);
+        match expected {
+            Success(stdout) => {
+                assert!(reference.status.success(), "{source:?}: {reference:?}");
+                assert_eq!(reference.stdout, stdout, "{source:?}");
+            }
+            CompileError | BoundsError => {
+                assert!(!reference.status.success(), "{source:?}: {reference:?}");
+                assert!(reference.stdout.is_empty(), "{source:?}: {reference:?}");
+                let diagnostic = match expected {
+                    CompileError => "Compile(",
+                    BoundsError => "Runtime(StaticDataOutOfBounds)",
+                    Success(_) => unreachable!(),
+                };
+                assert!(
+                    reference_error.contains(diagnostic),
+                    "{source:?}: {reference:?}"
+                );
+            }
+        }
+        for engine in ["sim65", "mos6502"] {
+            let output = cli()
+                .arg(&path)
+                .args(["--engine", engine, "--cycle-limit", "200000000"])
+                .output()
+                .unwrap();
+            let diagnostic = String::from_utf8_lossy(&output.stderr);
+            match expected {
+                Success(stdout) => {
+                    assert!(output.status.success(), "{engine}: {source:?}: {output:?}");
+                    assert_eq!(output.stdout, stdout, "{engine}: {source:?}");
+                }
+                CompileError => {
+                    assert!(!output.status.success(), "{engine}: {source:?}: {output:?}");
+                    assert!(output.stdout.is_empty(), "{engine}: {source:?}: {output:?}");
+                    assert!(
+                        diagnostic.contains("compilation failed"),
+                        "{engine}: {source:?}: {output:?}"
+                    );
+                }
+                BoundsError => {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(7),
+                        "{engine}: {source:?}: {output:?}"
+                    );
+                    assert!(output.stdout.is_empty(), "{engine}: {source:?}: {output:?}");
+                    assert!(
+                        diagnostic.contains("status 7"),
+                        "{engine}: {source:?}: {output:?}"
+                    );
+                }
+            }
+        }
+    }
+    // Whole-program compilation must suppress even an earlier output statement.
+    for engine in ["sim65", "mos6502"] {
+        let path = temp.source(b"?=42 .DATA:=[256]");
+        let output = cli().arg(path).args(["--engine", engine]).output().unwrap();
+        assert!(!output.status.success(), "{engine}: {output:?}");
+        assert!(output.stdout.is_empty(), "{engine}: {output:?}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr).contains("compilation failed"),
+            "{engine}: {output:?}"
+        );
+    }
+}
+
+#[test]
 #[ignore = "requires ca65 and ld65; run with --ignored"]
 fn default_and_explicit_mos_match_on_cycle_limit() {
     let temp = TestDir::new();
