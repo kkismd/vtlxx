@@ -430,3 +430,62 @@ fn interactive_compilation_failure_does_not_wait_for_stdin() {
         .unwrap();
     assert!(output.is_empty());
 }
+
+// Exercise the real example in the native CI path, with deadlines even if input
+// handling regresses into an endless polling loop.
+#[test]
+#[ignore = "requires ca65 and ld65; run with --ignored"]
+fn game_1024_batch_matches_reference() {
+    let temp = TestDir::new();
+    let input = temp.0.join("1024-input.bin");
+    fs::write(&input, b"hJkLrQ").unwrap();
+    let source = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/1024.vtl");
+    let mut reference = Command::new(env!("CARGO_BIN_EXE_vtlxx"));
+    reference
+        .arg(source)
+        .stdin(Stdio::from(fs::File::open(&input).unwrap()));
+    let mut native = cli();
+    native
+        .arg(source)
+        .args([
+            "--engine",
+            "mos6502",
+            "--cycle-limit",
+            "200000000",
+            "--runtime-input",
+        ])
+        .arg(&input);
+    let reference = output_with_deadline(&mut reference);
+    let native = output_with_deadline(&mut native);
+    assert!(reference.status.success(), "{reference:?}");
+    assert!(native.status.success(), "{native:?}");
+    assert_eq!(reference.stdout, native.stdout);
+}
+
+fn output_with_deadline(command: &mut Command) -> Output {
+    let mut child = TimedChild(
+        command
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stdout = child.0.stdout.take().unwrap();
+    let mut stderr = child.0.stderr.take().unwrap();
+    let out = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).unwrap();
+        bytes
+    });
+    let err = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).unwrap();
+        bytes
+    });
+    let status = wait(&mut child.0);
+    Output {
+        status,
+        stdout: out.join().unwrap(),
+        stderr: err.join().unwrap(),
+    }
+}

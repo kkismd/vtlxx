@@ -1,8 +1,9 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 const EXAMPLES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
 
@@ -23,12 +24,14 @@ enum Disposition {
 #[derive(Clone, Copy, Debug)]
 struct ExampleCase {
     name: &'static str,
+    engine: &'static str,
     disposition: Disposition,
 }
 
 const EXAMPLES: &[ExampleCase] = &[
     ExampleCase {
         name: "1024.vtl",
+        engine: "mos6502",
         disposition: Disposition::Portable {
             expected_stdout: None,
             cycle_limit: Some(256_000_000),
@@ -37,6 +40,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "eight_queens.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(include_bytes!("fixtures/eight_queens_example_output.txt")),
             cycle_limit: Some(256_000_000),
@@ -45,6 +49,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "eight_queens_storage.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(include_bytes!("fixtures/eight_queens_example_output.txt")),
             cycle_limit: Some(256_000_000),
@@ -53,6 +58,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "interactive_input.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"ENTER ONE CHARACTER: ASCII: 65\n"),
             cycle_limit: None,
@@ -61,6 +67,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "maze_dfs.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"7\n"),
             cycle_limit: None,
@@ -69,6 +76,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "micro_trek.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: None,
             cycle_limit: Some(4_000_000_000),
@@ -77,6 +85,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "rpn_evaluator.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"7\n"),
             cycle_limit: None,
@@ -85,6 +94,7 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "sim65_cli.vtl",
+        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"42"),
             cycle_limit: None,
@@ -94,7 +104,7 @@ const EXAMPLES: &[ExampleCase] = &[
 ];
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires ca65, ld65, sim65, and Linux mos6502; run with --ignored"]
 fn registered_examples_match_the_rust_reference_when_portable() {
     let examples_dir = Path::new(EXAMPLES_DIR);
     let mut actual_names = fs::read_dir(examples_dir)
@@ -138,8 +148,33 @@ fn registered_examples_match_the_rust_reference_when_portable() {
             );
             continue;
         }
+        if case.name == "1024.vtl" && !cfg!(target_os = "linux") {
+            println!(
+                "1024.vtl: not run: mos6502 host requires Linux{}",
+                if cfg!(unix) {
+                    ""
+                } else {
+                    "; Rust CLI Try input also requires Unix"
+                }
+            );
+            continue;
+        }
         if let Err(error) = check_example(case, examples_dir) {
             eprintln!("{error}");
+            failures.push(error);
+        }
+    }
+    if cfg!(target_os = "linux") {
+        let moves = ExampleCase {
+            name: "1024.vtl",
+            engine: "mos6502",
+            disposition: Disposition::Portable {
+                expected_stdout: None,
+                cycle_limit: Some(256_000_000),
+                runtime_input: Some(include_bytes!("fixtures/1024_moves.txt")),
+            },
+        };
+        if let Err(error) = check_example(&moves, examples_dir) {
             failures.push(error);
         }
     }
@@ -166,7 +201,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
         &source,
         None,
         runtime_input,
-        false,
+        None,
     )
     .map_err(|error| format!("{}: {error}", case.name))?;
     if rust.status.code().is_none() {
@@ -186,7 +221,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
         &source,
         cycle_limit,
         runtime_input,
-        true,
+        Some(case.engine),
     )
     .map_err(|error| format!("{}: {error}", case.name))?;
     if target.status.code().is_none() {
@@ -238,12 +273,12 @@ fn run(
     source: &Path,
     cycle_limit: Option<u32>,
     runtime_input: Option<&[u8]>,
-    target: bool,
+    engine: Option<&str>,
 ) -> Result<Output, String> {
     let mut command = Command::new(binary);
     command.arg(source);
-    if target {
-        command.args(["--engine", "sim65"]);
+    if let Some(engine) = engine {
+        command.args(["--engine", engine]);
     }
     if source
         .file_name()
@@ -254,13 +289,15 @@ fn run(
     if let Some(cycle_limit) = cycle_limit {
         command.arg("--cycle-limit").arg(cycle_limit.to_string());
     }
-    if target && runtime_input.is_some() {
+    if engine.is_some() && runtime_input.is_some() {
         let fixture = if runtime_input
             == Some(include_bytes!("fixtures/interactive_input.txt").as_slice())
         {
             "interactive_input.txt"
         } else if runtime_input == Some(include_bytes!("fixtures/1024_quit.txt").as_slice()) {
             "1024_quit.txt"
+        } else if runtime_input == Some(include_bytes!("fixtures/1024_moves.txt").as_slice()) {
+            "1024_moves.txt"
         } else if runtime_input == Some(include_bytes!("fixtures/micro_trek_exit.txt").as_slice()) {
             "micro_trek_exit.txt"
         } else {
@@ -272,7 +309,29 @@ fn run(
                 .join(fixture),
         );
     }
-    if !target && let Some(input) = runtime_input {
+    if source.file_name().is_some_and(|name| name == "1024.vtl") {
+        if engine.is_none() {
+            let fixture = if runtime_input
+                == Some(include_bytes!("fixtures/1024_quit.txt").as_slice())
+            {
+                "1024_quit.txt"
+            } else if runtime_input == Some(include_bytes!("fixtures/1024_moves.txt").as_slice()) {
+                "1024_moves.txt"
+            } else {
+                return Err("unknown 1024 input fixture".to_owned());
+            };
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(fixture);
+            let input = fs::File::open(&path)
+                .map_err(|error| format!("open {}: {error}", path.display()))?;
+            command.stdin(Stdio::from(input));
+        }
+        return output_with_deadline(&mut command, binary);
+    }
+    if engine.is_none()
+        && let Some(input) = runtime_input
+    {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -293,6 +352,55 @@ fn run(
             .output()
             .map_err(|error| format!("start {} for {}: {error}", binary, source.display()))
     }
+}
+
+// Drain both pipes concurrently so a full pipe cannot prevent completion.
+// Always reap the child, including on timeout or a wait error.
+fn output_with_deadline(command: &mut Command, binary: &str) -> Result<Output, String> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("start {binary}: {error}"))?;
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let out = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let err = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            result => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(match result {
+                    Ok(None) => format!("{binary} timed out"),
+                    Err(error) => format!("wait for {binary}: {error}"),
+                    Ok(Some(_)) => unreachable!(),
+                });
+            }
+        }
+    };
+    let stdout = out
+        .join()
+        .map_err(|_| "stdout reader panicked".to_owned())?
+        .map_err(|error| format!("read stdout: {error}"))?;
+    let stderr = err
+        .join()
+        .map_err(|_| "stderr reader panicked".to_owned())?
+        .map_err(|error| format!("read stderr: {error}"))?;
+    Ok(Output {
+        status: status?,
+        stdout,
+        stderr,
+    })
 }
 
 fn assert_eight_queens_output(name: &str, output: &[u8]) -> Result<(), String> {

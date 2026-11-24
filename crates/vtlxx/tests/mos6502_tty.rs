@@ -239,3 +239,75 @@ fn ordinary_interactive_keeps_canonical_mode() {
     assert!(wait(&mut child).success());
     tty.restored();
 }
+
+struct GuardedChild(Child);
+impl Drop for GuardedChild {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+fn screen_until_prompt(rx: &std::sync::mpsc::Receiver<u8>) -> String {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let mut bytes = Vec::new();
+    while !bytes.ends_with(b"> ") {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        bytes.push(rx.recv_timeout(remaining).expect("1024 output timed out"));
+    }
+    String::from_utf8(bytes).unwrap()
+}
+
+#[test]
+#[ignore = "requires ca65 and ld65 and a Linux PTY"]
+fn game_1024_raw_terminal_accepts_keys_without_enter() {
+    for native in [false, true] {
+        let mut tty = Terminal::new();
+        let fd = unsafe { libc::dup(tty.slave.as_raw_fd()) };
+        assert!(fd >= 0);
+        let mut command = Command::new(if native {
+            env!("CARGO_BIN_EXE_vtlxx6502")
+        } else {
+            env!("CARGO_BIN_EXE_vtlxx")
+        });
+        command.arg(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/1024.vtl"));
+        if native {
+            command.arg("--interactive");
+        }
+        let mut child = GuardedChild(
+            command
+                .arg("--raw-tty")
+                .stdin(unsafe { Stdio::from(OwnedFd::from_raw_fd(fd)) })
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let mut stdout = child.0.stdout.take().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut byte = [0];
+            while stdout.read_exact(&mut byte).is_ok() {
+                if tx.send(byte[0]).is_err() {
+                    break;
+                }
+            }
+        });
+        let initial = screen_until_prompt(&rx);
+        assert!(initial.contains("MOVES: 0"), "{initial}");
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err());
+        tty.master.write_all(b"h").unwrap();
+        let moved = screen_until_prompt(&rx);
+        assert!(moved.contains("MOVES: 1"), "{moved}");
+        assert_ne!(initial, moved);
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err());
+        tty.master.write_all(b"r").unwrap();
+        let restarted = screen_until_prompt(&rx);
+        assert!(restarted.contains("MOVES: 0"), "{restarted}");
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err());
+        tty.master.write_all(b"q").unwrap();
+        assert!(wait(&mut child.0).success());
+        assert!(rx.recv_timeout(Duration::from_millis(150)).is_err());
+        tty.restored();
+    }
+}

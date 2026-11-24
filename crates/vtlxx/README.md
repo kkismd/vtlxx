@@ -758,29 +758,24 @@ opener / closer の改行配置には今後評価する余地がありますが�
 
 ## Example: 1024
 
-[`examples/1024.vtl`](examples/1024.vtl) は 4×4 の盤面で同じ数を合わせて 1024 を目指すゲームです。repository root から Rust CLI で起動します。
+[`examples/1024.vtl`](examples/1024.vtl) は 4×4 の盤面で同じ数を合わせて 1024 を目指すゲームです。`H` は左、`J` は下、`K` は上、`L` は右に移動し、`R` は新しいゲーム、`Q` は終了です。小文字も使えます。各キーは1文字ずつ処理され、Enter は不要です。
+
+Linux の端末では repository root から次のように起動します。
 
 ```sh
-cargo run -p vtlxx --bin vtlxx -- \
-  crates/vtlxx/examples/1024.vtl
+cargo run -p vtlxx --bin vtlxx -- crates/vtlxx/examples/1024.vtl --raw-tty
+cargo run -p vtlxx --bin vtlxx6502 -- crates/vtlxx/examples/1024.vtl --interactive --raw-tty
 ```
 
-`W` / `A` / `S` / `D` で上下左右、`R` で新しいゲーム、`Q` で終了します。小文字も使えます。通常の端末ではコマンドを入力して Enter を押してください。入力文字と改行は端末の echo として表示されます。
+6502 CLI は既定で mos6502 を使い、リンクには cc65 が必要です（`--engine mos6502` も指定できます）。標準 sim65 はこの example が使う非ブロッキング入力に対応していません。Rust CLI の非ブロッキング入力は Unix 対応であり、非 Unix ではこの example の入力方式を利用できません。raw でない通常の端末では Enter が必要になる場合があります。pipe や入力ファイルなど非 TTY の固定入力には raw 指定は不要です。
 
-同じ source は 6502/sim65 でも実行できます。固定入力による終了は、[`tests/sim65_examples.rs`](tests/sim65_examples.rs) の ignored 統合テストで、Rust reference と 6502 の正常終了・stdout 一致を検証しています。検証条件は `1024_quit.txt` を入力に使い、cycle 上限を `256000000` とした一括実行です。
+固定入力による即終了と移動・再開・終了の列について、[`tests/sim65_examples.rs`](tests/sim65_examples.rs) で Rust と actual 6502 の正常終了・stdout 一致を検証します。例えば次は改行のない固定入力で、cycle 上限を `256000000` とした一括実行です。
 
 ```sh
 cargo run -p vtlxx --bin vtlxx6502 -- \
   crates/vtlxx/examples/1024.vtl \
-  --runtime-input crates/vtlxx/tests/fixtures/1024_quit.txt \
+  --runtime-input crates/vtlxx/tests/fixtures/1024_moves.txt \
   --cycle-limit 256000000
-```
-
-端末から操作する場合は、次の対話モードを使用します。ただし、上記の固定入力テストは対話操作の全経路まで検証するものではありません。
-
-```sh
-cargo run -p vtlxx --bin vtlxx6502 -- \
-  crates/vtlxx/examples/1024.vtl --interactive
 ```
 
 ## Example: Micro Trek
