@@ -1,7 +1,12 @@
 use std::collections::VecDeque;
 use std::io;
-use std::process::{Command, Stdio};
+#[cfg(unix)]
+use std::io::{Read, Write};
+#[cfg(unix)]
+use std::process::{Child, Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 use vtlxx::{InputEvent, Machine, ReadMode, RuntimeError, RuntimeInput, SourceError};
 
 struct ScriptedInput {
@@ -21,7 +26,6 @@ fn input(m: &mut Machine, bytes: &[u8]) -> Arc<Mutex<usize>> {
         .iter()
         .copied()
         .map(|b| Ok(InputEvent::Byte(b)))
-        .chain(std::iter::once(Ok(InputEvent::Eof)))
         .collect();
     m.set_runtime_input(ScriptedInput {
         events,
@@ -156,7 +160,16 @@ fn availability_checks_empty_and_equal_neighbors() {
 #[test]
 fn readcmd_classifies_each_byte() {
     let mut m = machine();
-    input(&mut m, b"hJkLrQ\r\nwasd?\0");
+    let events = b"hJkLrQ\r\nwasd?\0"
+        .iter()
+        .copied()
+        .map(|b| Ok(InputEvent::Byte(b)))
+        .chain(std::iter::once(Ok(InputEvent::Eof)))
+        .collect();
+    m.set_runtime_input(ScriptedInput {
+        events,
+        calls: Arc::new(Mutex::new(0)),
+    });
     for expected in [72, 74, 75, 76, 82, 81, 0, 0, -2, -2, -2, -2, -2, 0, -1] {
         m.execute_source("readcmd=()").unwrap();
         assert_eq!(m.pop().unwrap(), expected);
@@ -179,13 +192,61 @@ fn cell_centering_and_score_rendering() {
 }
 
 #[cfg(unix)]
+struct ChildGuard(Child);
+
+#[cfg(unix)]
+impl Drop for ChildGuard {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+#[cfg(unix)]
+fn cli_output(bytes: &[u8]) -> Output {
+    let mut child = ChildGuard(
+        Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/1024.vtl"))
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap(),
+    );
+    let mut stdin = child.0.stdin.take().unwrap();
+    stdin.write_all(bytes).unwrap();
+    drop(stdin);
+    let mut stdout = child.0.stdout.take().unwrap();
+    let mut stderr = child.0.stderr.take().unwrap();
+    let out = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).unwrap();
+        bytes
+    });
+    let err = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).unwrap();
+        bytes
+    });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(Instant::now() < deadline, "1024 CLI timed out");
+        std::thread::sleep(Duration::from_millis(10));
+    };
+    Output {
+        status,
+        stdout: out.join().unwrap(),
+        stderr: err.join().unwrap(),
+    }
+}
+
+#[cfg(unix)]
 #[test]
 fn initial_cli_stdout_is_exact() {
-    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx"))
-        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/1024.vtl"))
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
+    let output = cli_output(b"");
     assert!(
         output.status.success(),
         "{}",
@@ -486,7 +547,7 @@ fn idle_and_nul_do_not_change_output_or_state_even_after_victory() {
 
 #[test]
 fn fatal_input_preserves_prior_effects_and_stops_reading() {
-    let baseline = run_game(b"H");
+    let baseline = run_game(b"HQ");
     let (actual, result, calls) = run_events(vec![
         Ok(InputEvent::Byte(b'H')),
         Err(io::Error::other("fatal")),
@@ -501,14 +562,14 @@ fn fatal_input_preserves_prior_effects_and_stops_reading() {
 }
 
 #[test]
-fn directions_dispatch_in_both_cases_and_eof_follows_move() {
+fn directions_dispatch_in_both_cases() {
     for (upper, lower, expected) in [
         (b'H', b'h', [1, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
         (b'J', b'j', [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
         (b'K', b'k', [1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
         (b'L', b'l', [1, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]),
     ] {
-        let a = run_game(&[upper]);
+        let a = run_game(&[upper, b'Q']);
         let b = run_game(&[lower, b'Q']);
         assert_eq!(a.output(), b.output());
         for i in 0..=25 {
@@ -517,5 +578,14 @@ fn directions_dispatch_in_both_cases_and_eof_follows_move() {
         assert_eq!(board(&a), expected, "direction {}", upper as char);
         assert_eq!(a.storage(23), 1, "direction {}", upper as char);
     }
-    assert_eq!(run_game(b"").output(), run_game(b"Q").output());
+}
+
+#[cfg(unix)]
+#[test]
+fn eof_after_each_move_matches_q_termination() {
+    for key in b"HJKL" {
+        let output = cli_output(&[*key]);
+        assert!(output.status.success(), "{:?}", output);
+        assert_eq!(output.stdout, run_game(&[*key, b'Q']).output());
+    }
 }

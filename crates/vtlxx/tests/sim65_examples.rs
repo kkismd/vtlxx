@@ -1,8 +1,9 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 const EXAMPLES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
 
@@ -147,9 +148,15 @@ fn registered_examples_match_the_rust_reference_when_portable() {
             );
             continue;
         }
-        // The Rust CLI's Try input is supported on Unix only.
-        if case.name == "1024.vtl" && !cfg!(unix) {
-            println!("1024.vtl: Rust CLI Try input unsupported on this OS");
+        if case.name == "1024.vtl" && !cfg!(target_os = "linux") {
+            println!(
+                "1024.vtl: not run: mos6502 host requires Linux{}",
+                if cfg!(unix) {
+                    ""
+                } else {
+                    "; Rust CLI Try input also requires Unix"
+                }
+            );
             continue;
         }
         if let Err(error) = check_example(case, examples_dir) {
@@ -157,7 +164,7 @@ fn registered_examples_match_the_rust_reference_when_portable() {
             failures.push(error);
         }
     }
-    if cfg!(unix) {
+    if cfg!(target_os = "linux") {
         let moves = ExampleCase {
             name: "1024.vtl",
             engine: "mos6502",
@@ -302,6 +309,26 @@ fn run(
                 .join(fixture),
         );
     }
+    if source.file_name().is_some_and(|name| name == "1024.vtl") {
+        if engine.is_none() {
+            let fixture = if runtime_input
+                == Some(include_bytes!("fixtures/1024_quit.txt").as_slice())
+            {
+                "1024_quit.txt"
+            } else if runtime_input == Some(include_bytes!("fixtures/1024_moves.txt").as_slice()) {
+                "1024_moves.txt"
+            } else {
+                return Err("unknown 1024 input fixture".to_owned());
+            };
+            let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures")
+                .join(fixture);
+            let input = fs::File::open(&path)
+                .map_err(|error| format!("open {}: {error}", path.display()))?;
+            command.stdin(Stdio::from(input));
+        }
+        return output_with_deadline(&mut command, binary);
+    }
     if engine.is_none()
         && let Some(input) = runtime_input
     {
@@ -325,6 +352,55 @@ fn run(
             .output()
             .map_err(|error| format!("start {} for {}: {error}", binary, source.display()))
     }
+}
+
+// Drain both pipes concurrently so a full pipe cannot prevent completion.
+// Always reap the child, including on timeout or a wait error.
+fn output_with_deadline(command: &mut Command, binary: &str) -> Result<Output, String> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("start {binary}: {error}"))?;
+    let mut stdout = child.stdout.take().expect("piped stdout");
+    let mut stderr = child.stderr.take().expect("piped stderr");
+    let out = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let err = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stderr.read_to_end(&mut bytes).map(|_| bytes)
+    });
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(10)),
+            result => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(match result {
+                    Ok(None) => format!("{binary} timed out"),
+                    Err(error) => format!("wait for {binary}: {error}"),
+                    Ok(Some(_)) => unreachable!(),
+                });
+            }
+        }
+    };
+    let stdout = out
+        .join()
+        .map_err(|_| "stdout reader panicked".to_owned())?
+        .map_err(|error| format!("read stdout: {error}"))?;
+    let stderr = err
+        .join()
+        .map_err(|_| "stderr reader panicked".to_owned())?
+        .map_err(|error| format!("read stderr: {error}"))?;
+    Ok(Output {
+        status: status?,
+        stdout,
+        stderr,
+    })
 }
 
 fn assert_eight_queens_output(name: &str, output: &[u8]) -> Result<(), String> {
