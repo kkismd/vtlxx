@@ -174,7 +174,18 @@ EC07全体やruntimeの256 B安全ゲートの完了をこの変更だけから�
 `rt_commit_binary` へ tail JMP する。各共用 entry は leaf で、入口からの
 追加 hardware stack は 0 B、呼出しの JSR を含めると 2 B。以前から存在した
 `rt_need_two` の JSR と同時には積まれないため、各 wrapper の最大深度は
-増えない。既存の runtime 69 B 保守的上界（#520）の条件は変わらない。
+増えない。#520 の 69 B は通常手続26件時の条件付き値であり、現行の
+64件には適用しない。#456 の `ecvtl-6502-long-write-resources.md` は、
+sim6502・IRQ/NMIなし・cc65 V2.18 のリンクで、64段の呼出しを含む
+136 B と入力 helper 9 B を合計した 145 B を保守的上界とした。
+現行 `binding.s` の上限も64件で、生成呼出しは解決済み target への JSR、
+chunk は逐次実行される。現行の `rt_read_char → serial_in → _getchar`
+と `_fgetc` の経路は同じ 9 B（JSR 3個と library 内最大3 B）であり、
+今回の sim6502・同一 V2.18 library のリンクでも確認した。追加された
+非同期入力・乱数・静的 byte 読取・文字列出力も、現行 sim65 adapter
+では入力経路を超える同時 stack 消費を持たない。145 B はこの対象と
+リンク条件に限る先行監査の値であり、別 adapter・library・割込み条件や
+将来の呼出し構造に対する無条件の上界ではない。
 compile 側からはまだ呼ばれないため guard 間・入口外経路も変わらず、
 S>=25 と失敗時の status 4 / exit 132 / 空 stdout / 即時停止を維持する。
 #637 で呼出しを追加する際にはその経路を再監査する。
