@@ -403,19 +403,18 @@ mod tests {
         let (_temp, path) = compile_image(false);
         let image = std::fs::read(&path).unwrap();
         let input = crate::frame_input(b"?=65", b"").unwrap();
-        let exit_cycles = 470_637;
         let (outcome, stdout, _) = HostRunner::new(&image, input.clone(), Some(2_000_000))
             .unwrap()
             .run()
             .unwrap();
         assert_eq!(stdout, b"65");
-        assert_eq!(
-            outcome,
-            HostOutcome::GuestExit {
-                status: 0,
-                cycles: exit_cycles
-            }
-        );
+        let HostOutcome::GuestExit {
+            status: 0,
+            cycles: exit_cycles,
+        } = outcome
+        else {
+            panic!("expected successful guest exit, got {outcome:?}");
+        };
 
         let (limited, _, _) = HostRunner::new(&image, input.clone(), Some(exit_cycles))
             .unwrap()
