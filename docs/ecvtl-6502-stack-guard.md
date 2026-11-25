@@ -247,3 +247,15 @@ stdout、S=25 は成功した。201-byte fixture の guard 観測最小 S は83�
 観測 S は guard 時点の値であり、library 内の動的高水位ではない。これらは
 sim6502 とこの toolchain、割込みなしの条件に限り、実機の IRQ/NMI や別の
 library の安全性を主張しない。
+
+## 完成 owner の公開（#651）
+
+sim6502 の実リンクで完成・公開経路を再確認した。`cc_complete_owner` は
+終端生成と freeze を順に呼び、従来の bitmap 更新 helper を呼ばない。
+`cc_publish` は名前検索後に `cc_completed_entry` を JSR し、返された2 byteを
+PHA で保持して登録後に回収し、件数更新後 `cc_consume_completed` を JSR
+する。取得・消費は leaf であり、保持中に別の JSR はない。公開内部の最大
+追加量は JSR または2 PHA の2 Bで、従来の完成判定から bit address helper
+への二重 JSR より深くならない。失敗は push を増やさず session 中止へ
+飛ぶ。入口外の chunk / driver の完成も従来より深くならず、先行監査の
+K=24、S>=25 と入口外 S>=232 を維持する。実機の割込み等には適用しない。

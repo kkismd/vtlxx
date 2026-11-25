@@ -62,9 +62,9 @@ cargo test -p vtlxx --test sim65_runtime -- --ignored
 
 `compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 24,576 B のコード・静的byte列共有 arena、binding、owner を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。backend の確定した失敗は `cc_status` に原因を記録し、共通 session 中止処理で caller へ戻る。runtime は開始しない。失敗した session の内部状態は再利用しない。
 
-`compiler/arena.s` は生成コードと静的byte列の24,576 B arenaと、arena全域のbyte位置を追跡する`patch_bits`・`completed_bits`（各3,072 B）を保持する。手続テンプレートのsource保存領域や仮想readerは廃止済みであり、通常のsource frameは`frontend/source.s`が読み取る。コードの予約・patch・owner完成と、完成済みbindingのみ公開する順序は維持する。
+`compiler/arena.s` は生成コードと静的byte列の24,576 B arenaと、arena全域のbyte位置を追跡する`patch_bits`（3,072 B）を保持する。手続テンプレートのsource保存領域や仮想readerは廃止済みであり、通常のsource frameは`frontend/source.s`が読み取る。コードの予約・patch・owner完成と、完成済みbindingのみ公開する順序は維持する。
 
-target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_is_bound`、`cc_publish`、`cc_resolve` は `cc_name_len` と `cc_name` に入れた ASCII 小文字1〜8文字の通常 Write 名を取る。`cc_is_bound` は bound なら carry set、unbound なら carry clear を返し、有効な問い合わせでは `cc_status` と binding table を変更しない。`cc_publish` は `cc_arg`=completed target を取り、`cc_resolve` は完全名から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
+target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_is_bound`、`cc_publish`、`cc_resolve` は `cc_name_len` と `cc_name` に入れた ASCII 小文字1〜8文字の通常 Write 名を取る。`cc_is_bound` は bound なら carry set、unbound なら carry clear を返し、有効な問い合わせでは `cc_status` と binding table を変更しない。`cc_publish` は直前に完成した未公開 owner の entry を取得し、公開成功時に権限を消費し、`cc_resolve` は完全名から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
 
 | 操作 | 役割 |
 | --- | --- |
@@ -154,7 +154,7 @@ mos6502 host は標準の [`mos6502` 0.10.1](https://crates.io/crates/mos6502/0.
 
 ## 現行の6502資源構成
 
-現在のsim65用コンパイラは、生成コードと不変の静的byte列を保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。現在のpatch追跡・完成済み位置のbitsetは各3,072 Bで、ownerの完成・公開とコード境界の検査を維持している。
+現在のsim65用コンパイラは、生成コードと不変の静的byte列を保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。patch追跡には3,072 Bのbitsetを使用する。完成履歴のbitsetは廃止し、直前に完成したownerからのみ公開することで、ownerの完成・公開とコード境界の検査を維持している。
 
 最新の正式sim65 CLIの静的リンク計測（[#524 / PR #537](https://github.com/kkismd/vtlxx/pull/537)、`ca65`/`ld65`のmap）:
 

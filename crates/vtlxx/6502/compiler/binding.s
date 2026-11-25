@@ -4,8 +4,7 @@
 
 .export cc_binding_reset, cc_is_bound, cc_publish, cc_resolve
 .export cc_name_len, cc_name
-.import cc_is_completed
-.importzp cc_status, cc_arg
+.import cc_completed_entry, cc_consume_completed
 
 .segment "ZEROPAGE"
 binding_ptr: .res 2
@@ -31,7 +30,7 @@ cc_is_bound:
     jsr binding_find
     rts
 
-; Input name and cc_arg = completed executable target. Publish count last.
+; Input name. Publish the most recently completed owner, count last.
 cc_publish:
     jsr binding_find
     bcc @available
@@ -41,9 +40,10 @@ cc_publish:
     lda binding_count
     cmp #64
     bcs @bad
-    lda cc_arg
-    ldx cc_arg+1
-    jsr cc_is_completed
+    jsr cc_completed_entry
+    pha
+    txa
+    pha
     ldy #0
     lda cc_name_len
     sta (binding_ptr),y
@@ -55,12 +55,14 @@ cc_publish:
     dex
     bne @copy
     ldy #9
-    lda cc_arg
-    sta (binding_ptr),y
     iny
-    lda cc_arg+1
+    pla
+    sta (binding_ptr),y
+    dey
+    pla
     sta (binding_ptr),y
     inc binding_count
+    jsr cc_consume_completed
 @done:
     rts
 @bad:

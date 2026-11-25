@@ -3,22 +3,19 @@
 .import session_backend_error
 
 .export cc_init, cc_begin_owner, cc_complete_owner
-.export cc_define_label, cc_label_jump, cc_is_completed, owner_require_active
+.export cc_define_label, cc_label_jump, cc_completed_entry, cc_consume_completed, owner_require_active
 .import cc_arena_reset, cc_patch_reset, cc_freeze, cc_mark, cc_return, cc_jump, cc_jump_placeholder, cc_patch
 .import cc_binding_reset, cc_static_reset
-.import cc_arena
 .importzp cc_status, cc_arg, cc_pending_count
 
 .importzp zp_phase
-owner_state = zp_phase + 67              ; 0 idle, 1 emitting
+owner_state = zp_phase + 67              ; 0 idle/consumed, 1 emitting, 2 completed
 owner_entry = zp_phase + 68
 label_count = zp_phase + 70
 fixup_count = zp_phase + 71
 owner_word = zp_phase + 72
 owner_target = zp_phase + 74
 owner_index = zp_phase + 76
-owner_offset = zp_phase + 77
-owner_mask = zp_phase + 79
 
 .segment "BSS"
 label_values: .res 64
@@ -26,10 +23,6 @@ label_targets: .res 64
 fixup_values: .res 64
 fixup_patches: .res 64
 fixup_active: .res 32
-completed_bits: .res 3072      ; one bit per possible arena entry byte
-
-.segment "RODATA"
-bit_masks: .byte 1,2,4,8,16,32,64,128
 
 .segment "CODE"
 cc_init:
@@ -42,27 +35,13 @@ cc_init:
     jsr cc_patch_reset
     jsr cc_binding_reset
     jsr cc_static_reset
-    lda #0
-    lda #<completed_bits
-    sta owner_offset
-    lda #>completed_bits
-    sta owner_offset+1
-    ldx #12
-    ldy #0
-    lda #0
-@clear:
-    sta (owner_offset),y
-    iny
-    bne @clear
-    inc owner_offset+1
-    dex
-    bne @clear
     rts
 
 ; A/X = unpublished entry address.
 cc_begin_owner:
     lda owner_state
-    bne @misuse
+    cmp #1
+    beq @misuse
     lda #1
     sta owner_state
     lda #0
@@ -100,14 +79,7 @@ cc_complete_owner:
 @terminator:
     jsr cc_return
     jsr cc_freeze
-    lda owner_entry
-    ldx owner_entry+1
-    jsr owner_bit_address
-    ldy #0
-    lda (owner_offset),y
-    ora owner_mask
-    sta (owner_offset),y
-    lda #0
+    lda #2
     sta owner_state
 @done:
     lda owner_entry
@@ -117,60 +89,21 @@ cc_complete_owner:
     lda #3
     jmp session_backend_error
 
-; A/X must be an entry produced by successful owner completion.
-cc_is_completed:
-    sta owner_target
-    stx owner_target+1
-    sec
-    lda owner_target
-    sbc #<cc_arena
-    sta owner_offset
-    lda owner_target+1
-    sbc #>cc_arena
-    sta owner_offset+1
-    bcc @bad
-    lda owner_offset+1
-    cmp #$60
-    bcs @bad
-    lda owner_target
-    ldx owner_target+1
-    jsr owner_bit_address
-    ldy #0
-    lda (owner_offset),y
-    and owner_mask
-    bne @done
-@bad:
+; Return only the most recently completed, unconsumed owner entry.
+cc_completed_entry:
+    lda owner_state
+    cmp #2
+    beq @ready
     lda #8
     jmp session_backend_error
-@done:
+@ready:
+    lda owner_entry
+    ldx owner_entry+1
     rts
 
-; Converts an in-arena address into byte index and bit mask.
-owner_bit_address:
-    sec
-    sbc #<cc_arena
-    sta owner_offset
-    txa
-    sbc #>cc_arena
-    sta owner_offset+1
-    lda owner_offset
-    and #7
-    tax
-    lda bit_masks,x
-    sta owner_mask
-    ldx #3
-@divide:
-    lsr owner_offset+1
-    ror owner_offset
-    dex
-    bne @divide
-    clc
-    lda owner_offset
-    adc #<completed_bits
-    sta owner_offset
-    lda owner_offset+1
-    adc #>completed_bits
-    sta owner_offset+1
+cc_consume_completed:
+    lda #0
+    sta owner_state
     rts
 
 ; A/X = resolved numeric label value.
