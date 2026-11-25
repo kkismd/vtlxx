@@ -310,6 +310,126 @@ fn static_data_fixture_and_failures_match_all_engines() {
 }
 
 #[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn constant_expressions_conform_across_all_engines() {
+    // Expected values are calculated independently of the reference implementation.
+    let successes: &[(&str, &[u8], &[u8])] = &[
+        ("layout", b".STATE:=1 .NEXT:=.STATE+1 .WIDTH:=8 .HEIGHT:=8 .SIZE:=.WIDTH*.HEIGHT .BASE:=.SIZE+7 .ALIAS:=.BASE ?=.NEXT ?=() ?=.SIZE ?=() ?=.BASE ?=() ?=.ALIAS", b"2\n64\n71\n71"),
+        ("long-names", b".ABCDEFGHIJKLMNOP:=2 .QRSTUVWXYZABCDEF:=3 .RESULT:=.ABCDEFGHIJKLMNOP+.QRSTUVWXYZABCDEF*4 ?=.RESULT", b"20"),
+        ("wrap-and-sign", b".AA:=32767+1 .BB:=-32768-1 .CC:=30000*3 .DD:=-32768*-1 .EE:=1--2 .FF:=1+-2 ?=.AA ?=() ?=.BB ?=() ?=.CC ?=() ?=.DD ?=() ?=.EE ?=() ?=.FF", b"-32768\n32767\n24464\n-32768\n3\n-1"),
+        ("forms", b"; comment\r\n\t.AA \t:=\t1+0; comment\r\n.AA2:=.AA+1 *=0 [ A=2 ] ?=.AA2", b"2"),
+        ("procedure-label-data", b".ONE:=1+0 .TWO:=.ONE+1 .DATA:=[10,20,30] &=p [ ?=.DATA(.TWO) ] A=0 ^=.ONE A=A+1 %=A<.TWO [ #=.ONE ] p=() ?=A", b"302"),
+    ];
+    let failures: &[(&str, &[u8], Option<i32>)] = &[
+        ("undefined", b".AA:=.MISSING", None),
+        ("self", b".AA:=.AA", None),
+        ("forward", b".AA:=.BB .BB:=1", None),
+        ("duplicate", b".AA:=1 .AA:=2", None),
+        ("mixed-duplicate", b".AA:=[1] .AA:=2", None),
+        ("data-name", b".DATA:=[1] .AA:=.DATA", None),
+        ("data-index", b".DATA:=[1] .AA:=.DATA(0)", None),
+        ("literal-high", b".AA:=32768", Some(131)),
+        ("literal-low", b".AA:=-32769", Some(131)),
+        ("intermediate-literal", b".AA:=1+32768-1", Some(131)),
+        ("adjacent-number", b".AA:=1.TWO", None),
+        ("adjacent-name", b".BB:=1 .AA:=.BB.BB", None),
+        ("incomplete", b".AA:=1+", None),
+        ("double-plus", b".AA:=1++2", None),
+        ("space-before", b".AA:=1 +2", None),
+        ("space-after", b".AA:=1+ 2", None),
+        ("tab", b".AA:=1+\t2", None),
+        ("newline", b".AA:=1+\n2", None),
+        ("crlf", b".AA:=1+\r\n2", None),
+        ("minus-name", b".BB:=1 .AA:=-.BB", None),
+        ("parentheses", b".AA:=(1+2)", None),
+        ("division", b".AA:=1/2", None),
+        ("remainder", b".AA:=1%2", None),
+        ("comparison", b".AA:=1==2", None),
+        ("character", b".AA:='A'", None),
+        ("register", b".AA:=A", None),
+        ("input", b".AA:=$", None),
+        ("output", b".AA:=?", None),
+        ("random", b".AA:=!", None),
+        ("stack", b".AA:=~", None),
+        ("comma", b".AA:=1,2", None),
+        ("block", b"%=1 [ .AA:=1 ]", None),
+        ("byte-expression", b".DATA:=[1+2]", None),
+        ("byte-constant", b".AA:=1 .DATA:=[.AA]", None),
+        ("label-range", b".AA:=0-1 ^=.AA", None),
+    ];
+    let temp = TestDir::new();
+    for (name, source, expected) in successes {
+        let path = temp.source(source);
+        for engine in ["reference", "sim65", "mos6502"] {
+            let mut command = if engine == "reference" {
+                Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            } else {
+                cli()
+            };
+            command.arg(&path).stdin(Stdio::null());
+            if engine != "reference" {
+                command.args(["--engine", engine, "--cycle-limit", "200000000"]);
+            }
+            let output = command.output().unwrap();
+            assert_eq!(output.status.code(), Some(0), "{name} {engine}: {output:?}");
+            assert_eq!(&output.stdout, expected, "{name} {engine}: {output:?}");
+            assert!(output.stderr.is_empty(), "{name} {engine}: {output:?}");
+        }
+    }
+    for (name, source, status) in failures.iter().copied().chain(std::iter::once((
+        "flush",
+        &b"?=42 &=p [ A=1 ] .GOOD:=1 .BAD:=.GOOD+2+.MISSING"[..],
+        None,
+    ))) {
+        let path = temp.source(source);
+        for engine in ["reference", "sim65", "mos6502"] {
+            let mut command = if engine == "reference" {
+                Command::new(env!("CARGO_BIN_EXE_vtlxx"))
+            } else {
+                cli()
+            };
+            command.arg(&path).stdin(Stdio::null());
+            if engine != "reference" {
+                command.args(["--engine", engine, "--cycle-limit", "200000000"]);
+            }
+            let output = command.output().unwrap();
+            let diagnostic = String::from_utf8_lossy(&output.stderr);
+            if engine == "reference" {
+                assert!(
+                    !output.status.success() && diagnostic.contains("Compile("),
+                    "{name} {engine}: {output:?}"
+                );
+                assert_eq!(
+                    output.stdout,
+                    if name == "flush" {
+                        &b"42"[..]
+                    } else {
+                        &b""[..]
+                    },
+                    "{name} {engine}: {output:?}"
+                );
+            } else {
+                assert!(
+                    matches!(output.status.code(), Some(130 | 131)),
+                    "{name} {engine}: {output:?}"
+                );
+                if let Some(code) = status {
+                    assert_eq!(
+                        output.status.code(),
+                        Some(code),
+                        "{name} {engine}: {output:?}"
+                    );
+                }
+                assert!(
+                    output.stdout.is_empty() && diagnostic.contains("compilation failed"),
+                    "{name} {engine}: {output:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 #[ignore = "requires ca65 and ld65; run with --ignored"]
 fn default_and_explicit_mos_match_on_cycle_limit() {
     let temp = TestDir::new();

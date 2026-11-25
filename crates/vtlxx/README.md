@@ -29,7 +29,7 @@ Rust package `vtlxx`、path `crates/vtlxx/`、CLI `vtlxx` / `vtlxx6502` は正�
 - [#191](https://github.com/kkismd/vtlxx/issues/191): anonymous block / structured control の設計
 - [#265](https://github.com/kkismd/vtlxx/issues/265): anonymous block の `[ ... ]` 一本化
 - [#280](https://github.com/kkismd/vtlxx/issues/280): value stack 接続記号を `~` に変更
-- [#469](https://github.com/kkismd/vtlxx/issues/469), [#255](https://github.com/kkismd/vtlxx/issues/255): 名前付き整数の構文と定義順
+- [#634](https://github.com/kkismd/vtlxx/issues/634): 名前付き整数の宣言式。[#469](https://github.com/kkismd/vtlxx/issues/469) の右辺をリテラル1個に限る判断を置換し、その他の契約と [#255](https://github.com/kkismd/vtlxx/issues/255) の定義順を継承
 - [#217](https://github.com/kkismd/vtlxx/issues/217): target profile ごとの indexed storage の容量とアドレス規則
 - [#433](https://github.com/kkismd/vtlxx/issues/433), [#528](https://github.com/kkismd/vtlxx/issues/528): SourceProcedure・手続テンプレートの廃止
 - [#541](https://github.com/kkismd/vtlxx/issues/541): VTLXX への名称移行 Tracker
@@ -323,21 +323,27 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 
 ### 名前付き整数
 
-トップレベルの source sequence で `.NAME := value` と書くと、整数に名前を付けられます。参照するときも `.NAME` と書きます。定義は runtime code を生成しません。
+トップレベルの source sequence で `.NAME := expression` と書くと、コンパイル時に計算した整数に名前を付けられます。参照するときも `.NAME` と書きます。定義は runtime code を生成しません。
 
 ```vtl
-.BOARD_BASE := 16
+.WIDTH := 8
+.HEIGHT := 8
+.SIZE := .WIDTH*.HEIGHT
+.BASE := .SIZE+7
+.END := .BASE+.SIZE-1
 .LOOP := 1
-  A=.BOARD_BASE+2
+  A=.BASE
 ^=.LOOP
   #=.LOOP
 ```
 
-名前本体は ASCII 大文字で始まる 2〜16 byte の `[A-Z][A-Z0-9_]+` で、接頭の `.` は長さに含めず、定数表にも保存しません。1文字の `A`〜`Z` は従来どおり register です。値は `-32768`〜`32767` の符号付き decimal literal 1個に限ります。定数名や式を値には書けません。旧宣言 `==NAME,value` と、`.` を付けない複数文字の定数参照は受理しません。式の等価比較 `==` は引き続き使えます。
+名前本体は ASCII 大文字で始まる 2〜16 byte の `[A-Z][A-Z0-9_]+` で、接頭の `.` は長さに含めず、名前表にも保存しません。1文字の `A`〜`Z` は従来どおり register です。右辺には符号付き十進リテラルまたは定義済み整数名を1個以上書き、`+`、`-`、`*` でつなげられます。各リテラルは `-32768..32767` の範囲で、単項 minus はリテラルにのみ使えます。演算子に優先順位はなく左から評価し、各演算は signed 16-bit Cell で wrap します。例えば `2+3*4` は `20`、`32767+1` は `-32768` です。
 
-宣言の前後は通常の statement と同じ区切りを使います。例えば `A=1 .MAX:=10 B=.MAX` や `.MAX:=10 .MIN:=-1` のように同じ行に書けます。`.` と名前、`:` と `=` はそれぞれ連続させ、`:=` の前後には ASCII space / HTAB を入れられます。宣言の途中で改行することはできません。値の直後には空白、改行、`;` コメントまたは source の終端が必要です。
+右辺の途中に空白・タブ・改行は入れられません。括弧、除算、剰余、比較、文字リテラル、register、入出力、乱数、stack、静的バイト列名や添字は使えません。例えば `.AA:=1 +2`、`.BB:=(1+2)`、`.CC:=-.AA` は不正です。これは通常式の grouping や除余を制限するものではありません。静的バイト列の要素に式や定数名を使うこともできません。
 
-定義後の RHS 式、数値ラベルの `^=` と `#=` から参照できます。手続きや anonymous block の中で定義することはできません。未定義名の参照と同名の再定義は compile error です。異なる名前に同じ値を指定できます。`^=` / `#=` で使う値には既存のラベル範囲 `0..32767` が適用されます。
+宣言の前後は通常の statement と同じ区切りを使います。例えば `A=1 .MAX:=10 B=.MAX` や `.MAX:=10 .MIN:=-1` のように同じ行に書けます。`.` と名前、`:` と `=` はそれぞれ連続させ、`:=` の前後には ASCII space / HTAB を入れられます。式の直後には空白、改行、`;` コメントまたは source の終端が必要です。旧宣言 `==NAME,value` と、`.` を付けない複数文字の定数参照は受理しません。式の等価比較 `==` は引き続き使えます。
+
+定義後の RHS 式、数値ラベルの `^=` と `#=` から参照できます。手続きや anonymous block の中で定義することはできません。未定義名・自己参照・前方参照と同名の再定義は compile error です。異なる名前に同じ値を指定できます。`^=` / `#=` のオペランド文法は変わらず、算出した整数名にも既存のラベル範囲 `0..32767` が適用されます。
 
 名前表は compile-run の source processing 中だけ存在し、runtime に名前や表を残しません。Rust の `execute_source` では呼び出し1回ごとに表を作ります。手続きの本体は定義時に解決済みの値を保持しますが、別の `execute_source` 呼び出しで名前を再利用するには再定義が必要です。6502 は整数と後述の静的バイト列を合わせて compile-run あたり最大128件受け付け、Rust reference はこの件数上限を設けません。
 
