@@ -486,11 +486,34 @@ failed:
 
 // Install a test-only probe on the actual compile failure path. Exit 98 proves
 // that the probe ran to completion, while 99 identifies a table mismatch.
-fn inject_constant_table_probe(basic: &str, entries: &[(&str, u8, u16)]) -> String {
+fn inject_constant_table_probe(basic: &str, entries: &[(&str, u8, u16)], status: u8) -> String {
     let marker = "@failed:\n    sec\n    rts";
     assert_eq!(basic.matches(marker).count(), 1);
+    let publish = "@published:\n    inc constant_count";
+    assert_eq!(basic.matches(publish).count(), 1);
+    let basic = basic.replacen(
+        publish,
+        r#"@published:
+    lda definition_kind
+    beq :+
+    ldx constant_count
+    ldy #18
+    lda (constant_ptr),y
+    sta probe_start_lo,x
+    iny
+    lda (constant_ptr),y
+    sta probe_start_hi,x
+:
+    inc constant_count"#,
+        1,
+    );
     let check = format!(
         r#"@failed:
+    lda fe_compile_status
+    cmp #{status}
+    beq :+
+    jmp @table_corrupt
+:
     lda constant_count
     cmp #{}
     beq :+
@@ -513,9 +536,18 @@ fn inject_constant_table_probe(basic: &str, entries: &[(&str, u8, u16)]) -> Stri
     bcc @probe_compare
     cpy #20
     bcs @probe_compare
-    ; Static addresses are allocator-dependent; verify their length instead.
     lda probe_kind
-    bne @probe_next
+    beq @probe_compare
+    lda (constant_ptr),y
+    cpy #18
+    bne @probe_static_hi
+    cmp probe_start_lo,x
+    jmp @probe_checked
+@probe_static_hi:
+    cmp probe_start_hi,x
+@probe_checked:
+    beq @probe_next
+    jmp @table_corrupt
 @probe_compare:
     lda (constant_ptr),y
     cmp (probe_ptr),y
@@ -555,7 +587,7 @@ fn inject_constant_table_probe(basic: &str, entries: &[(&str, u8, u16)]) -> Stri
     }
     let bytes = data.iter().map(u8::to_string).collect::<Vec<_>>().join(",");
     format!(
-        "{}\n.segment \"ZEROPAGE\"\nprobe_ptr: .res 2\nprobe_kind: .res 1\n.segment \"RODATA\"\nprobe_expected: .byte {}\n",
+        "{}\n.segment \"ZEROPAGE\"\nprobe_ptr: .res 2\nprobe_kind: .res 1\n.segment \"BSS\"\nprobe_start_lo: .res 128\nprobe_start_hi: .res 128\n.segment \"RODATA\"\nprobe_expected: .byte {}\n",
         basic.replacen(marker, &check, 1),
         bytes
     )
@@ -567,17 +599,18 @@ fn invalid_constant_does_not_publish_a_partial_entry() {
     let basic =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("6502/frontend/basic.s"))
             .unwrap();
-    let basic = inject_constant_table_probe(&basic, &[("GOOD", 0, 1)]);
-    for invalid in [
-        ".BAD:=.GOOD+2+.MISSING",
-        ".BAD:=32768",
-        ".BAD:=1A=2",
-        ".BAD:=[1,]",
-        ".BAD:=[1]X=2",
-        ".BAD:=[\"unfinished",
-        ".GOOD:=2",
-        ".BAD :=",
+    for (invalid, status) in [
+        (".BAD:=.GOOD+2+.MISSING", 2),
+        (".BAD:=.GOOD+2+32768", 3),
+        (".BAD:=32768", 3),
+        (".BAD:=1A=2", 2),
+        (".BAD:=[1,]", 2),
+        (".BAD:=[1]X=2", 2),
+        (".BAD:=[\"unfinished", 2),
+        (".GOOD:=2", 2),
+        (".BAD :=", 3),
     ] {
+        let basic = inject_constant_table_probe(&basic, &[("GOOD", 0, 1)], status);
         let source = format!(".GOOD:=1 {invalid}");
         let mut input = (source.len() as u16).to_le_bytes().to_vec();
         input.extend_from_slice(source.as_bytes());
@@ -626,8 +659,11 @@ fn mixed_constant_table_survives_failed_lookup_chain() {
     let basic =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("6502/frontend/basic.s"))
             .unwrap();
-    let basic =
-        inject_constant_table_probe(&basic, &[("GOOD", 0, 7), ("DATA", 1, 3), ("OTHER", 0, 9)]);
+    let basic = inject_constant_table_probe(
+        &basic,
+        &[("GOOD", 0, 7), ("DATA", 1, 3), ("OTHER", 0, 9)],
+        2,
+    );
     let source = b"?=42 .GOOD:=7 .DATA:=[1,2,3] .OTHER:=.GOOD+2 .BAD:=.OTHER+.GOOD+.MISSING";
     let mut input = (source.len() as u16).to_le_bytes().to_vec();
     input.extend_from_slice(source);
@@ -647,19 +683,19 @@ fn full_constant_table_survives_failed_declarations_and_references() {
     let original =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("6502/frontend/basic.s"))
             .unwrap();
-    for (count, invalid) in [
-        (127, ".BAD:=32768"),
-        (128, ".N0:=7"),
-        (128, "A=.MISSING"),
-        (128, ".ABCDEFGHIJKLMNOPQ:=1"),
-        (128, ".EXTRA:=1"),
+    for (count, invalid, status) in [
+        (127, ".BAD:=32768", 3),
+        (128, ".N0:=7", 2),
+        (128, "A=.MISSING", 2),
+        (128, ".ABCDEFGHIJKLMNOPQ:=1", 2),
+        (128, ".EXTRA:=1", 2),
     ] {
         let entries: Vec<_> = (0..count).map(|i| (format!("N{i}"), i as u16)).collect();
         let refs: Vec<_> = entries
             .iter()
             .map(|(name, value)| (name.as_str(), 0, *value))
             .collect();
-        let basic = inject_constant_table_probe(&original, &refs);
+        let basic = inject_constant_table_probe(&original, &refs, status);
         let definitions: String = (0..count).map(|i| format!(".N{i}:={i}\n")).collect();
         let source = format!("?=42\n{definitions}{invalid}\n");
         let mut input = (source.len() as u16).to_le_bytes().to_vec();

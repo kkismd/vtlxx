@@ -348,6 +348,7 @@ fn dotted_constants_compile_and_execute_in_source_order() {
             b"43",
         ),
         ("same-value", ".FOO:=2 .BAR:=2 ?=.FOO ?=.BAR", b"22"),
+        ("declaration-while", ".AA:=1 *=0 [ A=2 ] ?=.AA", b"1"),
         (
             "declaration-expressions",
             ".ABCDEFGHIJKLMNOP:=2 .QRSTUVWXYZABCDEF:=3 .LONGRESULTNAMEAA:=.ABCDEFGHIJKLMNOP+.QRSTUVWXYZABCDEF*4 .XX:=.LONGRESULTNAMEAA-1 ?=.XX ?=() ?=.LONGRESULTNAMEAA",
@@ -438,7 +439,7 @@ fn static_bytes_compile_and_resolve_nested_indices() {
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn static_bytes_share_the_constant_table_limit() {
     let temp = TestDir::new();
-    let definitions: String = (0..127).map(|i| format!(".N{i}:={i}\n")).collect();
+    let definitions: String = (0..127).map(|i| format!(".N{i}:={i}+0\n")).collect();
     let source = format!("{definitions}.DATA:=[255] ?=.N126 ?=.DATA(0)");
     assert_runtime_input_output(&temp, "mixed-table", source.as_bytes(), b"", b"126255");
     let source = format!("?=42\n{definitions}.DATA:=[] .EXTRA:=1");
