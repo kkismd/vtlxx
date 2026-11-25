@@ -2,6 +2,7 @@
 .setcpu "6502"
 
 .export rt_add, rt_sub, rt_mul, rt_div, rt_rem
+.export cell_add, cell_sub, cell_mul
 .export rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
 .importzp rt_lhs, rt_rhs, rt_result
 .import rt_need_two, rt_commit_binary, rt_div_zero, rt_rem_zero
@@ -17,6 +18,25 @@ compare_hi:  .res 2
 
 rt_add:
     jsr rt_need_two
+    jsr cell_add
+    jmp rt_commit_binary
+
+rt_sub:
+    jsr rt_need_two
+    jsr cell_sub
+    jmp rt_commit_binary
+
+rt_mul:
+    jsr rt_need_two
+    jsr cell_mul
+    jmp rt_commit_binary
+
+; Private compile/runtime ABI: D=0; rt_lhs and rt_rhs are little-endian
+; inputs, rt_result is the modulo-65536 result. Inputs and Y are preserved.
+; A and N/Z/C/V are clobbered; cell_mul also clobbers X and work_q/work_d.
+; No initialization is required. Entries are leaf routines: zero additional
+; hardware-stack bytes from entry (the caller's JSR uses two bytes).
+cell_add:
     clc
     lda rt_lhs
     adc rt_rhs
@@ -24,10 +44,9 @@ rt_add:
     lda rt_lhs+1
     adc rt_rhs+1
     sta rt_result+1
-    jmp rt_commit_binary
+    rts
 
-rt_sub:
-    jsr rt_need_two
+cell_sub:
     sec
     lda rt_lhs
     sbc rt_rhs
@@ -35,10 +54,9 @@ rt_sub:
     lda rt_lhs+1
     sbc rt_rhs+1
     sta rt_result+1
-    jmp rt_commit_binary
+    rts
 
-rt_mul:
-    jsr rt_need_two
+cell_mul:
     lda #$00
     sta rt_result
     sta rt_result+1
@@ -69,7 +87,7 @@ rt_mul:
     ror work_d
     dex
     bne @bit
-    jmp rt_commit_binary
+    rts
 
 rt_div:
     jsr rt_need_two
