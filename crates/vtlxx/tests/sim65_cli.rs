@@ -348,6 +348,21 @@ fn dotted_constants_compile_and_execute_in_source_order() {
             b"43",
         ),
         ("same-value", ".FOO:=2 .BAR:=2 ?=.FOO ?=.BAR", b"22"),
+        (
+            "declaration-expressions",
+            ".ABCDEFGHIJKLMNOP:=2 .QRSTUVWXYZABCDEF:=3 .LONGRESULTNAMEAA:=.ABCDEFGHIJKLMNOP+.QRSTUVWXYZABCDEF*4 .XX:=.LONGRESULTNAMEAA-1 ?=.XX ?=() ?=.LONGRESULTNAMEAA",
+            b"19\n20",
+        ),
+        (
+            "declaration-wrap",
+            ".AA:=32767+1 .BB:=-32768-1 .CC:=30000*3 .DD:=-32768*-1 .EE:=1--2 .FF:=1+-2 ?=.AA ?=() ?=.BB ?=() ?=.CC ?=() ?=.DD ?=() ?=.EE ?=() ?=.FF",
+            b"-32768\n32767\n24464\n-32768\n3\n-1",
+        ),
+        (
+            "declaration-control",
+            ".ONE:=1+0 .TWO:=.ONE+1 ; comment\r\n.ANSWER:=.TWO*2 &=p [ ?=.ANSWER ] A=0 ^=.ONE A=A+1 %=A<.TWO [ #=.ONE ] p=() ?=A",
+            b"42",
+        ),
     ];
     for &(name, source, expected) in cases {
         assert_runtime_input_output(&temp, name, source.as_bytes(), b"", expected);
@@ -358,7 +373,7 @@ fn dotted_constants_compile_and_execute_in_source_order() {
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn constant_table_accepts_128_entries_and_rejects_129() {
     let temp = TestDir::new();
-    let definitions: String = (0..128).map(|i| format!(".N{i}:={i}\n")).collect();
+    let definitions: String = (0..128).map(|i| format!(".N{i}:={i}+0\n")).collect();
     let path = temp.0.join("constants.vtl");
     // Exercise every constant entry within the code arena.
     for start in (0..128).step_by(16) {
@@ -551,7 +566,6 @@ fn dotted_constant_errors_do_not_start_runtime() {
         ".MAX:=\n16",
         ".MAX:=16A=1",
         ".MAX:=16.NEXT:=2",
-        ".MAX:=16+2",
         ".A:=1",
         ".lower:=1",
         ".ABCDEFGHIJKLMNOPQ:=1",
@@ -559,7 +573,27 @@ fn dotted_constant_errors_do_not_start_runtime() {
         ".MAX:=-32769",
         ".MAX:=+1",
         ".MAX:=1,2",
-        ".OTHER:=1 .MAX:=.OTHER",
+        ".MAX:=1+",
+        ".MAX:=1++2",
+        ".MAX:=1+ 2",
+        ".MAX:=1 +2",
+        ".MAX:=1+\n2",
+        ".MAX:=-.MAX",
+        ".MAX:=.MAX",
+        ".MAX:=.LATER .LATER:=1",
+        ".DATA:=[1] .MAX:=.DATA",
+        ".DATA:=[1] .MAX:=.DATA(0)",
+        ".TWO:=2 .MAX:=1.TWO",
+        ".TWO:=2 .MAX:=.TWO.TWO",
+        ".MAX:=1+32768",
+        ".MAX:=(1)",
+        ".MAX:=1/2",
+        ".MAX:=1%2",
+        ".MAX:=1==2",
+        ".MAX:='A'",
+        ".MAX:=A",
+        ".MAX:=!",
+        ".MAX:=~",
         ".DUP:=1 .DUP:=2",
         "A=.LATER .LATER:=1",
         ".MAX:=2 A=.MAXIMUM",

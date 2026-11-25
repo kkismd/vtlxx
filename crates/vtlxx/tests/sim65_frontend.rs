@@ -484,19 +484,92 @@ failed:
     );
 }
 
+// Install a test-only probe on the actual compile failure path. Exit 98 proves
+// that the probe ran to completion, while 99 identifies a table mismatch.
+fn inject_constant_table_probe(basic: &str, entries: &[(&str, u8, u16)]) -> String {
+    let marker = "@failed:\n    sec\n    rts";
+    assert_eq!(basic.matches(marker).count(), 1);
+    let check = format!(
+        r#"@failed:
+    lda constant_count
+    cmp #{}
+    beq :+
+    jmp @table_corrupt
+:
+    lda #<probe_expected
+    sta probe_ptr
+    lda #>probe_expected
+    sta probe_ptr+1
+    ldx #0
+@probe_entry:
+    stx constant_slot
+    jsr constant_address
+    ldy #17
+    lda (probe_ptr),y
+    sta probe_kind
+    ldy #0
+@probe_byte:
+    cpy #18
+    bcc @probe_compare
+    cpy #20
+    bcs @probe_compare
+    ; Static addresses are allocator-dependent; verify their length instead.
+    lda probe_kind
+    bne @probe_next
+@probe_compare:
+    lda (constant_ptr),y
+    cmp (probe_ptr),y
+    beq :+
+    jmp @table_corrupt
+:
+@probe_next:
+    iny
+    cpy #22
+    bne @probe_byte
+    clc
+    lda probe_ptr
+    adc #22
+    sta probe_ptr
+    bcc :+
+    inc probe_ptr+1
+:
+    inx
+    cpx #{}
+    bne @probe_entry
+    lda #98
+    jmp halt
+@table_corrupt:
+    lda #99
+    jmp halt"#,
+        entries.len(),
+        entries.len()
+    );
+    let mut data = Vec::new();
+    for (name, kind, value) in entries {
+        let mut entry = [0u8; 22];
+        entry[..name.len()].copy_from_slice(name.as_bytes());
+        entry[17] = *kind;
+        let offset = if *kind == 0 { 18 } else { 20 };
+        entry[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+        data.extend(entry);
+    }
+    let bytes = data.iter().map(u8::to_string).collect::<Vec<_>>().join(",");
+    format!(
+        "{}\n.segment \"ZEROPAGE\"\nprobe_ptr: .res 2\nprobe_kind: .res 1\n.segment \"RODATA\"\nprobe_expected: .byte {}\n",
+        basic.replacen(marker, &check, 1),
+        bytes
+    )
+}
+
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn invalid_constant_does_not_publish_a_partial_entry() {
     let basic =
         fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("6502/frontend/basic.s"))
             .unwrap();
-    let basic = basic.replacen(
-        "@failed:\n    ; Abort only an active temporary source save.",
-        "@failed:\n    lda constant_count\n    cmp #1\n    beq :+\n    lda #99\n    jmp halt\n:\n    ; Abort only an active temporary source save.",
-        1,
-    );
+    let basic = inject_constant_table_probe(&basic, &[("GOOD", 0, 1)]);
     for invalid in [
-        ".BAD:=1+2",
+        ".BAD:=.GOOD+2+.MISSING",
         ".BAD:=32768",
         ".BAD:=1A=2",
         ".BAD:=[1,]",
@@ -514,12 +587,58 @@ fn invalid_constant_does_not_publish_a_partial_entry() {
             Some(&basic),
             None,
         );
+        assert!(result.status.code() == Some(98), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn integer_declaration_reports_truncated_transport() {
+    for source in ["?=42 .BAD:=1+", "?=42 .BAD:=-", "?=42 .GOOD:=1 .BAD:=.GO"] {
+        // The frame promises one more byte than the transport provides.
+        let mut input = ((source.len() + 1) as u16).to_le_bytes().to_vec();
+        input.extend_from_slice(source.as_bytes());
+        let result = build_and_run_input(&input);
+        assert_eq!(result.status.code(), Some(1), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+    for source in ["?=42 .BAD:=1+", "?=42 .BAD:=-"] {
+        let result = build_and_run(source.as_bytes(), b"");
         assert!(
             matches!(result.status.code(), Some(2 | 3)),
             "{source}: {result:?}"
         );
         assert!(result.stdout.is_empty(), "{source}: {result:?}");
     }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn integer_declaration_long_expression_uses_bounded_stack() {
+    let source = format!(".TOTAL:=1{} ?=.TOTAL", "+1".repeat(1000));
+    expect(&source, 0, b"1001Z");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn mixed_constant_table_survives_failed_lookup_chain() {
+    let basic =
+        fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("6502/frontend/basic.s"))
+            .unwrap();
+    let basic =
+        inject_constant_table_probe(&basic, &[("GOOD", 0, 7), ("DATA", 1, 3), ("OTHER", 0, 9)]);
+    let source = b"?=42 .GOOD:=7 .DATA:=[1,2,3] .OTHER:=.GOOD+2 .BAD:=.OTHER+.GOOD+.MISSING";
+    let mut input = (source.len() as u16).to_le_bytes().to_vec();
+    input.extend_from_slice(source);
+    let result = build_and_run_custom(
+        &input,
+        "tests/fixtures/sim65/frontend_basic.s",
+        Some(&basic),
+        None,
+    );
+    assert_eq!(result.status.code(), Some(98), "{result:?}");
+    assert!(result.stdout.is_empty(), "{result:?}");
 }
 
 #[test]
@@ -535,14 +654,12 @@ fn full_constant_table_survives_failed_declarations_and_references() {
         (128, ".ABCDEFGHIJKLMNOPQ:=1"),
         (128, ".EXTRA:=1"),
     ] {
-        let check = format!(
-            "@failed:\n    lda constant_count\n    cmp #{count}\n    bne @table_corrupt\n    ldx #0\n@check_entry:\n    stx constant_slot\n    jsr constant_address\n    ldy #0\n@find_end:\n    lda (constant_ptr),y\n    beq @check_value\n    iny\n    cpy #17\n    bcc @find_end\n    bcs @table_corrupt\n@check_value:\n    ldy #17\n    lda (constant_ptr),y\n    bne @table_corrupt\n    iny\n    txa\n    cmp (constant_ptr),y\n    bne @table_corrupt\n    iny\n    lda (constant_ptr),y\n    bne @table_corrupt\n    inx\n    cpx #{count}\n    bne @check_entry\n    jmp @table_intact\n@table_corrupt:\n    lda #99\n    jmp halt\n@table_intact:\n    ; Abort only an active temporary source save."
-        );
-        let basic = original.replacen(
-            "@failed:\n    ; Abort only an active temporary source save.",
-            &check,
-            1,
-        );
+        let entries: Vec<_> = (0..count).map(|i| (format!("N{i}"), i as u16)).collect();
+        let refs: Vec<_> = entries
+            .iter()
+            .map(|(name, value)| (name.as_str(), 0, *value))
+            .collect();
+        let basic = inject_constant_table_probe(&original, &refs);
         let definitions: String = (0..count).map(|i| format!(".N{i}:={i}\n")).collect();
         let source = format!("?=42\n{definitions}{invalid}\n");
         let mut input = (source.len() as u16).to_le_bytes().to_vec();
@@ -553,10 +670,7 @@ fn full_constant_table_survives_failed_declarations_and_references() {
             Some(&basic),
             None,
         );
-        assert!(
-            matches!(result.status.code(), Some(2 | 3)),
-            "{invalid}: {result:?}"
-        );
+        assert!(result.status.code() == Some(98), "{invalid}: {result:?}");
         assert!(result.stdout.is_empty(), "{invalid}: {result:?}");
     }
 }
@@ -777,7 +891,7 @@ fn malformed_source_never_starts_runtime() {
         ".ABCDEFGHIJKLMNOPQ:=1",
         ".LOW:=-32769",
         ".HIGH:=32768",
-        ".EXPR:=1+2",
+        ".EXPR:=1+2+.MISSING",
         ".REF:=OTHER",
         "A=UNKNOWN",
         "&=",

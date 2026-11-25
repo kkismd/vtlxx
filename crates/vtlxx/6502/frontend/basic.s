@@ -17,6 +17,8 @@
 .import cc_literal_output_begin, cc_literal_output_byte, cc_literal_output_finish
 .import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
+.import cell_add, cell_sub, cell_mul
+.importzp rt_lhs, rt_rhs, rt_result
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
 .import rt_print_number, rt_print_char, rt_read_char, rt_try_read_char, rt_read_entropy
 .importzp fe_status, cc_status, cc_arg
@@ -80,6 +82,11 @@ structured_patches: .res 16*2
 top_level_chunk_targets: .res 65*2
 definition_name: .res 8
 definition_length: .res 1
+; Live only during a top-level integer declaration, across reader and lookup calls.
+constant_definition_name: .res 16
+constant_definition_length: .res 1
+constant_accumulator: .res 2
+constant_operator: .res 1
 
 .segment "CODE"
 ; Carry clear on success; A/X is the completed entry. Compile errors never
@@ -996,6 +1003,8 @@ fe_definition:
     jne @definition_done
     jsr peek
     lda look_state
+    cmp #3
+    jeq source_error
     cmp #1
     jne literal_error
     lda #0
@@ -1007,15 +1016,33 @@ fe_definition:
     sta definition_kind
     jsr static_definition
     lda fe_compile_status
-    bne @definition_done
+    jne @definition_done
     jmp @publish
 @integer:
-    jsr parse_literal
+    lda constant_length
+    sta constant_definition_length
+    tax
+@save_name:
+    dex
+    lda constant_name,x
+    sta constant_definition_name,x
+    cpx #0
+    bne @save_name
+    jsr constant_expression
     lda fe_compile_status
     bne @definition_done
     jsr statement_end
     lda fe_compile_status
     bne @definition_done
+    lda constant_definition_length
+    sta constant_length
+    tax
+@restore_name:
+    dex
+    lda constant_definition_name,x
+    sta constant_name,x
+    cpx #0
+    bne @restore_name
 @publish:
     ; Validate everything before publishing a table entry.
     lda constant_count
@@ -1062,6 +1089,96 @@ fe_definition:
 @published:
     inc constant_count
 @definition_done:
+    rts
+
+; One value and a single lookahead survive each iteration. No runtime stack or
+; generated code is involved. The saved LHS and accumulator are private BSS.
+constant_expression:
+    jsr constant_expression_value
+    lda fe_compile_status
+    bne @done
+@next:
+    lda literal
+    sta constant_accumulator
+    lda literal+1
+    sta constant_accumulator+1
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    bne @done
+    lda look_byte
+    cmp #'+'
+    beq @operator
+    cmp #'-'
+    beq @operator
+    cmp #'*'
+    bne @done
+@operator:
+    sta constant_operator
+    jsr take
+    jsr peek
+    jsr constant_expression_value
+    lda fe_compile_status
+    bne @done
+    lda constant_accumulator
+    sta rt_lhs
+    lda constant_accumulator+1
+    sta rt_lhs+1
+    lda literal
+    sta rt_rhs
+    lda literal+1
+    sta rt_rhs+1
+    lda constant_operator
+    cmp #'+'
+    beq @add
+    cmp #'-'
+    beq @sub
+    jsr cell_mul
+    jmp @result
+@add:
+    jsr cell_add
+    jmp @result
+@sub:
+    jsr cell_sub
+@result:
+    lda rt_result
+    sta literal
+    lda rt_result+1
+    sta literal+1
+    jmp @next
+@done:
+    rts
+
+constant_expression_value:
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    jne literal_error
+    lda look_byte
+    cmp #'.'
+    beq @name
+    jsr parse_literal
+    ; parse_literal treats a non-byte immediately after '-' as literal error.
+    lda look_state
+    cmp #3
+    jeq source_error
+    rts
+@name:
+    jsr take
+    jsr scan_constant_name
+    lda look_state
+    cmp #3
+    jeq source_error
+    lda fe_compile_status
+    bne @done
+    jsr constant_find
+    jcc syntax_error
+    jsr constant_kind
+    jne syntax_error
+    jsr constant_load_value
+@done:
     rts
 
 ; State: 0 initial, 1 element, 2 comma, 3 whitespace after element.
