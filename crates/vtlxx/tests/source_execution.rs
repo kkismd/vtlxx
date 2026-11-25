@@ -39,8 +39,6 @@ fn named_integer_errors_reject_invalid_definitions_and_references() {
         ".ABCDEFGHIJKLMNOPQ:=1",
         ".BAD:=32768",
         ".BAD:=-32769",
-        ".BAD:=1+2",
-        ".OTHER:=1\n.BAD:=.OTHER",
         ".BAD:=+1",
         ".BAD:=1,2",
         ". NAME:=1",
@@ -48,7 +46,6 @@ fn named_integer_errors_reject_invalid_definitions_and_references() {
         ".BAD:=\n1",
         ".BAD:=16A=1",
         ".BAD:=16.NEXT:=2",
-        ".BAD:=16+2",
         ".BAD\n:=1",
         "&=t{} [ .BAD:=1 ]",
         "&=p [\n.INNER:=2\n]",
@@ -69,6 +66,116 @@ fn named_integer_errors_reject_invalid_definitions_and_references() {
             "{source}"
         );
     }
+}
+
+#[test]
+fn integer_declaration_expressions_evaluate_left_to_right_with_cell_wrap() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(concat!(
+            ".BASE := 2\r\n.ABCDEFGHIJKLMNOP:=.BASE+1; comment\r\n",
+            ".ALIAS:=.ABCDEFGHIJKLMNOP .SAME:=3 .RESULT:=.ALIAS+.SAME*4 ",
+            ".MIN:=32767+1 .MAX:=-32768-1 .MUL:=30000*3 .NEG:=-32768*-1 ",
+            ".SUB:=1--2 .ADD:=1+-2 .LEFT\t:=\t2+3*4 A=.RESULT B=.MIN C=.MAX D=.MUL E=.NEG F=.SUB G=.ADD I=.LEFT"
+        ))
+        .unwrap();
+    for (index, value) in [24, -32768, 32767, 24464, -32768, 3, -1]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(machine.register(index), Some(value));
+    }
+    assert_eq!(machine.register(8), Some(20));
+    machine
+        .execute_source(".LOOP:=1+0 &=p [ H=.LOOP+8 ] #=.LOOP H=99 ^=.LOOP p=()")
+        .unwrap();
+    assert_eq!(machine.register(7), Some(9));
+    machine.execute_source(".LOOP:=4 p=()").unwrap();
+    assert_eq!(machine.register(7), Some(9));
+}
+
+#[test]
+fn integer_declaration_expression_errors_are_syntax_errors() {
+    for rhs in [
+        "32768-1",
+        "1+32768-1",
+        "-32769+1",
+        ".MISSING",
+        ".SELF",
+        "1+.MISSING",
+        "1+2+.MISSING",
+        "1.TWO",
+        ".TWO.TWO",
+        "1+",
+        "1++2",
+        "+1",
+        "-.TWO",
+        "(1)",
+        "1/2",
+        "1%2",
+        "1<2",
+        "'A'",
+        "A",
+        "?",
+        "!",
+        "$",
+        "~",
+        "1,2",
+        "1+ 2",
+        "1 +2",
+        "1+\n2",
+        "é",
+        "1+é",
+        ".BYTES",
+        ".BYTES(0)",
+    ] {
+        let source = format!(".TWO:=2 .BYTES:=[1] .SELF:={rhs}");
+        assert_eq!(
+            Machine::new().execute_source(&source),
+            Err(SourceError::Compile(CompileError::Syntax)),
+            "{source}"
+        );
+    }
+    for source in [
+        ".FIRST:=.LATER .LATER:=1",
+        ".TWO:=1 .TWO:=2",
+        ".BYTES:=[1] .BYTES:=2",
+    ] {
+        assert_eq!(
+            Machine::new().execute_source(source),
+            Err(SourceError::Compile(CompileError::Syntax)),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn integer_declarations_preserve_machine_state_and_flushed_effects() {
+    let mut machine = Machine::new();
+    machine.execute_source("A=7 @=3,9 ?=A").unwrap();
+    machine
+        .execute_source(".ONE:=1 .TWO:=.ONE+1 .LONG:=.TWO*3")
+        .unwrap();
+    assert_eq!(machine.register(0), Some(7));
+    assert_eq!(machine.storage(3), 9);
+    assert_eq!(machine.output(), b"7");
+    assert!(machine.stack().is_empty());
+    assert_eq!(
+        machine.execute_source("B=8 &=q [ C=1 ] .GOOD:=1 .BAD:=.GOOD+2+.MISSING"),
+        Err(SourceError::Compile(CompileError::Syntax))
+    );
+    assert_eq!(machine.register(1), Some(8));
+    machine.execute_source(".AA:=1 *=0 [ A=2 ]").unwrap();
+    assert_eq!(machine.register(0), Some(7));
+}
+
+#[test]
+fn integer_declaration_long_expression_has_no_fixed_operation_limit() {
+    let source = format!(".VALUE:=1{} A=.VALUE", "+1".repeat(10000));
+    let mut machine = Machine::new();
+    machine.execute_source(&source).unwrap();
+    assert_eq!(machine.register(0), Some(10001));
+    assert!(machine.stack().is_empty());
 }
 
 #[test]
