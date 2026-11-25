@@ -62,7 +62,7 @@ cargo test -p vtlxx --test sim65_runtime -- --ignored
 
 `compiler/` は source syntax を扱わない 6502 固有 backend である。`cc_init` は 1 回の compile-run に先立って 24,576 B のコード・静的byte列共有 arena、binding、owner を初期化する。generated code は arena の RAM に残り、owner 完了後の entry address は u16 の絶対 address として利用できる。backend の確定した失敗は `cc_status` に原因を記録し、共通 session 中止処理で caller へ戻る。runtime は開始しない。失敗した session の内部状態は再利用しない。
 
-`compiler/arena.s` は生成コードと静的byte列の24,576 B arenaと、arena全域のbyte位置を追跡する`patch_bits`（3,072 B）を保持する。手続テンプレートのsource保存領域や仮想readerは廃止済みであり、通常のsource frameは`frontend/source.s`が読み取る。コードの予約・patch・owner完成と、完成済みbindingのみ公開する順序は維持する。
+`compiler/arena.s` は生成コードと静的byte列の24,576 B arenaと、同時に未解決のoperand addressを追跡する49件の表（98 B）を保持する。手続テンプレートのsource保存領域や仮想readerは廃止済みであり、通常のsource frameは`frontend/source.s`が読み取る。コードの予約・patch・owner完成と、完成済みbindingのみ公開する順序は維持する。
 
 target 内の呼び出し規約は次の通り。u16 の主引数・戻り値は A=low、X=high。`cc_patch` は A/X に operand low-byte address、`cc_arg` に書き込む u16 を取る。`cc_is_bound`、`cc_publish`、`cc_resolve` は `cc_name_len` と `cc_name` に入れた ASCII 小文字1〜8文字の通常 Write 名を取る。`cc_is_bound` は bound なら carry set、unbound なら carry clear を返し、有効な問い合わせでは `cc_status` と binding table を変更しない。`cc_publish` は直前に完成した未公開 owner の entry を取得し、公開成功時に権限を消費し、`cc_resolve` は完全名から A/X に target を返す。raw arena pointer、table layout、scratch は frontend 向け contract に含めない。
 
@@ -154,18 +154,18 @@ mos6502 host は標準の [`mos6502` 0.10.1](https://crates.io/crates/mos6502/0.
 
 ## 現行の6502資源構成
 
-現在のsim65用コンパイラは、生成コードと不変の静的byte列を保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。patch追跡には3,072 Bのbitsetを使用する。完成履歴のbitsetは廃止し、直前に完成したownerからのみ公開することで、ownerの完成・公開とコード境界の検査を維持している。
+現在のsim65用コンパイラは、生成コードと不変の静的byte列を保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。patch追跡には最大49件のoperand address表（98 B）を使用し、成功したpatchは一度だけ消費する。完成履歴のbitsetは廃止し、直前に完成したownerからのみ公開することで、ownerの完成・公開とコード境界の検査を維持している。
 
-最新の正式sim65 CLIの静的リンク計測（[#524 / PR #537](https://github.com/kkismd/vtlxx/pull/537)、`ca65`/`ld65`のmap）:
+正式sim65 CLIの同一 module・cc65 V2.18 の静的リンク計測（#652）:
 
-| 領域 | 計測値 |
-| --- | ---: |
-| ZEROPAGE | 132 B |
-| BSS | 34,903 B |
-| CODE | 6,145 B |
-| RODATA | 49 B |
+| 領域 | 前提 main | 変更後 |
+| --- | ---: | ---: |
+| ZEROPAGE | 134 B | 134 B |
+| BSS | 32,265 B | 29,291 B |
+| CODE | 6,979 B | 6,913 B |
+| RODATA | 41 B | 33 B |
 
-共有ZPの`zp_phase`は100 B予約で、compile viewは80 B、runtime viewは100 Bを使用する。driver entry、compiler/frontend status、cc65共通ZPは別領域である。この表は**PR #537時点の静的配置**であって、portable ABIや全入力の上界ではない。動的CPU hardware stackの高水位、IRQ/NMIを含む実機安全性、compile/runtime別cyclesを実測したものでもない。実際の配置は最新のlink mapとコードを正本とする。
+変更後のarenaは `$2993..$8992`、patch表は `$8993..$89f4`、BSSは `$1d92..$8ffc`。CPU stackは `$0100..$01ff`、cc65 software stackは `$f7f0..$ffef` で、BSS末尾からsoftware stackまで26,611 B空く。共有ZPの `zp_phase` は100 B予約で、entry、status、cc65共通ZPは別領域である。アドレスはABIではなく、実際の配置はlink mapを正本とする。IRQ/NMIを含む実機安全性はこの計測の対象外。
 
 ## 過去の計測記録: Micro TREK の sim65 E2E と資源（#513）
 

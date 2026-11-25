@@ -259,3 +259,16 @@ PHA で保持して登録後に回収し、件数更新後 `cc_consume_completed
 への二重 JSR より深くならない。失敗は push を増やさず session 中止へ
 飛ぶ。入口外の chunk / driver の完成も従来より深くならず、先行監査の
 K=24、S>=25 と入口外 S>=232 を維持する。実機の割込み等には適用しない。
+
+
+## 未解決 patch 表（#652）
+
+正式 sim6502 CLI の link と命令を確認した。`cc_track_patch` と `cc_patch`
+は表の登録・探索・消費を自身で行う leaf で、検索 index は register に保持し、
+新たな PHA/PHP や JSR はない。従来の `cc_patch` → `cc_untrack_patch` →
+`cc_patch_bit_address` の JSR はなくなり、文字列・静的 payload や label
+解決の最深経路を増やさない。容量超過や未登録の失敗は追加 push なしで
+`session_backend_error` へ tail JMP する。完成・公開、source、adapter、
+cc65 library は変更せず、先行監査の K=24、S>=25、入口外 S>=232 と
+runtime の条件付き上界145 Bを維持する。これは sim6502、同一 library、
+割込みなしの静的な評価であり、実機 IRQ/NMI の保証ではない。

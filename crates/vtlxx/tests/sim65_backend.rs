@@ -193,3 +193,11 @@ fn static_data_skip_read_and_completion_guards() {
         expect(case, b"K");
     }
 }
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn bounded_pending_patch_registry() {
+    for case in 53..=57 {
+        expect(case, b"K");
+    }
+}
