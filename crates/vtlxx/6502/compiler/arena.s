@@ -5,7 +5,7 @@
 .export cc_arena_reset, cc_mark, cc_emit_byte, cc_emit_u16, cc_patch
 .export cc_patch_reset, cc_track_patch, cc_freeze
 .export cc_reserve, cc_write_byte_raw
-.export cc_arena
+.export cc_arena, cc_patch_table
 .exportzp cc_status, cc_arg, cc_cursor, cc_pending_count
 
 .importzp zp_phase
@@ -20,16 +20,11 @@ cc_value = zp_phase + 53
 cc_pending_count = zp_phase + 55
 cc_reserve_count = zp_phase + 57
 cc_write_value = zp_phase + 58
-cc_bit_index = zp_phase + 59
-cc_bit_mask = zp_phase + 61
-
-.segment "RODATA"
-patch_masks: .byte 1,2,4,8,16,32,64,128
 
 .segment "BSS"
 cc_arena:     .res 24576
 cc_arena_end:
-patch_bits:   .res 3072
+cc_patch_table: .res 98
 
 .segment "CODE"
 cc_arena_reset:
@@ -53,20 +48,6 @@ cc_patch_reset:
     lda #0
     sta cc_pending_count
     sta cc_pending_count+1
-    lda #<patch_bits
-    sta cc_bit_index
-    lda #>patch_bits
-    sta cc_bit_index+1
-    ldx #12
-    ldy #0
-    lda #0
-@clear:
-    sta (cc_bit_index),y
-    iny
-    bne @clear
-    inc cc_bit_index+1
-    dex
-    bne @clear
     rts
 
 ; A/X = absolute address of next emitted byte.
@@ -170,89 +151,62 @@ cc_patch:
     bcc @write
     bne @bad
 @write:
-    ; Only unresolved operands may be patched, never arbitrary data bytes.
-    lda cc_ptr
-    ldx cc_ptr+1
-    jsr cc_patch_bit_address
-    ldy #0
-    lda (cc_bit_index),y
-    and cc_bit_mask
+    ; Each entry is a unique operand emitted by the placeholder routines.
+    ldx #0
+@scan:
+    cpx cc_pending_count
     beq @bad
+    txa
+    asl a
+    tay
+    lda cc_patch_table,y
+    cmp cc_ptr
+    bne @next
+    lda cc_patch_table+1,y
+    cmp cc_ptr+1
+    beq @found
+@next:
+    inx
+    bne @scan
+@found:
+    ; Preserve the table offset in X while writing through cc_ptr.
+    tya
+    tax
     ldy #0
     lda cc_arg
     sta (cc_ptr),y
     iny
     lda cc_arg+1
     sta (cc_ptr),y
-    lda cc_ptr
-    ldx cc_ptr+1
-    jsr cc_untrack_patch
+    dec cc_pending_count
+    lda cc_pending_count
+    asl a
+    tay
+    lda cc_patch_table,y
+    sta cc_patch_table,x
+    lda cc_patch_table+1,y
+    sta cc_patch_table+1,x
     rts
 @bad:
     lda #2
     jmp session_backend_error
-@done:
-    rts
 
-; Track an unpatched placeholder operand until cc_patch/cc_patch_here resolves it.
-; The bitset covers all 24576 possible byte positions.
+; Internal emitter contract: A/X is the operand of a newly appended,
+; fully reserved placeholder. Append order guarantees uniqueness.
 cc_track_patch:
-    jsr cc_patch_bit_address
-    ldy #0
-    lda (cc_bit_index),y
-    and cc_bit_mask
-    bne @done
-    lda (cc_bit_index),y
-    ora cc_bit_mask
-    sta (cc_bit_index),y
-    inc cc_pending_count
-    bne @done
-    inc cc_pending_count+1
-@done:
-    rts
-
-cc_untrack_patch:
-    jsr cc_patch_bit_address
-    ldy #0
-    lda (cc_bit_index),y
-    and cc_bit_mask
-    beq @done
-    lda cc_bit_mask
-    eor #$ff
-    and (cc_bit_index),y
-    sta (cc_bit_index),y
+    sta cc_ptr
+    stx cc_ptr+1
     lda cc_pending_count
-    bne @low
-    dec cc_pending_count+1
-@low:
-    dec cc_pending_count
-@done:
+    cmp #49
+    bcs @full
+    asl a
+    tay
+    lda cc_ptr
+    sta cc_patch_table,y
+    lda cc_ptr+1
+    sta cc_patch_table+1,y
+    inc cc_pending_count
     rts
-
-; A/X = operand low-byte address within the arena.
-cc_patch_bit_address:
-    sec
-    sbc #<cc_arena
-    sta cc_bit_index
-    txa
-    sbc #>cc_arena
-    sta cc_bit_index+1
-    lda cc_bit_index
-    and #7
-    tax
-    lda patch_masks,x
-    sta cc_bit_mask
-    ldx #3
-@divide:
-    lsr cc_bit_index+1
-    ror cc_bit_index
-    dex
-    bne @divide
-    clc
-    lda cc_bit_index
-    adc #<patch_bits
-    sta cc_bit_index
-    lda cc_bit_index+1
-    adc #>patch_bits
-    sta cc_bit_index+1
-    rts
+@full:
+    lda #2
+    jmp session_backend_error

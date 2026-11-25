@@ -57,15 +57,16 @@ call_count:  .res 1
 caller_sp: .res 1
 software_sp: .res 2
 phase: .res 1
+patches: .res 98
 
 .segment "CODE"
 _main:
     jsr rt_init
     jsr cc_init
 .if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
-    ; First byte beyond the arena is an adjacent patch bitmap byte.
+    ; Byte immediately after the 98-byte patch table in the linked image.
     lda #$a5
-    sta cc_arena+$6000
+    sta cc_arena+$6062
 .endif
     lda #$a5
     pha
@@ -76,7 +77,7 @@ _main:
     lda sp+1
     sta software_sp+1
     jsr probe_session
-.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 48 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52
+.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 48 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57
     bcs :+
     jmp bad
 :
@@ -87,7 +88,7 @@ _main:
 :
 .if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
     lda #1
-.elseif TEST_CASE = 4 .or TEST_CASE = 16 .or TEST_CASE = 32 .or TEST_CASE = 48
+.elseif TEST_CASE = 4 .or TEST_CASE = 16 .or TEST_CASE = 32 .or TEST_CASE = 48 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57
     lda #2
 .elseif TEST_CASE = 34 .or TEST_CASE = 52
     lda #3
@@ -106,7 +107,7 @@ _main:
     beq :+
     jmp bad
 :
-.if TEST_CASE = 8 .or TEST_CASE = 20 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52
+.if TEST_CASE = 4 .or TEST_CASE = 8 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 20 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 38 .or TEST_CASE = 41 .or TEST_CASE = 48 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57
     lda phase
     cmp #1
     jne bad
@@ -117,7 +118,12 @@ _main:
 :
 .endif
 .if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
-    lda cc_arena+$6000
+    lda cc_arena+$6062
+    cmp #$a5
+    jne bad
+.endif
+.if TEST_CASE = 54
+    lda cc_arena+$6062
     cmp #$a5
     jne bad
 .endif
@@ -280,6 +286,8 @@ probe_session:
     jmp bad
 :
     ; A field beginning at the cursor is outside the emitted range.
+    lda #1
+    sta phase
     jsr cc_mark
     jsr cc_patch
 .elseif TEST_CASE = 5
@@ -477,6 +485,8 @@ probe_session:
     jsr cc_begin_owner
     jsr cc_jump_placeholder
     OK
+    lda #1
+    sta phase
     jsr cc_complete_owner
 .elseif TEST_CASE = 16
     ; A completed owner is frozen even though its bytes remain in the arena.
@@ -490,6 +500,8 @@ probe_session:
     WORD $1234
     sta cc_arg
     stx cc_arg+1
+    lda #1
+    sta phase
     lda patch
     ldx patch+1
     jsr cc_patch
@@ -771,6 +783,8 @@ probe_session:
     jsr cc_static_begin
     lda #1
     jsr cc_static_byte
+    lda #1
+    sta phase
     jsr cc_complete_owner ; outstanding skip prevents completion
 .elseif TEST_CASE = 32
     jsr cc_begin_owner
@@ -781,6 +795,8 @@ probe_session:
     jsr cc_static_byte
     jsr cc_static_finish
     OK
+    lda #1
+    sta phase
     lda cc_static_start
     ldx cc_static_start+1
     jsr cc_patch          ; payload is not a tracked operand
@@ -814,6 +830,8 @@ probe_session:
     jsr cc_begin_owner
     WORD 7
     jsr cc_label_jump
+    lda #1
+    sta phase
     jsr cc_complete_owner
 .elseif TEST_CASE = 39
     ; Labels belong to the owner in which they were defined.
@@ -835,6 +853,8 @@ probe_session:
 .elseif TEST_CASE = 41
     jsr cc_begin_owner
     jsr cc_jz_placeholder
+    lda #1
+    sta phase
     jsr cc_complete_owner
 .elseif TEST_CASE = 42
     lda #0
@@ -895,6 +915,8 @@ probe_session:
     sta patch
     stx patch+1
     jsr cc_patch_here
+    lda #1
+    sta phase
     lda patch
     ldx patch+1
     jsr cc_patch_here
@@ -976,6 +998,130 @@ probe_session:
     lda #1
     sta phase
     jsr cc_begin_owner
+ .elseif TEST_CASE = 53
+    ; Fill all slots through real emitter calls, consume a middle slot, then
+    ; reuse it. Reverse resolution checks swapped and surviving entries.
+    jsr cc_begin_owner
+    ldx #0
+@register:
+    stx counter
+    jsr cc_jump_placeholder
+    ldy counter
+    sta patches,y
+    txa
+    sta patches+1,y
+    ldx counter
+    inx
+    inx
+    cpx #98
+    bne @register
+    lda cc_pending_count
+    cmp #49
+    jne bad
+    lda cc_pending_count+1
+    jne bad
+    WORD $a15c
+    sta cc_arg
+    stx cc_arg+1
+    lda patches+20
+    ldx patches+21
+    jsr cc_patch
+    ldy #20
+    jsr verify_value
+    lda cc_pending_count
+    cmp #48
+    jne bad
+    jsr cc_jump_placeholder
+    sta patches+20
+    stx patches+21
+    lda cc_pending_count
+    cmp #49
+    jne bad
+    ldx #96
+@resolve:
+    stx counter
+    WORD $a15c
+    sta cc_arg
+    stx cc_arg+1
+    ldy counter
+    lda patches,y
+    ldx patches+1,y
+    jsr cc_patch
+    ldy counter
+    jsr verify_value
+    ldx counter
+    dex
+    dex
+    bpl @resolve
+    lda cc_pending_count
+    ora cc_pending_count+1
+    jne bad
+    ; A fresh session discards pending registrations.
+    jsr cc_jump_placeholder
+    jsr cc_init
+    lda cc_pending_count
+    ora cc_pending_count+1
+    jne bad
+.elseif TEST_CASE = 54
+    ; A 50th real placeholder must abort after the first 49 succeeded.
+    jsr cc_begin_owner
+    lda #0
+    sta counter
+@fill_table:
+    jsr cc_jump_placeholder
+    inc counter
+    lda counter
+    cmp #49
+    bne @fill_table
+    lda cc_pending_count
+    cmp #49
+    jne bad
+    lda cc_pending_count+1
+    jne bad
+    lda #$a5
+    sta cc_arena+$6062
+    lda #1
+    sta phase
+    jsr cc_jump_placeholder
+.elseif TEST_CASE = 55
+    ; Session reset cannot retain an earlier registration.
+    jsr cc_begin_owner
+    jsr cc_jump_placeholder
+    sta patch
+    stx patch+1
+    jsr cc_init
+    jsr cc_begin_owner
+    ; Emit equivalent bytes without registering a placeholder.
+    WORD $1234
+    jsr cc_jump
+    lda #1
+    sta phase
+    lda patch
+    ldx patch+1
+    jsr cc_patch
+.elseif TEST_CASE = 56
+    ; Generated operands which were never placeholders are not patchable.
+    jsr cc_begin_owner
+    WORD $1234
+    jsr cc_jump
+    jsr cc_mark
+    sec
+    sbc #2
+    sta patch
+    txa
+    sbc #0
+    tax
+    lda #1
+    sta phase
+    lda patch
+    jsr cc_patch
+.elseif TEST_CASE = 57
+    ; Reject operand+2 wrap independently of prior operations.
+    jsr cc_begin_owner
+    lda #1
+    sta phase
+    WORD $ffff
+    jsr cc_patch
 .else
     .error "unknown backend probe case"
 .endif
@@ -1003,3 +1149,19 @@ next_condition:
     lda #1
     ldx #0
     jmp rt_push
+
+; Y = byte offset of a saved operand. Check both bytes of the replacement.
+verify_value:
+    lda patches,y
+    sta probe_ptr
+    lda patches+1,y
+    sta probe_ptr+1
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$5c
+    jne bad
+    iny
+    lda (probe_ptr),y
+    cmp #$a1
+    jne bad
+    rts
