@@ -63,10 +63,10 @@ patches: .res 98
 _main:
     jsr rt_init
     jsr cc_init
-.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
-    ; Byte immediately after the 98-byte patch table in the linked image.
+.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 40
+    ; Detect even a single byte written beyond the arena.
     lda #$a5
-    sta cc_arena+$6062
+    sta cc_arena+$6000
 .endif
     lda #$a5
     pha
@@ -107,7 +107,7 @@ _main:
     beq :+
     jmp bad
 :
-.if TEST_CASE = 4 .or TEST_CASE = 8 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 20 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 38 .or TEST_CASE = 41 .or TEST_CASE = 48 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57
+.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 38 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 48 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57
     lda phase
     cmp #1
     jne bad
@@ -118,7 +118,7 @@ _main:
 :
 .endif
 .if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
-    lda cc_arena+$6062
+    lda cc_arena+$6000
     cmp #$a5
     jne bad
 .endif
@@ -308,6 +308,8 @@ probe_session:
     jsr cc_mark
     sta address
     stx address+1
+    lda #1
+    sta phase
     lda #$ea
     jsr cc_emit_byte
 .elseif TEST_CASE = 6
@@ -329,6 +331,8 @@ probe_session:
     jsr cc_mark
     sta address
     stx address+1
+    lda #1
+    sta phase
     WORD $abcd
     jsr cc_push_const
 .elseif TEST_CASE = 7
@@ -572,6 +576,8 @@ probe_session:
     sta cc_cursor
     lda #>(cc_arena+$5ffc)
     sta cc_cursor+1
+    lda #1
+    sta phase
     ldx #25
     jsr cc_store_reg
 .elseif TEST_CASE = 20
@@ -643,6 +649,8 @@ probe_session:
     lda #$ff
     sta cc_cursor
     sta cc_cursor+1
+    lda #1
+    sta phase
     lda #$42
     jsr cc_emit_byte
 .elseif TEST_CASE = 22
@@ -654,6 +662,8 @@ probe_session:
     jsr cc_begin_owner
     lda #$ea
     jsr cc_emit_byte
+    lda #1
+    sta phase
     jsr cc_complete_owner
 .elseif TEST_CASE = 28
     ; Two placeholders at identical offsets in different 2 KiB pages.
@@ -810,6 +820,11 @@ probe_session:
     lda #42
     jsr cc_static_byte    ; exactly fills the arena
     OK
+    ; Registration is complete; use the first table byte as an arena sentinel.
+    lda #$a5
+    sta cc_arena+$6000
+    lda #1
+    sta phase
     lda #43
     jsr cc_static_byte
 .elseif TEST_CASE = 34
@@ -848,6 +863,8 @@ probe_session:
     sta cc_cursor
     lda #>(cc_arena+$5ffc)
     sta cc_cursor+1
+    lda #1
+    sta phase
     ldx #25
     jsr cc_load_reg
 .elseif TEST_CASE = 41
