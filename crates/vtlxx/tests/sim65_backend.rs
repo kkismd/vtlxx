@@ -180,7 +180,9 @@ fn code_arena_u16_wrap_and_full_range_bitsets() {
     expect(21, b"K");
     expect(22, b"K");
     expect(28, b"K");
-    expect(44, b"K");
+    for case in 44..=48 {
+        expect(case, b"K");
+    }
 }
 
 #[test]

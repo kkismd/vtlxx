@@ -75,7 +75,7 @@ _main:
     lda sp+1
     sta software_sp+1
     jsr probe_session
-.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 28 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44
+.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 28 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 48
     bcs :+
     jmp bad
 :
@@ -86,7 +86,7 @@ _main:
 :
 .if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
     lda #1
-.elseif TEST_CASE = 4 .or TEST_CASE = 16 .or TEST_CASE = 32
+.elseif TEST_CASE = 4 .or TEST_CASE = 16 .or TEST_CASE = 32 .or TEST_CASE = 48
     lda #2
 .elseif TEST_CASE = 34
     lda #3
@@ -891,9 +891,59 @@ probe_session:
     sta cc_cursor+1
     jsr cc_begin_owner
     jsr cc_complete_owner
+    WORD cc_arena+$5fff
+    jsr cc_is_completed
     jsr cc_init
     WORD cc_arena+$5fff
     jsr cc_is_completed
+.elseif TEST_CASE = 45
+    ; A completed bit must not alias the same position in another 2 KiB page.
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    WORD cc_arena+$800
+    jsr cc_is_completed
+.elseif TEST_CASE = 46
+    ; A new session clears a completed bit in an intermediate page.
+    lda #<(cc_arena+$800)
+    sta cc_cursor
+    lda #>(cc_arena+$800)
+    sta cc_cursor+1
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    WORD cc_arena+$800
+    jsr cc_is_completed
+    jsr cc_init
+    WORD cc_arena+$800
+    jsr cc_is_completed
+.elseif TEST_CASE = 47
+    ; A new session starts with no binding from a successful previous one.
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    sta cc_arg
+    stx cc_arg+1
+    NAME 'a'
+    jsr cc_publish
+    NAME 'a'
+    jsr cc_is_bound
+    bcs :+
+    jmp bad
+:
+    jsr cc_init
+    NAME 'a'
+    jsr cc_is_bound
+    bcc :+
+    jmp bad
+:
+.elseif TEST_CASE = 48
+    ; Resolving the same operand twice fails while its owner is still active.
+    jsr cc_begin_owner
+    jsr cc_jump_placeholder
+    sta patch
+    stx patch+1
+    jsr cc_patch_here
+    lda patch
+    ldx patch+1
+    jsr cc_patch_here
 .else
     .error "unknown backend probe case"
 .endif
