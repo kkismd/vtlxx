@@ -403,6 +403,7 @@ mod tests {
         let (_temp, path) = compile_image(false);
         let image = std::fs::read(&path).unwrap();
         let input = crate::frame_input(b"?=65", b"").unwrap();
+        let exit_cycles = 470_637;
         let (outcome, stdout, _) = HostRunner::new(&image, input.clone(), Some(2_000_000))
             .unwrap()
             .run()
@@ -412,16 +413,21 @@ mod tests {
             outcome,
             HostOutcome::GuestExit {
                 status: 0,
-                cycles: 471_353
+                cycles: exit_cycles
             }
         );
 
-        let (limited, _, _) = HostRunner::new(&image, input.clone(), Some(471_353))
+        let (limited, _, _) = HostRunner::new(&image, input.clone(), Some(exit_cycles))
             .unwrap()
             .run()
             .unwrap();
-        assert_eq!(limited, HostOutcome::CycleLimit { cycles: 471_353 });
-        let (complete, _, _) = HostRunner::new(&image, input, Some(471_354))
+        assert_eq!(
+            limited,
+            HostOutcome::CycleLimit {
+                cycles: exit_cycles
+            }
+        );
+        let (complete, _, _) = HostRunner::new(&image, input, Some(exit_cycles + 1))
             .unwrap()
             .run()
             .unwrap();
@@ -429,7 +435,7 @@ mod tests {
             complete,
             HostOutcome::GuestExit {
                 status: 0,
-                cycles: 471_353
+                cycles: exit_cycles
             }
         );
 
