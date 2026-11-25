@@ -16,7 +16,7 @@ cargo build --locked --release --manifest-path "$work/failure-harness/Cargo.toml
 
 base="$work/source/crates/vtlxx"
 sources=(6502/target/sim65_cli.s 6502/frontend/basic.s 6502/frontend/source.s
-  6502/compiler/arena.s 6502/compiler/emitter.s 6502/compiler/owner.s
+  6502/compiler/session.s 6502/compiler/arena.s 6502/compiler/emitter.s 6502/compiler/owner.s
   6502/compiler/binding.s 6502/target/zp_layout.s 6502/runtime/state.s
   6502/runtime/primitives.s 6502/runtime/arithmetic.s 6502/target/sim65_adapter.s)
 objects=()

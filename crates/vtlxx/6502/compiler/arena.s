@@ -1,5 +1,6 @@
 ; Compiler-private, append-only 24 KiB code arena.
 .setcpu "6502"
+.import session_backend_error
 
 .export cc_arena_reset, cc_mark, cc_emit_byte, cc_emit_u16, cc_patch
 .export cc_patch_reset, cc_track_patch, cc_freeze
@@ -77,8 +78,6 @@ cc_mark:
 ; A = required code byte count (1..255). No cursor mutation on failure.
 cc_reserve:
     sta cc_reserve_count
-    lda cc_status
-    bne @done
     clc
     lda cc_cursor
     adc cc_reserve_count
@@ -96,7 +95,7 @@ cc_reserve:
     beq @ok
 @full:
     lda #1
-    sta cc_status
+    jmp session_backend_error
 @ok:
 @done:
     rts
@@ -117,8 +116,6 @@ cc_emit_byte:
     sta cc_value
     lda #1
     jsr cc_reserve
-    lda cc_status
-    bne @done
     lda cc_value
     jsr cc_write_byte_raw
 @done:
@@ -130,8 +127,6 @@ cc_emit_u16:
     stx cc_value+1
     lda #2
     jsr cc_reserve
-    lda cc_status
-    bne @done
     lda cc_value
     jsr cc_write_byte_raw
     lda cc_value+1
@@ -144,8 +139,6 @@ cc_emit_u16:
 cc_patch:
     sta cc_ptr
     stx cc_ptr+1
-    lda cc_status
-    bne @done
     lda cc_ptr+1
     cmp #>cc_arena
     bcc @bad
@@ -197,7 +190,7 @@ cc_patch:
     rts
 @bad:
     lda #2
-    sta cc_status
+    jmp session_backend_error
 @done:
     rts
 

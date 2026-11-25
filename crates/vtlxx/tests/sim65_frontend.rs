@@ -95,6 +95,7 @@ fn build_and_run_custom_with_adapter(
         "6502/target/zp_layout.s",
         "6502/frontend/basic.s",
         "6502/frontend/source.s",
+        "6502/compiler/session.s",
         "6502/compiler/arena.s",
         "6502/compiler/emitter.s",
         "6502/compiler/owner.s",

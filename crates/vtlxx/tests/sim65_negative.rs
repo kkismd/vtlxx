@@ -59,6 +59,7 @@ fn build_probe(temp: &TestDir) -> PathBuf {
         "tests/fixtures/sim65/negative_compile_probe.s",
         "6502/frontend/basic.s",
         "6502/frontend/source.s",
+        "6502/compiler/session.s",
         "6502/compiler/arena.s",
         "6502/compiler/emitter.s",
         "6502/compiler/owner.s",
@@ -235,6 +236,13 @@ fn compile_failures_do_not_start_runtime_and_report_expected_causes() {
         (
             "arena-full",
             arena_source(2200),
+            "compiler resource error",
+            132,
+            33,
+        ),
+        (
+            "arena-before-syntax",
+            [b"A=1\n".repeat(2048), b"A=1+?\n".to_vec()].concat(),
             "compiler resource error",
             132,
             33,

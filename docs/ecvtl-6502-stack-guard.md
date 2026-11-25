@@ -200,3 +200,50 @@ mod 65536 の結果を返す。入力と Y を保持し、A と N/Z/C/V を変�
 sim6502 CLI の同一 source 順・同一 toolchain での map 比較は CODE
 7480→7492 B、RODATA 49→49 B、BSS 35317→35317 B、ZEROPAGE
 132→132 B（CODE +12 B、他は増減なし）。
+
+## compile session の一括中止（#650）
+
+本節は上記の履歴中にある旧 temporary-source cleanup や旧 P0a 経路を
+現行経路として扱わない。`vtlxx6502` の現行 source 配列を順に ca65 V2.18
+（Ubuntu 2.19-1）で assemble し、sim6502 設定・同梱 library で link して
+命令と呼出しを確認した。sim65 adapter と mos6502 adapter の両方で
+共通 session の中止経路を確認した。
+
+`fe_compile_run` は `TSX; STX session_entry_sp` を最初に実行する。保存時は
+caller の JSR の復帰アドレスが既に stack 上にあり、追加の JSR frame はない。
+backend の確定 fatal は詳細を A に入れて `JMP session_backend_error` し、
+同ルーチンは status を記録して `LDX session_entry_sp; TXS; SEC; RTS` へ
+続く。記録から RTS まで追加 push は 0 B。中間 frame や PHA があっても
+保存 S まで戻して caller へ復帰する。frontend の確定 fatal も同じ
+`session_abort` に tail JMP する。定数値の暫定 error は通常 RTS で分類元に
+戻り、分類後に中止する。`fe_init` / `fe_next` は serial_in の復帰後に
+失敗を判定するので cc65 software stack を使用中に脱出しない。
+stack guard NG は従来どおり push なしで halt へ tail JMP し、mos6502
+adapter の Fatal も adapter から halt へ tail JMP する。
+
+4入口間は JSR 2 B、PHA/PHP 1 B、tail JMP 0 B で数え、次の guard 入口への
+JSR も含める。既存の入力側最大は `peek → fe_next → serial_in → _getchar
+→ _fgetc` で peek 入口から 9 B。`parse_literal` の 2 PHA は peek の JSR
+より前に両方回収される。guard 後の主な最大経路は、statement から label
+解決と literal 読取を経る 15 B、required_block から separator 読取の 13 B、
+operand から operator 読取の 15 B、value から literal 読取の 13 B である。
+文字列・静的 payload の patch 側は nested JSR と局所 PHA の生存期間を含め
+K=24 B 内であり、backend fatal への tail JMP は追加しない。mos6502 の入力
+adapter は host `$FFF0` を JSR し、sim65 の cc65 入力経路より深くない。
+これらにより既存 K=24、残り 1 B のための S>=25 を維持する。
+
+入口外では fe_compile_run の S=$FB（251）を基準に、framing 初期化は 9 B、
+通常の top-level separator は 13 B、finish / driver は 8 B 以下。top-level
+定数定義の `fe_definition → constant_expression → constant_expression_value
+→ parse_literal → peek` は、それぞれの JSR 10 B と peek 内 9 B の計 19 B。
+静的定義の source 読取・backend patch 経路もこの値を超えない。したがって
+入口外 compile 区間は S>=232 であり、保存 S 自体も wrap しない。startup は
+従来どおり S=$FF から fe_compile_run まで 4 B を保持する。
+
+現行の `cargo test -p vtlxx --test sim65_frontend compile_stack_guard --
+--ignored --nocapture` では4件が成功し、比較入力 S=24 は exit 132 / 空
+stdout、S=25 は成功した。201-byte fixture の guard 観測最小 S は83、16段の
+静的読取は181。深い各入口の試験は runtime 非開始と下端番兵を確認した。
+観測 S は guard 時点の値であり、library 内の動的高水位ではない。これらは
+sim6502 とこの toolchain、割込みなしの条件に限り、実機の IRQ/NMI や別の
+library の安全性を主張しない。

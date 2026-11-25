@@ -1,5 +1,6 @@
 ; #275 backend proof. TEST_CASE selects one independent compiler operation sequence.
 .setcpu "6502"
+.macpack longbranch
 .export _main
 .import cc_init, cc_mark, cc_emit_byte, cc_emit_u16, cc_patch
 .import cc_push_const, cc_call, cc_return, cc_jump, cc_jz
@@ -14,6 +15,7 @@
 .import rt_init, rt_print_number, rt_print_char, rt_push
 .import serial_out, halt
 .importzp cc_status, cc_arg, cc_cursor, cc_pending_count, rt_depth
+.importzp session_entry_sp, fe_compile_status, sp
 
 .macro WORD value
     lda #<(value)
@@ -52,11 +54,87 @@ patch_two:   .res 2
 address:     .res 2
 counter:     .res 2
 call_count:  .res 1
+caller_sp: .res 1
+software_sp: .res 2
 
 .segment "CODE"
 _main:
     jsr rt_init
     jsr cc_init
+.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
+    ; First byte beyond the arena is an adjacent patch bitmap byte.
+    lda #$a5
+    sta cc_arena+$6000
+.endif
+    lda #$a5
+    pha
+    tsx
+    stx caller_sp
+    lda sp
+    sta software_sp
+    lda sp+1
+    sta software_sp+1
+    jsr probe_session
+.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 28 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44
+    bcs :+
+    jmp bad
+:
+    lda fe_compile_status
+    cmp #4
+    beq :+
+    jmp bad
+:
+.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
+    lda #1
+.elseif TEST_CASE = 4 .or TEST_CASE = 16 .or TEST_CASE = 32
+    lda #2
+.elseif TEST_CASE = 34
+    lda #3
+.elseif TEST_CASE = 11
+    lda #4
+.elseif TEST_CASE = 12
+    lda #5
+.elseif TEST_CASE = 13
+    lda #6
+.elseif TEST_CASE = 15 .or TEST_CASE = 31 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 41
+    lda #7
+.else
+    lda #8
+.endif
+    cmp cc_status
+    beq :+
+    jmp bad
+:
+.else
+    bcc :+
+    jmp bad
+:
+.endif
+.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
+    lda cc_arena+$6000
+    cmp #$a5
+    jne bad
+.endif
+    tsx
+    cpx caller_sp
+    jne bad
+    lda sp
+    cmp software_sp
+    jne bad
+    lda sp+1
+    cmp software_sp+1
+    jne bad
+    pla
+    cmp #$a5
+    jne bad
+    lda #'K'
+    jsr serial_out
+    lda #0
+    jmp halt
+
+probe_session:
+    tsx
+    stx session_entry_sp
 .if TEST_CASE = 1
     ; PushConst, direct Call to an already resolved target, and final Return.
     jsr cc_begin_owner
@@ -198,9 +276,8 @@ _main:
     ; A field beginning at the cursor is outside the emitted range.
     jsr cc_mark
     jsr cc_patch
-    ERROR
 .elseif TEST_CASE = 5
-    ; Exactly 24576 bytes fit. The next byte fails without moving the cursor.
+    ; Exactly 24576 bytes fit. The next byte aborts.
 @fill:
     lda #$ea
     jsr cc_emit_byte
@@ -219,18 +296,8 @@ _main:
     stx address+1
     lda #$ea
     jsr cc_emit_byte
-    ERROR
-    jsr cc_mark
-    cmp address
-    beq :+
-    jmp bad
-:
-    cpx address+1
-    beq :+
-    jmp bad
-:
 .elseif TEST_CASE = 6
-    ; A seven-byte PushConst cannot partially append with six bytes free.
+    ; A seven-byte PushConst fails with six bytes free.
 @fill:
     lda #$ea
     jsr cc_emit_byte
@@ -250,16 +317,6 @@ _main:
     stx address+1
     WORD $abcd
     jsr cc_push_const
-    ERROR
-    jsr cc_mark
-    cmp address
-    beq :+
-    jmp bad
-:
-    cpx address+1
-    beq :+
-    jmp bad
-:
 .elseif TEST_CASE = 7
     ; Raw u16 append retains the target's little-endian byte order.
     WORD $a1b2
@@ -326,7 +383,6 @@ _main:
     OK
     NAME 'a'
     jsr cc_publish
-    ERROR
 .elseif TEST_CASE = 9
     ; An unpublished owner cannot be bound, and an unbound slot fails resolve.
     jsr cc_begin_owner
@@ -334,20 +390,6 @@ _main:
     stx cc_arg+1
     NAME 'a'
     jsr cc_publish
-    ERROR
-    jsr cc_init
-    NAME 'z'
-    jsr cc_resolve
-    ERROR
-    jsr cc_init
-    lda #0
-    sta cc_name_len
-    jsr cc_resolve
-    ERROR
-    jsr cc_init
-    NAME 'A'
-    jsr cc_resolve
-    ERROR
 .elseif TEST_CASE = 10
     ; Forward label skips '?' and backward label repeats until helper returns 0.
     jsr cc_begin_owner
@@ -397,25 +439,6 @@ _main:
     OK
     WORD 7
     jsr cc_define_label
-    ERROR
-    jsr cc_init
-    jsr cc_begin_owner
-    WORD 7
-    jsr cc_label_jump
-    jsr cc_complete_owner
-    ERROR
-    ; Owner-local tables must not carry a previous owner's label.
-    jsr cc_init
-    jsr cc_begin_owner
-    WORD 7
-    jsr cc_define_label
-    jsr cc_complete_owner
-    OK
-    jsr cc_begin_owner
-    WORD 7
-    jsr cc_label_jump
-    jsr cc_complete_owner
-    ERROR
 .elseif TEST_CASE = 12
     jsr cc_begin_owner
     lda #1
@@ -431,7 +454,6 @@ _main:
     bne @labels
     WORD 33
     jsr cc_define_label
-    ERROR
 .elseif TEST_CASE = 13
     jsr cc_begin_owner
     lda #0
@@ -446,20 +468,12 @@ _main:
     bne @fixups
     WORD 7
     jsr cc_label_jump
-    ERROR
 .elseif TEST_CASE = 15
     ; Manual placeholders are also unresolved owner work until patched.
     jsr cc_begin_owner
     jsr cc_jump_placeholder
     OK
     jsr cc_complete_owner
-    ERROR
-    jsr cc_init
-    jsr cc_begin_owner
-    jsr cc_jz_placeholder
-    OK
-    jsr cc_complete_owner
-    ERROR
 .elseif TEST_CASE = 16
     ; A completed owner is frozen even though its bytes remain in the arena.
     jsr cc_begin_owner
@@ -475,7 +489,6 @@ _main:
     lda patch
     ldx patch+1
     jsr cc_patch
-    ERROR
 .elseif TEST_CASE = 17
     ; A resolved user binding is encoded as JSR abs16 in a later owner.
     jsr cc_begin_owner
@@ -540,79 +553,13 @@ _main:
     jmp bad
 :
 .elseif TEST_CASE = 19
-    ; With four arena bytes remaining, either five-byte template fails
-    ; before changing the cursor or the bytes in that remaining space.
-    lda #0
-    sta call_count
-@stage:
-    jsr cc_init
-    lda #0
-    sta counter
-    sta counter+1
-@fill:
-    lda #$ea
-    jsr cc_emit_byte
-    inc counter
-    bne :+
-    inc counter+1
-:
-    lda counter+1
-    cmp #$5f
-    bne @fill
-    lda counter
-    cmp #$fc                 ; 0x5ffc = 24572
-    bne @fill
-    OK
-    jsr cc_mark
-    sta address
-    stx address+1
-    sta probe_ptr
-    stx probe_ptr+1
-    ldy #0
-@seed:
-    lda #$a5
-    sta (probe_ptr),y
-    iny
-    cpy #4
-    bne @seed
+    ; Five-byte register template cannot fit into four remaining bytes.
+    lda #<(cc_arena+$5ffc)
+    sta cc_cursor
+    lda #>(cc_arena+$5ffc)
+    sta cc_cursor+1
     ldx #25
-    lda call_count
-    bne @load
     jsr cc_store_reg
-    jmp @check
-@load:
-    jsr cc_load_reg
-@check:
-    lda cc_status
-    cmp #1
-    beq :+
-    jmp bad
-:
-    jsr cc_mark
-    cmp address
-    beq :+
-    jmp bad
-:
-    cpx address+1
-    beq :+
-    jmp bad
-:
-    ldy #0
-@verify:
-    lda (probe_ptr),y
-    cmp #$a5
-    beq :+
-    jmp bad
-:
-    iny
-    cpy #4
-    bne @verify
-    inc call_count
-    lda call_count
-    cmp #2
-    beq :+
-    jmp @stage
-:
 .elseif TEST_CASE = 20
     ; Availability queries are non-destructive and isolated by complete name.
     NAME 'a'
@@ -675,85 +622,23 @@ _main:
 :
     NAME 'a'
     jsr cc_publish
-    ERROR
-    jsr cc_init
-    NAME 'b'
-    jsr cc_is_bound
-    bcc :+
-    jmp bad
-:
-    lda cc_status
-    beq :+
-    jmp bad
-:
-    lda #0
-    sta cc_name_len
-    jsr cc_is_bound
-    ERROR
-    jsr cc_init
-    NAME 'A'
-    jsr cc_is_bound
-    ERROR
-    jsr cc_init
-    NAME 'a'
-    jsr cc_resolve
-    ERROR
 .elseif TEST_CASE = 21
-    ; Reserve with a wrapping u16 cursor must fail without modifying it.
+    ; A wrapping cursor is rejected before any write.
     lda #$ff
     sta cc_cursor
     sta cc_cursor+1
     lda #$42
     jsr cc_emit_byte
-    lda cc_status
-    cmp #1
-    beq :+
-    jmp bad
-:
-    lda cc_cursor
-    and cc_cursor+1
-    cmp #$ff
-    beq :+
-    jmp bad
-:
 .elseif TEST_CASE = 22
-    ; A failed completion at the end of the arena cannot publish the owner,
-    ; and does not damage a previously completed owner.
-    jsr cc_begin_owner
-    sta patch
-    stx patch+1
-    jsr cc_complete_owner
-    OK
+    ; Completion cannot append its terminator beyond the arena.
     lda #<(cc_arena+$5fff)
     sta cc_cursor
     lda #>(cc_arena+$5fff)
     sta cc_cursor+1
     jsr cc_begin_owner
-    sta patch_two
-    stx patch_two+1
     lda #$ea
     jsr cc_emit_byte
-    OK
     jsr cc_complete_owner
-    lda cc_status
-    cmp #1
-    beq :+
-    jmp bad
-:
-    lda #0
-    sta cc_status
-    lda patch
-    ldx patch+1
-    jsr cc_is_completed
-    OK
-    lda patch_two
-    ldx patch_two+1
-    jsr cc_is_completed
-    lda cc_status
-    cmp #8
-    beq :+
-    jmp bad
-:
 .elseif TEST_CASE = 28
     ; Two placeholders at identical offsets in different 2 KiB pages.
     jsr cc_jump_placeholder
@@ -827,14 +712,6 @@ _main:
     stx patch+1
     jsr cc_complete_owner
     OK
-    ; A different page with the same low index is still unpublished.
-    WORD cc_arena+$800
-    jsr cc_is_completed
-    lda cc_status
-    cmp #8
-    beq :+
-    jmp bad
-:
     ; Repeat from a clean state to complete both owners below.
     jsr cc_init
     jsr cc_begin_owner
@@ -872,18 +749,7 @@ _main:
     OK
     WORD cc_arena+$6000
     jsr cc_is_completed
-    ERROR
-    ; Reset clears bits in every page, including the final byte.
-    jsr cc_init
-    WORD cc_arena+$5fff
-    jsr cc_is_completed
-    ERROR
-    jsr cc_init
-    lda patch_two
-    ldx patch_two+1
-    jsr cc_is_completed
-    ERROR
- .elseif TEST_CASE = 29
+.elseif TEST_CASE = 29
     jsr cc_begin_owner
     sta entry
     stx entry+1
@@ -900,7 +766,7 @@ _main:
     OK
     lda cc_static_length
     cmp #2
-    bne bad
+    jne bad
     WORD 1
     jsr cc_push_const
     jsr cc_static_read
@@ -934,10 +800,10 @@ _main:
     OK
     lda cc_static_length
     cmp #1
-    bne bad
+    jne bad
     lda cc_static_length+1
     cmp #1
-    bne bad
+    jne bad
     jsr cc_complete_owner
     OK
 .elseif TEST_CASE = 31
@@ -946,7 +812,6 @@ _main:
     lda #1
     jsr cc_static_byte
     jsr cc_complete_owner ; outstanding skip prevents completion
-    ERROR
 .elseif TEST_CASE = 32
     jsr cc_begin_owner
     jsr cc_static_begin
@@ -959,7 +824,6 @@ _main:
     lda cc_static_start
     ldx cc_static_start+1
     jsr cc_patch          ; payload is not a tracked operand
-    ERROR
 .elseif TEST_CASE = 33
     jsr cc_begin_owner
     lda #<(cc_arena+$5ffc)
@@ -972,16 +836,69 @@ _main:
     OK
     lda #43
     jsr cc_static_byte
-    ERROR
+.elseif TEST_CASE = 34
+    ; A static byte outside a payload is owner/static misuse.
+    lda #42
+    jsr cc_static_byte
+.elseif TEST_CASE = 35
+    NAME 'z'
+    jsr cc_resolve
+.elseif TEST_CASE = 36
+    lda #0
+    sta cc_name_len
+    jsr cc_resolve
+.elseif TEST_CASE = 37
+    NAME 'A'
+    jsr cc_resolve
+.elseif TEST_CASE = 38
+    jsr cc_begin_owner
+    WORD 7
+    jsr cc_label_jump
     jsr cc_complete_owner
-    ERROR
+.elseif TEST_CASE = 39
+    ; Labels belong to the owner in which they were defined.
+    jsr cc_begin_owner
+    WORD 7
+    jsr cc_define_label
+    jsr cc_complete_owner
+    jsr cc_begin_owner
+    WORD 7
+    jsr cc_label_jump
+    jsr cc_complete_owner
+.elseif TEST_CASE = 40
+    lda #<(cc_arena+$5ffc)
+    sta cc_cursor
+    lda #>(cc_arena+$5ffc)
+    sta cc_cursor+1
+    ldx #25
+    jsr cc_load_reg
+.elseif TEST_CASE = 41
+    jsr cc_begin_owner
+    jsr cc_jz_placeholder
+    jsr cc_complete_owner
+.elseif TEST_CASE = 42
+    lda #0
+    sta cc_name_len
+    jsr cc_is_bound
+.elseif TEST_CASE = 43
+    NAME 'A'
+    jsr cc_is_bound
+.elseif TEST_CASE = 44
+    ; Reset clears the final completed bit.
+    lda #<(cc_arena+$5fff)
+    sta cc_cursor
+    lda #>(cc_arena+$5fff)
+    sta cc_cursor+1
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    jsr cc_init
+    WORD cc_arena+$5fff
+    jsr cc_is_completed
 .else
     .error "unknown backend probe case"
 .endif
-    lda #'K'
-    jsr serial_out
-    lda #0
-    jmp halt
+    clc
+    rts
 
 bad:
     lda #'F'

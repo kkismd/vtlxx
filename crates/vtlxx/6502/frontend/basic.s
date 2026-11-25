@@ -3,8 +3,10 @@
 .setcpu "6502"
 .macpack longbranch
 
+.importzp fe_compile_status, session_entry_sp
+.import session_abort
 .export fe_compile_run
-.exportzp fe_compile_status
+
 .import fe_init, fe_next, cc_init, cc_begin_owner, cc_complete_owner
 .import cc_define_label, cc_label_jump, cc_return
 .import cc_mark, cc_jz_placeholder, cc_jump_placeholder, cc_patch_here
@@ -21,7 +23,7 @@
 .importzp rt_lhs, rt_rhs, rt_result
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
 .import rt_print_number, rt_print_char, rt_read_char, rt_try_read_char, rt_read_entropy
-.importzp fe_status, cc_status, cc_arg
+.importzp fe_status, cc_arg
 .import halt
 
 ; Compile-private CPU stack guard (#417/#424). The audited unguarded
@@ -40,7 +42,7 @@
 
 .importzp zp_phase
 .segment "ZEROPAGE"
-fe_compile_status: .res 1       ; 0 success, 1 source/transport, 2 syntax, 3 literal, 4 compile/backend resource
+
 look_state = zp_phase + 0        ; 0 empty, 1 byte, 2 frame end, 3 transport error
 look_byte = zp_phase + 1
 target_index = zp_phase + 11
@@ -55,7 +57,7 @@ digit = zp_phase + 24
 operator_index = zp_phase + 25
 .segment "ZEROPAGE"
 entry:             .res 2
-fe_entry_sp:       .res 1 ; compile-session caller return address remains on the CPU stack
+
 fe_defer_error:    .res 1 ; only while classifying a constant value reader error
 chunk_count = zp_phase + 26
 chunk_index = zp_phase + 27
@@ -96,7 +98,7 @@ constant_operator: .res 1
 ; CPU stack exhaustion alone halts immediately instead of returning.
 fe_compile_run:
     tsx
-    stx fe_entry_sp
+    stx session_entry_sp
     lda #0
     sta fe_compile_status
     sta fe_defer_error
@@ -124,8 +126,6 @@ fe_compile_run:
 @definition:
     jsr fe_definition
 @checked:
-    lda cc_status
-    jne backend_error
     jmp @next_statement
 @complete:
     ; Close and retain the final source chunk, then make the final driver the
@@ -151,9 +151,6 @@ fe_compile_run:
 ; named definition owner has completed and published.
 fe_start_chunk:
     jsr cc_begin_owner
-    lda cc_status
-    beq @started
-    jmp backend_error
 @started:
     clc
     rts
@@ -171,9 +168,6 @@ fe_finish_chunk:
     jsr cc_complete_owner
     sta chunk_target
     stx chunk_target+1
-    lda cc_status
-    beq @completed
-    jmp backend_error
 @completed:
     lda chunk_count
     asl a
@@ -191,9 +185,6 @@ fe_finish_chunk:
 ; Named definition owners are deliberately absent from this runtime sequence.
 fe_build_driver:
     jsr cc_begin_owner
-    lda cc_status
-    beq @driver_started
-    jmp backend_error
 @driver_started:
     lda #0
     sta chunk_index
@@ -210,9 +201,6 @@ fe_build_driver:
     tax
     lda chunk_target
     jsr cc_call
-    lda cc_status
-    beq @chunk_called
-    jmp backend_error
 @chunk_called:
     inc chunk_index
     jmp @next_chunk
@@ -220,9 +208,6 @@ fe_build_driver:
     jsr cc_complete_owner
     sta entry
     stx entry+1
-    lda cc_status
-    beq @driver_completed
-    jmp backend_error
 @driver_completed:
     lda entry
     ldx entry+1
@@ -257,10 +242,7 @@ set_error:
     sec
     rts
 compile_abort:
-    ldx fe_entry_sp
-    txs
-    sec
-    rts
+    jmp session_abort
 
 ; Fill the single lookahead byte. Frame end is cached and never read again.
 peek:
@@ -294,8 +276,6 @@ take:
 literal_output:
     jsr take
     jsr cc_literal_output_begin
-    lda cc_status
-    jne backend_error
 @next:
     jsr peek
     lda look_state
@@ -313,8 +293,6 @@ literal_output:
     cmp #$80
     jcs syntax_error
     jsr cc_literal_output_byte
-    lda cc_status
-    jne backend_error
     jsr take
     jmp @next
 @end:
@@ -322,8 +300,6 @@ literal_output:
     jsr peek
     jsr statement_end
     jsr cc_literal_output_finish
-    lda cc_status
-    jne backend_error
 @done:
     rts
 
@@ -479,8 +455,6 @@ statement:
     jsr cc_resolve
     sta call_target
     stx call_target+1
-    lda cc_status
-    jne backend_error
     ; `p=()` has no operands; keep its parentheses out of value().
     jsr peek
     lda look_state
@@ -543,13 +517,9 @@ statement:
     lda #10
     ldx #0
     jsr cc_push_const
-    lda cc_status
-    jne backend_error
     lda #<rt_print_char
     ldx #>rt_print_char
     jsr cc_call
-    lda cc_status
-    jne backend_error
     rts
 @question_group:
     ; The opener is consumed, so compile the group through the same operand
@@ -652,14 +622,10 @@ statement:
     lda #1
     jsr operand
 @condition_ready:
-    lda cc_status
-    jne backend_error
     jsr statement_end
     jsr cc_jz_placeholder
     sta patch_scratch
     stx patch_scratch+1
-    lda cc_status
-    jne backend_error
     lda structured_depth
     asl a
     tay
@@ -690,8 +656,6 @@ statement:
     jsr cc_jump_placeholder
     sta while_word
     stx while_word+1
-    lda cc_status
-    jne backend_error
     lda structured_depth
     asl a
     tay
@@ -703,8 +667,6 @@ statement:
     lda patch_scratch
     ldx patch_scratch+1
     jsr cc_patch_here
-    lda cc_status
-    jne backend_error
     jsr required_block
 @one_arm:
     lda structured_depth
@@ -717,8 +679,6 @@ statement:
     tax
     lda patch_scratch
     jsr cc_patch_here
-    lda cc_status
-    jne backend_error
     rts
 @condition_empty:
     jmp syntax_error
@@ -735,8 +695,6 @@ statement:
     jsr cc_mark
     sta while_word
     stx while_word+1
-    lda cc_status
-    jne @while_backend
     lda structured_depth
     asl a
     tay
@@ -765,16 +723,12 @@ statement:
     lda #1
     jsr operand
 @while_condition_ready:
-    lda cc_status
-    bne @while_backend
     jsr statement_end
 
     ; The JZ consumes exactly the condition's top runtime Cell.
     jsr cc_jz_placeholder
     sta while_word
     stx while_word+1
-    lda cc_status
-    bne @while_backend
     lda structured_depth
     asl a
     tay
@@ -787,8 +741,6 @@ statement:
     ; The body is one required block. Recompute the frame after nested source
     ; compilation, which may overwrite shared scratch and frame indexes.
     jsr required_block
-    lda cc_status
-    bne @while_backend
     lda structured_depth
     asl a
     sta while_offset
@@ -800,8 +752,6 @@ statement:
     tax
     lda while_word
     jsr cc_jump_to
-    lda cc_status
-    bne @while_backend
     ldy while_offset
     lda structured_patches,y
     sta while_word
@@ -810,15 +760,9 @@ statement:
     tax
     lda while_word
     jsr cc_patch_here
-    lda cc_status
-    bne @while_backend
     rts
 @while_syntax:
     jmp syntax_error
-@while_backend:
-    jmp backend_error
-@while_done:
-    rts
 @done:
     rts
 
@@ -845,8 +789,6 @@ statement:
     jsr require_form_boundary
     jsr cc_is_bound
     bcs @write_definition_syntax
-    lda cc_status
-    bne @write_definition_backend
     lda cc_name_len
     sta definition_length
     tax
@@ -861,14 +803,10 @@ statement:
     ; owner, then resume with a fresh chunk after publication.
     jsr fe_finish_chunk
     jsr cc_begin_owner
-    lda cc_status
-    bne @write_definition_backend
     jsr required_block
     jsr cc_complete_owner
     sta cc_arg
     stx cc_arg+1
-    lda cc_status
-    bne @write_definition_backend
     ldx definition_length
     stx cc_name_len
 @restore_definition_name:
@@ -878,16 +816,10 @@ statement:
     cpx #0
     bne @restore_definition_name
     jsr cc_publish
-    lda cc_status
-    bne @write_definition_backend
     jsr fe_start_chunk
     rts
 @write_definition_syntax:
     jmp syntax_error
-@write_definition_backend:
-    jmp backend_error
-@write_definition_done:
-    rts
 
 ; Numeric label operands use the compile-run constant table.
 fe_label:
@@ -1120,8 +1052,6 @@ constant_expression_value:
 static_definition:
     jsr take
     jsr cc_static_begin
-    lda cc_status
-    jne backend_error
     lda #0
     sta static_state
 @next:
@@ -1161,8 +1091,6 @@ static_definition:
     jne literal_error
     lda literal
     jsr cc_static_byte
-    lda cc_status
-    jne backend_error
     jmp @element
 @string:
     jsr take
@@ -1181,8 +1109,6 @@ static_definition:
     cmp #$7f
     jcs syntax_error
     jsr cc_static_byte
-    lda cc_status
-    jne backend_error
     jsr take
     jmp @string_next
 @string_end:
@@ -1239,8 +1165,6 @@ static_definition:
     jsr peek
     jsr statement_end
     jsr cc_static_finish
-    lda cc_status
-    jne backend_error
 @done:
     rts
 
@@ -1516,8 +1440,6 @@ required_block:
     cmp #']'
     beq @block_close
     jsr statement
-    lda cc_status
-    jne backend_error
     jmp @block_next
 @block_close:
     jsr take
@@ -1565,8 +1487,6 @@ operand:
     tax
     pla
     jsr cc_call
-    lda cc_status
-    jne backend_error
     jmp @operators
 @done:
     rts
