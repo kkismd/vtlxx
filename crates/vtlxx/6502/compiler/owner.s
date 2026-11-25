@@ -1,5 +1,6 @@
 ; Owner-local labels/fixups and completion of executable code targets.
 .setcpu "6502"
+.import session_backend_error
 
 .export cc_init, cc_begin_owner, cc_complete_owner
 .export cc_define_label, cc_label_jump, cc_is_completed, owner_require_active
@@ -60,8 +61,6 @@ cc_init:
 
 ; A/X = unpublished entry address.
 cc_begin_owner:
-    lda cc_status
-    bne @done
     lda owner_state
     bne @misuse
     lda #1
@@ -83,13 +82,10 @@ cc_begin_owner:
     rts
 @misuse:
     lda #3
-    sta cc_status
-    jmp @done
+    jmp session_backend_error
 
 ; Checks all unresolved references, appends the final RTS, then marks entry completed.
 cc_complete_owner:
-    lda cc_status
-    bne @done
     lda owner_state
     cmp #1
     bne @misuse
@@ -100,12 +96,9 @@ cc_complete_owner:
     beq @terminator
 @unresolved:
     lda #7
-    sta cc_status
-    jmp @done
+    jmp session_backend_error
 @terminator:
     jsr cc_return
-    lda cc_status
-    bne @done
     jsr cc_freeze
     lda owner_entry
     ldx owner_entry+1
@@ -122,15 +115,12 @@ cc_complete_owner:
     rts
 @misuse:
     lda #3
-    sta cc_status
-    jmp @done
+    jmp session_backend_error
 
 ; A/X must be an entry produced by successful owner completion.
 cc_is_completed:
     sta owner_target
     stx owner_target+1
-    lda cc_status
-    bne @done
     sec
     lda owner_target
     sbc #<cc_arena
@@ -151,7 +141,7 @@ cc_is_completed:
     bne @done
 @bad:
     lda #8
-    sta cc_status
+    jmp session_backend_error
 @done:
     rts
 
@@ -188,20 +178,16 @@ cc_define_label:
     sta owner_word
     stx owner_word+1
     jsr owner_require_active
-    lda cc_status
-    bne @done
     jsr owner_find_label
     bcc @new
     lda #4
-    sta cc_status
-    rts
+    jmp session_backend_error
 @new:
     ldx label_count
     cpx #32
     bcc @room
     lda #5
-    sta cc_status
-    rts
+    jmp session_backend_error
 @room:
     txa
     asl a
@@ -244,8 +230,6 @@ cc_define_label:
     tax
     pla
     jsr cc_patch
-    lda cc_status
-    bne @done
     ldx owner_index
     lda #0
     sta fixup_active,x
@@ -261,8 +245,6 @@ cc_label_jump:
     sta owner_word
     stx owner_word+1
     jsr owner_require_active
-    lda cc_status
-    bne @done
     jsr owner_find_label
     bcc @forward
     lda label_targets,y
@@ -276,8 +258,7 @@ cc_label_jump:
     cmp #32
     bcc @find_slot
     lda #6
-    sta cc_status
-    rts
+    jmp session_backend_error
 @find_slot:
     ldx #0
 @slot:
@@ -291,8 +272,6 @@ cc_label_jump:
     jsr cc_jump_placeholder
     sta owner_target
     stx owner_target+1
-    lda cc_status
-    bne @done
     ldx owner_index
     lda #1
     sta fixup_active,x
@@ -312,13 +291,11 @@ cc_label_jump:
     rts
 
 owner_require_active:
-    lda cc_status
-    bne @done
     lda owner_state
     cmp #1
     beq @done
     lda #3
-    sta cc_status
+    jmp session_backend_error
 @done:
     rts
 

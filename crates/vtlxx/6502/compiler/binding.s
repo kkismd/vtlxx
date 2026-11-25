@@ -1,5 +1,6 @@
 ; Compile-time Write bindings. Runtime calls contain only resolved targets.
 .setcpu "6502"
+.import session_backend_error
 
 .export cc_binding_reset, cc_is_bound, cc_publish, cc_resolve
 .export cc_name_len, cc_name
@@ -33,12 +34,9 @@ cc_is_bound:
 ; Input name and cc_arg = completed executable target. Publish count last.
 cc_publish:
     jsr binding_find
-    lda cc_status
-    bne @done
     bcc @available
     lda #8
-    sta cc_status
-    rts
+    jmp session_backend_error
 @available:
     lda binding_count
     cmp #64
@@ -46,8 +44,6 @@ cc_publish:
     lda cc_arg
     ldx cc_arg+1
     jsr cc_is_completed
-    lda cc_status
-    bne @done
     ldy #0
     lda cc_name_len
     sta (binding_ptr),y
@@ -69,14 +65,11 @@ cc_publish:
     rts
 @bad:
     lda #8
-    sta cc_status
-    rts
+    jmp session_backend_error
 
 ; Returns A/X resolved completed target, or status 8 for unknown name.
 cc_resolve:
     jsr binding_find
-    lda cc_status
-    bne @fail
     bcc @missing
     ; Return low in A and high in X.
     ldy #9
@@ -89,17 +82,11 @@ cc_resolve:
     rts
 @missing:
     lda #8
-    sta cc_status
-@fail:
-    lda #0
-    tax
-    rts
+    jmp session_backend_error
 
 ; On success binding_ptr points at matching entry (carry set), otherwise at
 ; next free entry (carry clear). Pointer advances in 16 bits across pages.
 binding_find:
-    lda cc_status
-    bne @invalid
     lda cc_name_len
     beq @bad
     cmp #9
@@ -151,7 +138,4 @@ binding_find:
     rts
 @bad:
     lda #8
-    sta cc_status
-@invalid:
-    clc
-    rts
+    jmp session_backend_error

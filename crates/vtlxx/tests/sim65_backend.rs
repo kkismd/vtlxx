@@ -62,6 +62,7 @@ fn build_and_run(case: u8) -> Result<Output, String> {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
         root.join("tests/fixtures/sim65/backend_probe.s"),
+        root.join("6502/compiler/session.s"),
         root.join("6502/compiler/arena.s"),
         root.join("6502/compiler/emitter.s"),
         root.join("6502/compiler/owner.s"),
@@ -151,19 +152,26 @@ fn completed_owner_binding_and_owner_local_labels() {
     expect(15, b"K");
     expect(16, b"K");
     expect(17, b"QK");
+    for case in 35..=39 {
+        expect(case, b"K");
+    }
+    expect(41, b"K");
 }
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn register_templates_cover_index_bounds_and_atomic_reserve_failure() {
+fn register_templates_cover_index_bounds_and_reserve_failure() {
     expect(18, b"AZK");
     expect(19, b"K");
+    expect(40, b"K");
 }
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn binding_availability_query_is_non_destructive() {
-    expect(20, b"K");
+    for case in [20, 42, 43] {
+        expect(case, b"K");
+    }
 }
 
 #[test]
@@ -172,13 +180,16 @@ fn code_arena_u16_wrap_and_full_range_bitsets() {
     expect(21, b"K");
     expect(22, b"K");
     expect(28, b"K");
+    for case in 44..=48 {
+        expect(case, b"K");
+    }
 }
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn static_data_skip_read_and_completion_guards() {
     expect(29, b"A255K");
-    for case in 30..=33 {
+    for case in 30..=34 {
         expect(case, b"K");
     }
 }

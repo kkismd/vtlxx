@@ -1,5 +1,6 @@
 ; Fixed native templates. All multi-byte forms reserve their full size first.
 .setcpu "6502"
+.import session_backend_error
 
 .export cc_push_const, cc_call, cc_return, cc_jump, cc_jz
 .export cc_load_reg, cc_store_reg
@@ -31,8 +32,8 @@ static_active: .res 1
 static_byte: .res 1
 
 .segment "CODE"
- ; Static payload operations are sequential and require an active top-level
-; owner. On any failure cc_status poisons the compile-run; only successful
+; Static payload operations are sequential and require an active top-level
+; owner. A fatal error aborts the compile session; only successful
 ; finish exposes cc_static_start/cc_static_length to the frontend.
 cc_static_reset:
     lda #0
@@ -41,15 +42,11 @@ cc_static_reset:
 
 cc_static_begin:
     jsr owner_require_active
-    lda cc_status
-    bne @done
     lda static_active
     bne @bad
     jsr cc_jump_placeholder
     sta static_patch
     stx static_patch+1
-    lda cc_status
-    bne @done
     jsr cc_mark
     sta cc_static_start
     stx cc_static_start+1
@@ -62,13 +59,10 @@ cc_static_begin:
     rts
 @bad:
     lda #3
-    sta cc_status
-    rts
+    jmp session_backend_error
 
 cc_static_byte:
     sta static_byte
-    lda cc_status
-    bne @done
     lda static_active
     beq @bad
     ; Length 32768 is the largest useful payload.
@@ -77,8 +71,6 @@ cc_static_byte:
     bcs @bad
     lda static_byte
     jsr cc_emit_byte
-    lda cc_status
-    bne @done
     inc cc_static_length
     bne @done
     inc cc_static_length+1
@@ -86,35 +78,27 @@ cc_static_byte:
     rts
 @bad:
     lda #3
-    sta cc_status
-    rts
+    jmp session_backend_error
 
 cc_static_finish:
-    lda cc_status
-    bne @done
     lda static_active
     beq @bad
     lda static_patch
     ldx static_patch+1
     jsr cc_patch_here
-    lda cc_status
-    bne @done
     lda #0
     sta static_active
 @done:
     rts
 @bad:
     lda #3
-    sta cc_status
-    rts
+    jmp session_backend_error
 
 ; Caller sets cc_static_start and cc_static_length to a finished payload.
 ; Emit four immediate stores followed by the bounds-checked helper call.
 cc_static_read:
     lda #19
     jsr cc_reserve
-    lda cc_status
-    bne @done
     ldx #0
 @loop:
     lda #$a9
@@ -150,49 +134,35 @@ cc_literal_output_begin:
 ; following byte arrives, so each emitted chunk has a count in 1..255.
 cc_literal_output_byte:
     sta literal_byte
-    lda cc_status
-    bne @done
     lda literal_count
     cmp #255
     bne @start_if_needed
     jsr cc_literal_output_finish
-    lda cc_status
-    bne @done
 @start_if_needed:
     lda literal_count
     bne @append
     jsr cc_jump_placeholder
     sta literal_patch
     stx literal_patch+1
-    lda cc_status
-    bne @done
     jsr cc_mark
     sta literal_start
     stx literal_start+1
 @append:
     lda literal_byte
     jsr cc_emit_byte
-    lda cc_status
-    bne @done
     inc literal_count
 @done:
     rts
 
 ; Reserve the entire fixed call template before patching or writing it.
 cc_literal_output_finish:
-    lda cc_status
-    bne @done
     lda literal_count
     beq @done
     lda #9
     jsr cc_reserve
-    lda cc_status
-    bne @done
     lda literal_patch
     ldx literal_patch+1
     jsr cc_patch_here
-    lda cc_status
-    bne @done
     lda #$a9               ; LDA #<literal_start
     jsr cc_write_byte_raw
     lda literal_start
@@ -222,8 +192,6 @@ cc_push_const:
     stx em_word+1
     lda #7
     jsr cc_reserve
-    lda cc_status
-    bne @done
     lda #$a9
     jsr cc_write_byte_raw
     lda em_word
@@ -247,8 +215,6 @@ cc_call:
     stx em_word+1
     lda #3
     jsr cc_reserve
-    lda cc_status
-    bne @done
     lda #$20
     jsr cc_write_byte_raw
     lda em_word
@@ -276,8 +242,6 @@ cc_indexed_call:
     sty em_word+1
     lda #5
     jsr cc_reserve
-    lda cc_status
-    bne @done
     lda #$a2
     jsr cc_write_byte_raw
     lda em_index
@@ -294,8 +258,6 @@ cc_indexed_call:
 cc_return:
     lda #1
     jsr cc_reserve
-    lda cc_status
-    bne @done
     lda #$60
     jsr cc_write_byte_raw
 @done:
@@ -308,8 +270,6 @@ cc_jump_to:
     stx em_word+1
     lda #3
     jsr cc_reserve
-    lda cc_status
-    bne @done
     lda #$4c
     jsr cc_write_byte_raw
     lda em_word
@@ -325,8 +285,6 @@ cc_jz:
     stx em_word+1
     lda #8
     jsr cc_reserve
-    lda cc_status
-    bne @done
     lda #$20
     jsr cc_write_byte_raw
     lda #<rt_pop_condition
@@ -358,12 +316,9 @@ cc_jump_placeholder:
     lda #0
     tax
     jsr cc_jump
-    lda cc_status
-    bne @failed
     lda em_patch
     ldx em_patch+1
     jsr cc_track_patch
-@failed:
     lda em_patch
     ldx em_patch+1
     rts
@@ -379,12 +334,9 @@ cc_jz_placeholder:
     lda #0
     tax
     jsr cc_jz
-    lda cc_status
-    bne @failed
     lda em_patch
     ldx em_patch+1
     jsr cc_track_patch
-@failed:
     lda em_patch
     ldx em_patch+1
     rts
