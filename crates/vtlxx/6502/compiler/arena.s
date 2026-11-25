@@ -19,7 +19,6 @@ cc_limit = zp_phase + 51
 cc_value = zp_phase + 53
 cc_pending_count = zp_phase + 55
 cc_reserve_count = zp_phase + 57
-cc_write_value = zp_phase + 58
 
 .segment "BSS"
 cc_arena:     .res 24576
@@ -83,9 +82,7 @@ cc_reserve:
 
 ; Caller must reserve the whole instruction first. A = byte to append.
 cc_write_byte_raw:
-    sta cc_write_value
     ldy #0
-    lda cc_write_value
     sta (cc_cursor),y
     inc cc_cursor
     bne @done

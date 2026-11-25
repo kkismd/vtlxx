@@ -336,10 +336,20 @@ probe_session:
     WORD $abcd
     jsr cc_push_const
 .elseif TEST_CASE = 7
-    ; Raw u16 append retains the target's little-endian byte order.
+    ; Cross a page while retaining little-endian order and cursor progress.
+    lda #$ff
+    sta cc_cursor
+    lda #>cc_arena+1
+    sta cc_cursor+1
     WORD $a1b2
     jsr cc_emit_u16
     OK
+    lda cc_cursor
+    cmp #1
+    jne bad
+    lda cc_cursor+1
+    cmp #>cc_arena+2
+    jne bad
     jsr cc_mark
     sec
     sbc #2
