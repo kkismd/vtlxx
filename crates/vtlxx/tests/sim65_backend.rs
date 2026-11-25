@@ -176,11 +176,11 @@ fn binding_availability_query_is_non_destructive() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn code_arena_u16_wrap_and_full_range_bitsets() {
+fn code_arena_u16_wrap_and_completion_publication() {
     expect(21, b"K");
     expect(22, b"K");
     expect(28, b"K");
-    for case in 44..=48 {
+    for case in 44..=52 {
         expect(case, b"K");
     }
 }

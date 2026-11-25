@@ -6,7 +6,7 @@
 .import cc_push_const, cc_call, cc_return, cc_jump, cc_jz
 .import cc_load_reg, cc_store_reg
 .import cc_jump_placeholder, cc_jz_placeholder, cc_patch_here, cc_jump_to
-.import cc_begin_owner, cc_complete_owner, cc_is_bound, cc_is_completed, cc_publish, cc_resolve
+.import cc_begin_owner, cc_complete_owner, cc_is_bound, cc_publish, cc_resolve
 .import cc_define_label, cc_label_jump
 .import cc_static_begin, cc_static_byte, cc_static_finish, cc_static_read
 .import cc_static_start, cc_static_length
@@ -56,6 +56,7 @@ counter:     .res 2
 call_count:  .res 1
 caller_sp: .res 1
 software_sp: .res 2
+phase: .res 1
 
 .segment "CODE"
 _main:
@@ -75,7 +76,7 @@ _main:
     lda sp+1
     sta software_sp+1
     jsr probe_session
-.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 28 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 48
+.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 48 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52
     bcs :+
     jmp bad
 :
@@ -88,7 +89,7 @@ _main:
     lda #1
 .elseif TEST_CASE = 4 .or TEST_CASE = 16 .or TEST_CASE = 32 .or TEST_CASE = 48
     lda #2
-.elseif TEST_CASE = 34
+.elseif TEST_CASE = 34 .or TEST_CASE = 52
     lda #3
 .elseif TEST_CASE = 11
     lda #4
@@ -105,6 +106,11 @@ _main:
     beq :+
     jmp bad
 :
+.if TEST_CASE = 8 .or TEST_CASE = 20 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52
+    lda phase
+    cmp #1
+    jne bad
+.endif
 .else
     bcc :+
     jmp bad
@@ -347,16 +353,14 @@ probe_session:
     jsr cc_complete_owner
     sta address
     stx address+1
-    sta cc_arg
-    stx cc_arg+1
     OK
     NAME 'a'
     jsr cc_publish
     OK
     jsr cc_begin_owner
     jsr cc_complete_owner
-    sta cc_arg
-    stx cc_arg+1
+    sta patch
+    stx patch+1
     OK
     NAME 'b'
     jsr cc_publish
@@ -374,20 +378,20 @@ probe_session:
     OK
     NAME 'b'
     jsr cc_resolve
-    cmp address
-    bne :+
-    cpx address+1
-    bne :+
-    jmp bad
-:
+    cmp patch
+    jne bad
+    cpx patch+1
+    jne bad
     OK
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    lda #1
+    sta phase
     NAME 'a'
     jsr cc_publish
 .elseif TEST_CASE = 9
     ; An unpublished owner cannot be bound, and an unbound slot fails resolve.
     jsr cc_begin_owner
-    sta cc_arg
-    stx cc_arg+1
     NAME 'a'
     jsr cc_publish
 .elseif TEST_CASE = 10
@@ -497,8 +501,6 @@ probe_session:
     WORD rt_print_char
     jsr cc_call
     jsr cc_complete_owner
-    sta cc_arg
-    stx cc_arg+1
     OK
     NAME 'a'
     jsr cc_publish
@@ -575,8 +577,6 @@ probe_session:
     jsr cc_complete_owner
     sta address
     stx address+1
-    sta cc_arg
-    stx cc_arg+1
     OK
     NAME 'a'
     jsr cc_publish
@@ -620,6 +620,10 @@ probe_session:
     beq :+
     jmp bad
 :
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    lda #1
+    sta phase
     NAME 'a'
     jsr cc_publish
 .elseif TEST_CASE = 21
@@ -705,50 +709,6 @@ probe_session:
     beq :+
     jmp bad
 :
-    ; Completion bits at matching positions also remain distinct.
-    jsr cc_init
-    jsr cc_begin_owner
-    sta patch
-    stx patch+1
-    jsr cc_complete_owner
-    OK
-    ; Repeat from a clean state to complete both owners below.
-    jsr cc_init
-    jsr cc_begin_owner
-    sta patch
-    stx patch+1
-    jsr cc_complete_owner
-    OK
-    lda #<(cc_arena+$800)
-    sta cc_cursor
-    lda #>(cc_arena+$800)
-    sta cc_cursor+1
-    jsr cc_begin_owner
-    sta patch_two
-    stx patch_two+1
-    jsr cc_complete_owner
-    OK
-    lda patch
-    ldx patch+1
-    jsr cc_is_completed
-    OK
-    lda patch_two
-    ldx patch_two+1
-    jsr cc_is_completed
-    OK
-    ; Final arena byte is a legal owner entry; next byte is not.
-    lda #<(cc_arena+$5fff)
-    sta cc_cursor
-    lda #>(cc_arena+$5fff)
-    sta cc_cursor+1
-    jsr cc_begin_owner
-    jsr cc_complete_owner
-    OK
-    WORD cc_arena+$5fff
-    jsr cc_is_completed
-    OK
-    WORD cc_arena+$6000
-    jsr cc_is_completed
 .elseif TEST_CASE = 29
     jsr cc_begin_owner
     sta entry
@@ -884,43 +844,37 @@ probe_session:
     NAME 'A'
     jsr cc_is_bound
 .elseif TEST_CASE = 44
-    ; Reset clears the final completed bit.
-    lda #<(cc_arena+$5fff)
-    sta cc_cursor
-    lda #>(cc_arena+$5fff)
-    sta cc_cursor+1
+    ; Reinitialization revokes an unconsumed completion.
     jsr cc_begin_owner
     jsr cc_complete_owner
-    WORD cc_arena+$5fff
-    jsr cc_is_completed
     jsr cc_init
-    WORD cc_arena+$5fff
-    jsr cc_is_completed
+    lda #1
+    sta phase
+    NAME 'a'
+    jsr cc_publish
 .elseif TEST_CASE = 45
-    ; A completed bit must not alias the same position in another 2 KiB page.
+    ; Starting a new owner revokes the previous unpublished completion.
     jsr cc_begin_owner
     jsr cc_complete_owner
-    WORD cc_arena+$800
-    jsr cc_is_completed
+    jsr cc_begin_owner
+    lda #1
+    sta phase
+    NAME 'a'
+    jsr cc_publish
 .elseif TEST_CASE = 46
-    ; A new session clears a completed bit in an intermediate page.
-    lda #<(cc_arena+$800)
-    sta cc_cursor
-    lda #>(cc_arena+$800)
-    sta cc_cursor+1
+    ; A different name cannot consume the same completion twice.
     jsr cc_begin_owner
     jsr cc_complete_owner
-    WORD cc_arena+$800
-    jsr cc_is_completed
-    jsr cc_init
-    WORD cc_arena+$800
-    jsr cc_is_completed
+    NAME 'a'
+    jsr cc_publish
+    lda #1
+    sta phase
+    NAME 'b'
+    jsr cc_publish
 .elseif TEST_CASE = 47
     ; A new session starts with no binding from a successful previous one.
     jsr cc_begin_owner
     jsr cc_complete_owner
-    sta cc_arg
-    stx cc_arg+1
     NAME 'a'
     jsr cc_publish
     NAME 'a'
@@ -944,6 +898,84 @@ probe_session:
     lda patch
     ldx patch+1
     jsr cc_patch_here
+.elseif TEST_CASE = 49
+    ; An initialized session has no completed owner to publish.
+    lda #1
+    sta phase
+    NAME 'a'
+    jsr cc_publish
+.elseif TEST_CASE = 50
+    ; Intermediate and final arena entries publish and resolve correctly.
+    lda #<(cc_arena+$800)
+    sta cc_cursor
+    lda #>(cc_arena+$800)
+    sta cc_cursor+1
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    sta address
+    stx address+1
+    cmp #<(cc_arena+$800)
+    jne bad
+    cpx #>(cc_arena+$800)
+    jne bad
+    NAME 'a'
+    jsr cc_publish
+    NAME 'a'
+    jsr cc_resolve
+    cmp address
+    jne bad
+    cpx address+1
+    jne bad
+    lda #<(cc_arena+$5fff)
+    sta cc_cursor
+    lda #>(cc_arena+$5fff)
+    sta cc_cursor+1
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    sta address
+    stx address+1
+    cmp #<(cc_arena+$5fff)
+    jne bad
+    cpx #>(cc_arena+$5fff)
+    jne bad
+    NAME 'b'
+    jsr cc_publish
+    NAME 'b'
+    jsr cc_resolve
+    cmp address
+    jne bad
+    cpx address+1
+    jne bad
+    jsr cc_init
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    sta address
+    stx address+1
+    NAME 'c'
+    jsr cc_publish
+    NAME 'c'
+    jsr cc_resolve
+    cmp address
+    jne bad
+    cpx address+1
+    jne bad
+.elseif TEST_CASE = 51
+    ; A consumed owner remains unavailable after another begins.
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    NAME 'a'
+    jsr cc_publish
+    jsr cc_begin_owner
+    lda #1
+    sta phase
+    NAME 'b'
+    jsr cc_publish
+.elseif TEST_CASE = 52
+    ; Beginning another owner during construction is misuse.
+    jsr cc_begin_owner
+    lda #1
+    sta phase
+    jsr cc_begin_owner
 .else
     .error "unknown backend probe case"
 .endif

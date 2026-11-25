@@ -805,8 +805,6 @@ statement:
     jsr cc_begin_owner
     jsr required_block
     jsr cc_complete_owner
-    sta cc_arg
-    stx cc_arg+1
     ldx definition_length
     stx cc_name_len
 @restore_definition_name:
