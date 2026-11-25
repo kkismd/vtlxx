@@ -55,6 +55,8 @@ digit = zp_phase + 24
 operator_index = zp_phase + 25
 .segment "ZEROPAGE"
 entry:             .res 2
+fe_entry_sp:       .res 1 ; compile-session caller return address remains on the CPU stack
+fe_defer_error:    .res 1 ; only while classifying a constant value reader error
 chunk_count = zp_phase + 26
 chunk_index = zp_phase + 27
 chunk_target = zp_phase + 28
@@ -93,8 +95,11 @@ constant_operator: .res 1
 ; enter generated code. The caller may inspect fe_compile_status/cc_status.
 ; CPU stack exhaustion alone halts immediately instead of returning.
 fe_compile_run:
+    tsx
+    stx fe_entry_sp
     lda #0
     sta fe_compile_status
+    sta fe_defer_error
     sta look_state
     sta nesting
     sta structured_depth
@@ -104,8 +109,6 @@ fe_compile_run:
     jcs source_error
     jsr cc_init
     jsr fe_start_chunk
-    lda fe_compile_status
-    bne @failed
 @next_statement:
     jsr skip_separators
     lda look_state
@@ -121,8 +124,6 @@ fe_compile_run:
 @definition:
     jsr fe_definition
 @checked:
-    lda fe_compile_status
-    bne @failed
     lda cc_status
     jne backend_error
     jmp @next_statement
@@ -130,11 +131,7 @@ fe_compile_run:
     ; Close and retain the final source chunk, then make the final driver the
     ; only runtime entry. No chunk executes until the whole source compiles.
     jsr fe_finish_chunk
-    lda fe_compile_status
-    bne @failed
     jsr fe_build_driver
-    lda fe_compile_status
-    bne @failed
     lda entry
     ldx entry+1
     jsr rt_init
@@ -148,9 +145,6 @@ fe_compile_run:
     lda entry
     ldx entry+1
     clc
-    rts
-@failed:
-    sec
     rts
 
 ; Start one top-level runtime chunk. #294 uses the same operation after a
@@ -172,9 +166,7 @@ fe_finish_chunk:
     bcc @capacity_available
     ; Chunk targets are frontend-owned compile state, not backend status.
     lda #4
-    sta fe_compile_status
-    sec
-    rts
+    jmp set_error
 @capacity_available:
     jsr cc_complete_owner
     sta chunk_target
@@ -258,6 +250,15 @@ backend_error:
     lda #4
 set_error:
     sta fe_compile_status
+    ; Constant value readers can discover a tentative syntax/literal error
+    ; before their caller classifies a transport EOF. Only those calls defer.
+    lda fe_defer_error
+    beq compile_abort
+    sec
+    rts
+compile_abort:
+    ldx fe_entry_sp
+    txs
     sec
     rts
 
@@ -297,8 +298,6 @@ literal_output:
     jne backend_error
 @next:
     jsr peek
-    lda fe_compile_status
-    bne @done
     lda look_state
     cmp #3
     jeq source_error
@@ -321,11 +320,7 @@ literal_output:
 @end:
     jsr take
     jsr peek
-    lda fe_compile_status
-    bne @done
     jsr statement_end
-    lda fe_compile_status
-    bne @done
     jsr cc_literal_output_finish
     lda cc_status
     jne backend_error
@@ -410,8 +405,6 @@ statement:
     lda #1
     sta cc_name_len
     jsr scan_write_name_tail
-    lda fe_compile_status
-    jne @done
 @require_equals:
     lda look_byte
     cmp #'='
@@ -445,8 +438,6 @@ statement:
     jsr take
     jsr peek
     jsr statement_end
-    lda fe_compile_status
-    jne @done
     jmp cc_return
 @label_operand:
     jmp fe_label
@@ -511,8 +502,6 @@ statement:
     jsr take
     jsr peek
     jsr statement_end
-    lda fe_compile_status
-    jne @done
     lda call_target
     ldx call_target+1
     jmp cc_call
@@ -521,20 +510,12 @@ statement:
     ; grouped operand. Compile the group contents, then continue the ordinary
     ; operator/comma path with its result already on the value stack.
     jsr enter_nesting
-    lda fe_compile_status
-    jne @done
     lda #0
     jsr operand
-    lda fe_compile_status
-    jne @done
     jsr close_group
     dec nesting
-    lda fe_compile_status
-    jne @done
     lda #1
     jsr operand
-    lda fe_compile_status
-    jne @done
     jmp @operands_ready
 @question_output:
     ; Only exact `?=()` is a zero-operand newline output. Preserve ordinary
@@ -559,8 +540,6 @@ statement:
     jsr take
     jsr peek
     jsr statement_end
-    lda fe_compile_status
-    jne @done
     lda #10
     ldx #0
     jsr cc_push_const
@@ -576,20 +555,12 @@ statement:
     ; The opener is consumed, so compile the group through the same operand
     ; path used by a Write call, then continue normal RHS parsing.
     jsr enter_nesting
-    lda fe_compile_status
-    jne @done
     lda #0
     jsr operand
-    lda fe_compile_status
-    jne @done
     jsr close_group
     dec nesting
-    lda fe_compile_status
-    jne @done
     lda #1
     jsr operand
-    lda fe_compile_status
-    jne @done
     jmp @operands_ready
 @compile_operand:
     jsr peek
@@ -606,8 +577,6 @@ statement:
     lda #0
 @operand:
     jsr operand
-    lda fe_compile_status
-    jne @done
 @operands_ready:
 @comma:
     jsr peek
@@ -620,14 +589,10 @@ statement:
     jsr take
     lda #0
     jsr operand
-    lda fe_compile_status
-    beq @comma
-    rts
+    jmp @comma
 
 @end:
     jsr statement_end
-    lda fe_compile_status
-    jne @done
     lda target_index
     cmp #'~'
     jeq @done
@@ -687,13 +652,9 @@ statement:
     lda #1
     jsr operand
 @condition_ready:
-    lda fe_compile_status
-    jne @conditional_done
     lda cc_status
     jne backend_error
     jsr statement_end
-    lda fe_compile_status
-    jne @conditional_done
     jsr cc_jz_placeholder
     sta patch_scratch
     stx patch_scratch+1
@@ -708,8 +669,6 @@ statement:
     lda patch_scratch+1
     sta structured_patches,y
     jsr required_block
-    lda fe_compile_status
-    bne @conditional_done
     jsr skip_separators
     lda look_state
     cmp #3
@@ -747,8 +706,6 @@ statement:
     lda cc_status
     jne backend_error
     jsr required_block
-    lda fe_compile_status
-    bne @conditional_done
 @one_arm:
     lda structured_depth
     asl a
@@ -808,13 +765,9 @@ statement:
     lda #1
     jsr operand
 @while_condition_ready:
-    lda fe_compile_status
-    bne @while_done
     lda cc_status
     bne @while_backend
     jsr statement_end
-    lda fe_compile_status
-    bne @while_done
 
     ; The JZ consumes exactly the condition's top runtime Cell.
     jsr cc_jz_placeholder
@@ -834,8 +787,6 @@ statement:
     ; The body is one required block. Recompute the frame after nested source
     ; compilation, which may overwrite shared scratch and frame indexes.
     jsr required_block
-    lda fe_compile_status
-    bne @while_done
     lda cc_status
     bne @while_backend
     lda structured_depth
@@ -891,11 +842,7 @@ statement:
     jsr take
     jsr peek
     jsr scan_write_name_tail
-    lda fe_compile_status
-    bne @write_definition_done
     jsr require_form_boundary
-    lda fe_compile_status
-    bne @write_definition_done
     jsr cc_is_bound
     bcs @write_definition_syntax
     lda cc_status
@@ -913,14 +860,10 @@ statement:
     ; Preserve source order by finishing the prior chunk before the named
     ; owner, then resume with a fresh chunk after publication.
     jsr fe_finish_chunk
-    lda fe_compile_status
-    bne @write_definition_done
     jsr cc_begin_owner
     lda cc_status
     bne @write_definition_backend
     jsr required_block
-    lda fe_compile_status
-    bne @write_definition_done
     jsr cc_complete_owner
     sta cc_arg
     stx cc_arg+1
@@ -949,11 +892,7 @@ statement:
 ; Numeric label operands use the compile-run constant table.
 fe_label:
     jsr resolve_label_operand
-    lda fe_compile_status
-    bne @done
     jsr statement_end
-    lda fe_compile_status
-    bne @done
     lda target_index
     cmp #'^'
     bne @jump
@@ -971,8 +910,6 @@ fe_label:
 fe_definition:
     jsr take
     jsr scan_constant_name
-    lda fe_compile_status
-    jne @definition_done
     jsr constant_find
     bcc :+
     jmp syntax_error             ; duplicate
@@ -999,8 +936,6 @@ fe_definition:
     jne syntax_error
     jsr take
     jsr skip_horizontal
-    lda fe_compile_status
-    jne @definition_done
     jsr peek
     lda look_state
     cmp #3
@@ -1015,8 +950,6 @@ fe_definition:
     lda #1
     sta definition_kind
     jsr static_definition
-    lda fe_compile_status
-    jne @definition_done
     jmp @publish
 @integer:
     lda constant_length
@@ -1029,11 +962,7 @@ fe_definition:
     cpx #0
     bne @save_name
     jsr constant_expression
-    lda fe_compile_status
-    bne @definition_done
     jsr statement_end
-    lda fe_compile_status
-    bne @definition_done
     lda constant_definition_length
     sta constant_length
     tax
@@ -1095,8 +1024,6 @@ fe_definition:
 ; generated code is involved. The saved LHS and accumulator are private BSS.
 constant_expression:
     jsr constant_expression_value
-    lda fe_compile_status
-    bne @done
 @next:
     lda literal
     sta constant_accumulator
@@ -1119,8 +1046,6 @@ constant_expression:
     jsr take
     jsr peek
     jsr constant_expression_value
-    lda fe_compile_status
-    bne @done
     lda constant_accumulator
     sta rt_lhs
     lda constant_accumulator+1
@@ -1159,20 +1084,30 @@ constant_expression_value:
     lda look_byte
     cmp #'.'
     beq @name
+    lda #1
+    sta fe_defer_error
     jsr parse_literal
+    lda #0
+    sta fe_defer_error
     ; parse_literal treats a non-byte immediately after '-' as literal error.
     lda look_state
     cmp #3
     jeq source_error
+    lda fe_compile_status
+    jne compile_abort
     rts
 @name:
     jsr take
+    lda #1
+    sta fe_defer_error
     jsr scan_constant_name
+    lda #0
+    sta fe_defer_error
     lda look_state
     cmp #3
     jeq source_error
     lda fe_compile_status
-    bne @done
+    jne compile_abort
     jsr constant_find
     jcc syntax_error
     jsr constant_kind
@@ -1222,8 +1157,6 @@ static_definition:
     cmp #'9'+1
     jcs syntax_error
     jsr parse_literal
-    lda fe_compile_status
-    jne @done
     lda literal+1
     jne literal_error
     lda literal
@@ -1305,8 +1238,6 @@ static_definition:
     jsr take
     jsr peek
     jsr statement_end
-    lda fe_compile_status
-    bne @done
     jsr cc_static_finish
     lda cc_status
     jne backend_error
@@ -1359,8 +1290,6 @@ resolve_label_operand:
     jne syntax_error
     jsr take
     jsr scan_constant_name
-    lda fe_compile_status
-    bne @done
     jsr constant_find
     bcs :+
     jmp syntax_error
@@ -1371,8 +1300,6 @@ resolve_label_operand:
     jmp @range
 @decimal:
     jsr parse_literal
-    lda fe_compile_status
-    bne @done
     lda negative
     bne @bad_range
 @range:
@@ -1575,8 +1502,6 @@ required_block:
     inc structured_depth
     jsr take
     jsr require_form_boundary
-    lda fe_compile_status
-    bne @block_done
     lda look_state
     cmp #2
     jeq syntax_error
@@ -1591,16 +1516,12 @@ required_block:
     cmp #']'
     beq @block_close
     jsr statement
-    lda fe_compile_status
-    bne @block_done
     lda cc_status
     jne backend_error
     jmp @block_next
 @block_close:
     jsr take
     jsr require_form_boundary
-    lda fe_compile_status
-    bne @block_done
     dec structured_depth
     rts
 @block_done:
@@ -1612,8 +1533,6 @@ operand:
     bne @operators
     compile_stack_guard
     jsr value
-    lda fe_compile_status
-    bne @done
 @operators:
     compile_stack_guard
     jsr peek
@@ -1639,19 +1558,12 @@ operand:
     beq @done
     jsr operator
     pha
-    lda fe_compile_status
-    beq @operator_ready
-    pla
-    rts
-@operator_ready:
     txa
     pha
     jsr value
     pla
     tax
     pla
-    ldy fe_compile_status
-    bne @done
     jsr cc_call
     lda cc_status
     jne backend_error
@@ -1701,10 +1613,6 @@ value:
 @named:
     jsr take
     jsr scan_constant_name
-    lda fe_compile_status
-    beq :+
-    jmp @done
-:
     jsr constant_find
     bcs :+
     jmp syntax_error
@@ -1731,16 +1639,12 @@ value:
     jne syntax_error
     jsr take
     jsr enter_nesting
-    lda fe_compile_status
-    jne @done
     ldx nesting
     dex
     lda constant_slot
     sta static_slots,x
     lda #0
     jsr operand
-    lda fe_compile_status
-    bne @named_leave
     jsr close_group
 @named_leave:
     ldx nesting
@@ -1748,8 +1652,6 @@ value:
     lda static_slots,x
     sta constant_slot
     dec nesting
-    lda fe_compile_status
-    jne @done
     jsr constant_address
     ldy #18
     lda (constant_ptr),y
@@ -1777,12 +1679,8 @@ value:
     jne syntax_error
     jsr take
     jsr enter_nesting
-    lda fe_compile_status
-    bne @done
     lda #0
     jsr operand
-    lda fe_compile_status
-    bne @leave
 @applied_comma:
     jsr peek
     lda look_state
@@ -1794,21 +1692,16 @@ value:
     jsr take
     lda #0
     jsr operand
-    lda fe_compile_status
-    beq @applied_comma
+    jmp @applied_comma
 @close_applied:
     jsr close_group
 @leave:
     dec nesting
-    lda fe_compile_status
-    bne @done
     lda #<rt_load_storage
     ldx #>rt_load_storage
     jmp cc_call
 @literal:
     jsr parse_literal
-    lda fe_compile_status
-    bne @done
     lda literal
     ldx literal+1
     jmp cc_push_const
@@ -1830,12 +1723,8 @@ value:
 @group:
     jsr take
     jsr enter_nesting
-    lda fe_compile_status
-    bne @done
     lda #0
     jsr operand
-    lda fe_compile_status
-    bne @leave_group
     jsr close_group
 @leave_group:
     dec nesting

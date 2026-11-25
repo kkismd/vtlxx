@@ -98,6 +98,10 @@ fn build_probe(temp: &TestDir) -> PathBuf {
 }
 
 fn run_probe(executable: &Path, source: &[u8]) -> Output {
+    run_probe_input(executable, &frame(source))
+}
+
+fn run_probe_input(executable: &Path, input: &[u8]) -> Output {
     run(
         "sim65",
         &[
@@ -105,7 +109,7 @@ fn run_probe(executable: &Path, source: &[u8]) -> Output {
             OsStr::new(CYCLE_LIMIT),
             executable.as_os_str(),
         ],
-        &frame(source),
+        input,
     )
 }
 
@@ -205,6 +209,23 @@ fn compile_failures_do_not_start_runtime_and_report_expected_causes() {
     let cases: Vec<(&str, Vec<u8>, &str, i32, i32)> = vec![
         ("syntax", b"?=42\nA=".to_vec(), "syntax error", 130, 66),
         (
+            "literal",
+            b"?=42\nA=32768".to_vec(),
+            "literal range error",
+            131,
+            67,
+        ),
+        (
+            "constant-table-full",
+            (0..129)
+                .map(|i| format!(".N{i}:=1\n"))
+                .collect::<String>()
+                .into_bytes(),
+            "syntax error",
+            130,
+            66,
+        ),
+        (
             "undefined-write",
             b"?=42\na=()\n".to_vec(),
             "compiler resource error",
@@ -301,6 +322,36 @@ fn compile_failures_do_not_start_runtime_and_report_expected_causes() {
         130,
         "syntax error",
     );
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn failure_returns_to_caller_for_truncated_input_and_eof_classification() {
+    let temp = TestDir::new();
+    let probe = build_probe(&temp);
+    let mut cases: Vec<(Vec<u8>, i32)> =
+        vec![(vec![], 65), (vec![1], 65), (vec![8, 0, b'A', b'='], 66)];
+    for (source, frame_end_status) in [
+        ("?=42 .BAD:=-", 67),
+        ("?=42 .BAD:=1+", 67),
+        ("?=42 .GOOD:=1 .BAD:=.GO", 66),
+    ] {
+        let bytes = source.as_bytes();
+        let mut truncated = ((bytes.len() + 1) as u16).to_le_bytes().to_vec();
+        truncated.extend_from_slice(bytes);
+        cases.push((truncated, 65));
+        cases.push((frame(bytes), frame_end_status));
+    }
+    for (input, expected) in cases {
+        let result = run_probe_input(&probe, &input);
+        assert_eq!(
+            result.status.code(),
+            Some(expected),
+            "{input:?}: {result:?}"
+        );
+        assert!(result.stdout.is_empty(), "{input:?}: {result:?}");
+        assert!(result.stderr.is_empty(), "{input:?}: {result:?}");
+    }
 }
 
 fn parentheses_source(depth: usize) -> Vec<u8> {

@@ -487,7 +487,7 @@ failed:
 // Install a test-only probe on the actual compile failure path. Exit 98 proves
 // that the probe ran to completion, while 99 identifies a table mismatch.
 fn inject_constant_table_probe(basic: &str, entries: &[(&str, u8, u16)], status: u8) -> String {
-    let marker = "@failed:\n    sec\n    rts";
+    let marker = "compile_abort:";
     assert_eq!(basic.matches(marker).count(), 1);
     let publish = "@published:\n    inc constant_count";
     assert_eq!(basic.matches(publish).count(), 1);
@@ -508,7 +508,7 @@ fn inject_constant_table_probe(basic: &str, entries: &[(&str, u8, u16)], status:
         1,
     );
     let check = format!(
-        r#"@failed:
+        r#"compile_abort:
     lda fe_compile_status
     cmp #{status}
     beq :+
