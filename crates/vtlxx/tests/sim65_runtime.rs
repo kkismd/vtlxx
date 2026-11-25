@@ -213,6 +213,27 @@ fn arithmetic_matches_signed_cell_edges() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn shared_arithmetic_is_independent_of_runtime_initialization() {
+    expect("runtime_shared_arithmetic", 0, b"K");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn binary_arithmetic_wrappers_preserve_stack_contract() {
+    for case in 1..=9 {
+        let output = build_and_run("runtime_binary_contract", Some(case)).unwrap();
+        let status = if case <= 6 { 1 } else { 0 };
+        assert_eq!(
+            output.status.code(),
+            Some(status),
+            "case {case}: {output:?}"
+        );
+        assert_eq!(output.stdout, b"K", "case {case}: {output:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn comparisons_are_signed_and_normalized() {
     expect("runtime_comparisons", 0, b"1,0,1,0,1,0,0,1,0,1,0,1");
 }

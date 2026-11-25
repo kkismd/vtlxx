@@ -166,3 +166,26 @@ helper・マクロ・通常失敗cleanup・cc65 library・adapter・startup・�
 変更するときは K と入口外の上界を再監査する。IRQ/NMIや常駐再利用を導入する場合は
 #417の前提外であり、新たな設計判断が必要。128 B予算の例外はcompile限定で、
 EC07全体やruntimeの256 B安全ゲートの完了をこの変更だけから宣言しない。
+
+## 加減乗算の共用（#636）
+
+現行 sim6502 のリンクでは `rt_add` / `rt_sub` / `rt_mul` はそれぞれ
+`rt_need_two`、`cell_add` / `cell_sub` / `cell_mul` を順に JSR し、
+`rt_commit_binary` へ tail JMP する。各共用 entry は leaf で、入口からの
+追加 hardware stack は 0 B、呼出しの JSR を含めると 2 B。以前から存在した
+`rt_need_two` の JSR と同時には積まれないため、各 wrapper の最大深度は
+増えない。既存の runtime 69 B 保守的上界（#520）の条件は変わらない。
+compile 側からはまだ呼ばれないため guard 間・入口外経路も変わらず、
+S>=25 と失敗時の status 4 / exit 132 / 空 stdout / 即時停止を維持する。
+#637 で呼出しを追加する際にはその経路を再監査する。
+
+共用 entry は D=0、`rt_lhs` / `rt_rhs` の Cell を入力し `rt_result` に
+mod 65536 の結果を返す。入力と Y を保持し、A と N/Z/C/V を変更する。
+乗算はさらに X と BSS の `work_q` / `work_d` を変更する。各呼出しで
+必要な作業領域を初期化し、runtime 初期化には依存しない。
+現行 link map では `zp_phase=$06`、compile の +0..79 は $06..$55、
+算術用 +85..90 は $5B..$60。永続 entry/status と cc65 の ZP は別予約で、
+`emitter.s` が埋め込む `rt_lhs=$5B` と各 alias の相対位置も不変。
+sim6502 CLI の同一 source 順・同一 toolchain での map 比較は CODE
+7480→7492 B、RODATA 49→49 B、BSS 35317→35317 B、ZEROPAGE
+132→132 B（CODE +12 B、他は増減なし）。
