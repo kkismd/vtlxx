@@ -1,6 +1,7 @@
 use crate::{
     binding::SourceRole,
     builder::CodeBuilder,
+    cell,
     executable::{Instruction, RuntimeError, StaticDataId},
     expression::compile_rhs,
     machine::Machine,
@@ -121,21 +122,64 @@ impl NameTable {
     fn define_integer(&mut self, definition: &str) -> Result<(), CompileError> {
         let (name, value) = definition.split_once(":=").ok_or(CompileError::Syntax)?;
         let name = name.trim_end_matches([' ', '\t']);
-        let value = value.trim_matches([' ', '\t']);
-        if self.validate_new_name(name).is_err()
-            || value.is_empty()
-            || value == "-"
-            || !value
-                .strip_prefix('-')
-                .unwrap_or(value)
-                .bytes()
-                .all(|byte| byte.is_ascii_digit())
-        {
-            return Err(CompileError::Syntax);
-        }
-        let value = value.parse::<i16>().map_err(|_| CompileError::Syntax)?;
+        let value = value.trim_start_matches([' ', '\t']);
+        self.validate_new_name(name)?;
+        let value = self.evaluate_integer(value)?;
         self.0.push((name.to_owned(), NamedValue::Integer(value)));
         Ok(())
+    }
+
+    fn evaluate_integer(&self, expression: &str) -> Result<i16, CompileError> {
+        if !expression.is_ascii() {
+            return Err(CompileError::Syntax);
+        }
+        let bytes = expression.as_bytes();
+        let mut pos = 0;
+        let mut value = self.integer_value(expression, &mut pos)?;
+        while pos < bytes.len() {
+            let operator = bytes[pos];
+            pos += 1;
+            if !matches!(operator, b'+' | b'-' | b'*') {
+                return Err(CompileError::Syntax);
+            }
+            let rhs = self.integer_value(expression, &mut pos)?;
+            value = match operator {
+                b'+' => cell::add(value, rhs),
+                b'-' => cell::sub(value, rhs),
+                b'*' => cell::mul(value, rhs),
+                _ => unreachable!(),
+            };
+        }
+        Ok(value)
+    }
+
+    fn integer_value(&self, expression: &str, pos: &mut usize) -> Result<i16, CompileError> {
+        let bytes = expression.as_bytes();
+        if bytes.get(*pos) == Some(&b'.') {
+            *pos += 1;
+            let start = *pos;
+            while bytes
+                .get(*pos)
+                .is_some_and(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || *b == b'_')
+            {
+                *pos += 1;
+            }
+            return self.resolve_integer(&expression[start..*pos]);
+        }
+        let start = *pos;
+        if bytes.get(*pos) == Some(&b'-') {
+            *pos += 1;
+        }
+        let digits = *pos;
+        while bytes.get(*pos).is_some_and(u8::is_ascii_digit) {
+            *pos += 1;
+        }
+        if *pos == digits {
+            return Err(CompileError::Syntax);
+        }
+        expression[start..*pos]
+            .parse()
+            .map_err(|_| CompileError::Syntax)
     }
 
     /// Register a byte-array name whose body the Machine has already taken
@@ -449,14 +493,11 @@ fn next_source_token<'a>(
         while end < bytes.len() && matches!(bytes[end], b' ' | b'\t') {
             end += 1;
         }
-        if bytes.get(end) == Some(&b'-') {
+        let value_start = end;
+        while end < bytes.len() && !matches!(bytes[end], b' ' | b'\t' | b';') {
             end += 1;
         }
-        let digits = end;
-        while end < bytes.len() && bytes[end].is_ascii_digit() {
-            end += 1;
-        }
-        if end == digits || (end < bytes.len() && !matches!(bytes[end], b' ' | b'\t' | b';')) {
+        if end == value_start {
             return Err(CompileError::Syntax);
         }
         *offset = end;
@@ -719,6 +760,21 @@ fn compile_statement(
 mod tests {
     use super::*;
     use crate::primitive::Primitive;
+
+    #[test]
+    fn failed_integer_expression_does_not_publish_or_modify_names() {
+        let mut names = NameTable::default();
+        names.define_integer("AA:=1").unwrap();
+        for expression in [".MISSING+1", ".AA+.MISSING", ".AA+2+.MISSING", "32768-1"] {
+            let before = names.0.clone();
+            assert_eq!(
+                names.define_integer(&format!("BAD:={expression}")),
+                Err(CompileError::Syntax)
+            );
+            assert_eq!(names.0, before);
+            assert_eq!(names.lookup("BAD"), None);
+        }
+    }
 
     #[test]
     fn lowercase_operator_ends_constant_name() {
