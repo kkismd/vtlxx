@@ -1,0 +1,86 @@
+; Port of https://github.com/kkismd/tbx/blob/main/docs/next/examples/mandelbrot.tbx
+; TBX blob 865a825bddbb02c129e66cbf7042a30b72007162.
+; X,Y are coordinates; C,D are c; A,B are z; N is the iteration.
+; fixedmul inputs stay within 250: initially |C|<=223, |D|<=125,
+; and every updated z is checked before it is used in another multiplication.
+; Coordinate products are at most 8931 and 1500. The largest remainder
+; product is 124*124=15376; all fixedmul and iteration intermediates fit i16.
+
+.SCALE := 125
+.LIMIT := 250
+.RADIUS := 500
+.XMAX := 39
+.YMAX := 12
+.ITERATIONS := 16
+
+  ; fixedmul: ( left right -- scaled_product ). Truncates toward zero.
+  ; reads: value stack; writes/clobbers: L, R, S, Q, U, V, W, T
+  &=fixedmul [
+    R=~
+    L=~
+    S=1
+    %=L<0 [ L=0-L S=0-S ]
+    %=R<0 [ R=0-R S=0-S ]
+    Q=L/.SCALE
+    U=R/.SCALE
+    V=L%.SCALE
+    W=R%.SCALE
+    T=(((Q*U)*.SCALE)+(Q*W))+(U*V)
+    T=T+((V*W)/.SCALE)
+    %=S<0 [ T=0-T ]
+    ~=T
+  ]
+
+  ; point: ( -- ). Draw one point for C,D.
+  ; reads: C,D; calls fixedmul
+  ; writes/clobbers: A,B,E,F,G,H,N,P,L,R,S,Q,U,V,W,T, output
+  &=point [
+    A=C
+    B=D
+    N=0
+    P=0
+    *=P==0 [
+      fixedmul=A,A
+      E=~
+      fixedmul=B,B
+      F=~
+      G=(E-F)+C
+      fixedmul=A,B
+      H=~
+      H=(2*H)+D
+      A=G
+      B=H
+      E=A
+      F=B
+      %=E<0 [ E=0-E ]
+      %=F<0 [ F=0-F ]
+      %=E>.LIMIT [ P=1 ] [
+        %=F>.LIMIT [ P=1 ] [
+          fixedmul=A,A
+          E=~
+          fixedmul=B,B
+          F=~
+          %=(E+F)>.RADIUS [ P=1 ]
+        ]
+      ]
+      %=P==1 [
+        %=N<10 [ $=48+N ] [ $=55+N ]
+      ] [
+        N=N+1
+        %=N>=.ITERATIONS [ $=32 P=1 ]
+      ]
+    ]
+  ]
+
+  Y=0-.YMAX
+  *=Y<=.YMAX [
+    X=0-.XMAX
+    *=X<=.XMAX [
+      C=(X*229)/40
+      D=(Y*.SCALE)/12
+      point=()
+      X=X+1
+    ]
+    ?=()
+    Y=Y+1
+  ]

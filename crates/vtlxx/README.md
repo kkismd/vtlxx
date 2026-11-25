@@ -822,6 +822,17 @@ cargo run -p vtlxx --bin vtlxx -- \
 
 [`examples/eight_queens_storage.vtl`](examples/eight_queens_storage.vtl) は、列ごとの候補と解数を storage に置き、現在の候補だけを短時間 register に読み出す別例です。同じ92解を逐一表示します。
 
+## Example: Mandelbrot
+
+[`examples/mandelbrot.vtl`](examples/mandelbrot.vtl) は 16-bit 整数と固定小数点乗算で、79 列 × 25 行のマンデルブロ集合を ASCII 描画します。入力は不要です。
+
+```sh
+cargo run -p vtlxx --bin vtlxx -- crates/vtlxx/examples/mandelbrot.vtl
+cargo run -p vtlxx --bin vtlxx6502 -- crates/vtlxx/examples/mandelbrot.vtl --cycle-limit 1200000000
+```
+
+6502 CLI の既定エンジンは mos6502 です。sim65 でも `--engine sim65` を指定して実行でき、どちらも既定の cycle 上限を超えるため上記の上限を指定します。出力行末の空白は描画の一部です。
+
 ## Example: 固定迷路の DFS
 
 [`examples/maze_dfs.vtl`](examples/maze_dfs.vtl) は、固定 4×4 迷路を再帰を使わずに探索します。迷路、訪問済み状態、現在の経路、各深さで次に試す方向を別々の indexed storage 領域に置きます。右から進んだ cell 2 の行き止まりで一度戻り、goal への経路の cell 数 `7` を表示します。

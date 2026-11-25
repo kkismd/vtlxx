@@ -66,6 +66,15 @@ const EXAMPLES: &[ExampleCase] = &[
         },
     },
     ExampleCase {
+        name: "mandelbrot.vtl",
+        engine: "sim65",
+        disposition: Disposition::Portable {
+            expected_stdout: Some(include_bytes!("fixtures/mandelbrot_example_output.txt")),
+            cycle_limit: Some(1_200_000_000),
+            runtime_input: None,
+        },
+    },
+    ExampleCase {
         name: "maze_dfs.vtl",
         engine: "sim65",
         disposition: Disposition::Portable {
@@ -259,6 +268,21 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
     }
     if matches!(case.name, "eight_queens.vtl" | "eight_queens_storage.vtl") {
         assert_eight_queens_output(case.name, &rust.stdout)?;
+    }
+    if case.name == "mandelbrot.vtl" {
+        let lines = rust.stdout.split(|byte| *byte == b'\n').collect::<Vec<_>>();
+        if rust.stdout.len() != 2000
+            || lines.len() != 26
+            || !lines[25].is_empty()
+            || lines[..25].iter().any(|line| {
+                line.len() != 79
+                    || !line
+                        .iter()
+                        .all(|b| matches!(b, b' ' | b'0'..=b'9' | b'A'..=b'F'))
+            })
+        {
+            return Err("mandelbrot.vtl: malformed 79 by 25 output".to_owned());
+        }
     }
     println!(
         "{}: Rust exit=0, 6502 exit=0, disposition=portable success, stdout={} bytes",
