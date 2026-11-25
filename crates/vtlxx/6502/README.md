@@ -154,7 +154,7 @@ mos6502 host は標準の [`mos6502` 0.10.1](https://crates.io/crates/mos6502/0.
 
 ## 現行の6502資源構成
 
-現在のsim65用コンパイラは、生成コードと不変の静的byte列を保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。現在のpatch追跡・完成済み位置のbitsetは各3,072 Bで、ownerの完成・公開とコード境界の検査を維持している。
+現在のsim65用コンパイラは、生成コードと不変の静的byte列を保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。patch追跡には3,072 Bのbitsetを使用する。完成履歴のbitsetは廃止し、直前に完成したownerからのみ公開することで、ownerの完成・公開とコード境界の検査を維持している。
 
 最新の正式sim65 CLIの静的リンク計測（[#524 / PR #537](https://github.com/kkismd/vtlxx/pull/537)、`ca65`/`ld65`のmap）:
 
