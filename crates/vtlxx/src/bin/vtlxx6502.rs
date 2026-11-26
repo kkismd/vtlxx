@@ -21,7 +21,7 @@ Compile VTLXX source with the NMOS 6502 target and run it on Linux.\n\
 Options:\n\
   --raw-tty               Enable raw terminal input (interactive only)\n\
   --runtime-input <path>  Supply raw runtime input bytes\n\
-  --interactive           Connect runtime input and output to standard I/O\n\
+  --interactive           Read runtime input from stdin; default to unlimited cycles\n\
   --cycle-limit <cycles>  Set guest cycle limit (default: 4000000; unlimited in interactive mode)\n\
   --seed <signed16>       Set the initial PRNG seed (default: OS entropy)\n\
   -h, --help              Show this help\n";
@@ -658,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ca65 and ld65"]
+    #[ignore = "requires Linux, ca65 and ld65"]
     fn failed_os_entropy_only_fails_when_bang_executes() {
         let temp = TempDir::new().unwrap();
         let run = |name: &str, source: &[u8]| {

@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Output, Stdio};
+#[cfg(target_os = "linux")]
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -153,7 +154,7 @@ fn seed_boundaries_match_rust_and_repeat_on_6502() {
 fn initial_eof_matches_after_startup() {
     compare_seed(0, b"");
 }
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
 #[ignore = "requires ca65, ld65, and Linux mos6502"]
 fn interactive_prompt_is_visible_before_input() {

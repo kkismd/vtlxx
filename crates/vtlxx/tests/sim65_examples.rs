@@ -1,8 +1,11 @@
 use std::ffi::OsStr;
 use std::fs;
+#[cfg(target_os = "linux")]
 use std::io::{Read, Write};
 use std::path::Path;
+#[cfg(target_os = "linux")]
 use std::process::{Command, Output, Stdio};
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
 const EXAMPLES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
@@ -24,6 +27,7 @@ enum Disposition {
 #[derive(Clone, Copy, Debug)]
 struct ExampleCase {
     name: &'static str,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     disposition: Disposition,
 }
 
@@ -103,8 +107,7 @@ const EXAMPLES: &[ExampleCase] = &[
 ];
 
 #[test]
-#[ignore = "requires ca65, ld65, and Linux mos6502; run with --ignored"]
-fn registered_examples_match_the_rust_reference_when_portable() {
+fn manifest_matches_examples() {
     let examples_dir = Path::new(EXAMPLES_DIR);
     let mut actual_names = fs::read_dir(examples_dir)
         .unwrap_or_else(|error| panic!("read {}: {error}", examples_dir.display()))
@@ -132,7 +135,13 @@ fn registered_examples_match_the_rust_reference_when_portable() {
         manifest_names.windows(2).all(|pair| pair[0] != pair[1]),
         "duplicate manifest name"
     );
+}
 
+#[test]
+#[cfg(target_os = "linux")]
+#[ignore = "requires ca65, ld65, and Linux mos6502; run with --ignored"]
+fn registered_examples_match_the_rust_reference_when_portable() {
+    let examples_dir = Path::new(EXAMPLES_DIR);
     let mut failures = Vec::new();
     for case in EXAMPLES {
         if let Disposition::Deferred {
@@ -147,24 +156,12 @@ fn registered_examples_match_the_rust_reference_when_portable() {
             );
             continue;
         }
-        if !cfg!(target_os = "linux") {
-            println!(
-                "{}: not run: mos6502 host requires Linux{}",
-                case.name,
-                if cfg!(unix) {
-                    ""
-                } else {
-                    "; Rust CLI Try input also requires Unix"
-                }
-            );
-            continue;
-        }
         if let Err(error) = check_example(case, examples_dir) {
             eprintln!("{error}");
             failures.push(error);
         }
     }
-    if cfg!(target_os = "linux") {
+    {
         let moves = ExampleCase {
             name: "1024.vtl",
             disposition: Disposition::Portable {
@@ -185,6 +182,7 @@ fn registered_examples_match_the_rust_reference_when_portable() {
     );
 }
 
+#[cfg(target_os = "linux")]
 fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> {
     let source = examples_dir.join(case.name);
     let Disposition::Portable {
@@ -282,6 +280,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn run(
     binary: &str,
     source: &Path,
@@ -365,6 +364,7 @@ fn run(
 
 // Drain both pipes concurrently so a full pipe cannot prevent completion.
 // Always reap the child, including on timeout or a wait error.
+#[cfg(target_os = "linux")]
 fn output_with_deadline(command: &mut Command, binary: &str) -> Result<Output, String> {
     let mut child = command
         .stdout(Stdio::piped())
@@ -412,6 +412,7 @@ fn output_with_deadline(command: &mut Command, binary: &str) -> Result<Output, S
     })
 }
 
+#[cfg(target_os = "linux")]
 fn assert_eight_queens_output(name: &str, output: &[u8]) -> Result<(), String> {
     let lines = output.split(|byte| *byte == b'\n').collect::<Vec<_>>();
     if lines.len() != 94 || !lines.last().is_some_and(|line| line.is_empty()) || lines[92] != b"92"
@@ -440,6 +441,7 @@ fn assert_eight_queens_output(name: &str, output: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn describe_bytes(bytes: &[u8]) -> String {
     format!("{} bytes ({bytes:?})", bytes.len())
 }

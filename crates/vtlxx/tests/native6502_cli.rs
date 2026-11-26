@@ -130,7 +130,7 @@ fn invalid_seed_arguments_are_rejected_before_reading_source_or_starting_cc65() 
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn compiles_native_source_and_reads_binary_runtime_input() {
     let temp = TestDir::new();
     let source = temp.0.join("program.vtl");
@@ -153,7 +153,7 @@ fn compiles_native_source_and_reads_binary_runtime_input() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn explicit_cycle_limit_stops_execution() {
     let temp = TestDir::new();
     let source = temp.0.join("cycle-limit.vtl");
@@ -170,7 +170,7 @@ fn explicit_cycle_limit_stops_execution() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
     let temp = TestDir::new();
     let source = temp.0.join("random.vtl");
@@ -213,7 +213,7 @@ fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn cli_without_seed_uses_os_entropy_for_bang() {
     let temp = TestDir::new();
     let source = temp.0.join("os-entropy.vtl");
@@ -235,7 +235,7 @@ fn cli_without_seed_uses_os_entropy_for_bang() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn cli_char_literals_execute_and_old_entropy_spelling_is_rejected() {
     let temp = TestDir::new();
     let output = run_program_with_input(
@@ -260,7 +260,7 @@ fn cli_char_literals_execute_and_old_entropy_spelling_is_rejected() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn runtime_input_primary_read_matches_waiting_input_semantics() {
     let temp = TestDir::new();
     let cases: &[RuntimeInputCase] = &[
@@ -294,7 +294,7 @@ fn runtime_input_primary_read_matches_waiting_input_semantics() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn removed_template_syntax_fails_before_runtime() {
     let temp = TestDir::new();
     for (index, form) in removed_templates::FORMS.iter().enumerate() {
@@ -311,7 +311,7 @@ fn removed_template_syntax_fails_before_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn dotted_constants_compile_and_execute_in_source_order() {
     let temp = TestDir::new();
     let cases: &[(&str, &str, &[u8])] = &[
@@ -364,7 +364,7 @@ fn dotted_constants_compile_and_execute_in_source_order() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn constant_table_accepts_128_entries_and_rejects_129() {
     let temp = TestDir::new();
     let definitions: String = (0..128).map(|i| format!(".N{i}:={i}+0\n")).collect();
@@ -395,7 +395,7 @@ fn constant_table_accepts_128_entries_and_rejects_129() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn static_bytes_compile_and_resolve_nested_indices() {
     let temp = TestDir::new();
     let cases: &[(&str, &str, &[u8])] = &[
@@ -427,7 +427,7 @@ fn static_bytes_compile_and_resolve_nested_indices() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn static_bytes_share_the_constant_table_limit() {
     let temp = TestDir::new();
     let definitions: String = (0..127).map(|i| format!(".N{i}:={i}+0\n")).collect();
@@ -440,7 +440,7 @@ fn static_bytes_share_the_constant_table_limit() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn static_byte_index_nesting_is_bounded() {
     let temp = TestDir::new();
     let nested = |depth: usize| format!("{}0{}", ".DATA(".repeat(depth), ")".repeat(depth));
@@ -453,7 +453,7 @@ fn static_byte_index_nesting_is_bounded() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn invalid_static_byte_sources_do_not_start_runtime() {
     let temp = TestDir::new();
     let cases = [
@@ -503,7 +503,7 @@ fn invalid_static_byte_sources_do_not_start_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn static_byte_reads_report_out_of_range_at_runtime() {
     let temp = TestDir::new();
     for (index, source) in [
@@ -529,7 +529,7 @@ fn static_byte_reads_report_out_of_range_at_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn oversized_static_bytes_do_not_start_runtime() {
     let temp = TestDir::new();
     // Exceed the entire 24 KiB arena, while keeping the source framing valid.
@@ -544,7 +544,7 @@ fn oversized_static_bytes_do_not_start_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn dotted_constant_errors_do_not_start_runtime() {
     let temp = TestDir::new();
     let cases = [
@@ -624,7 +624,7 @@ fn dotted_constant_errors_do_not_start_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn dotted_constant_sources_match_both_implementations() {
     use vtlxx::Machine;
 
@@ -680,6 +680,7 @@ fn dotted_constant_sources_match_both_implementations() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn oversized_source_is_rejected_before_toolchain_start() {
     let temp = TestDir::new();
     let source = temp.0.join("oversized.vtl");
@@ -694,7 +695,21 @@ fn oversized_source_is_rejected_before_toolchain_start() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[cfg(not(target_os = "linux"))]
+fn execution_is_rejected_before_source_or_tool_access() {
+    let temp = TestDir::new();
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .arg(temp.0.join("missing.vtl"))
+        .env("PATH", &temp.0)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("supported only on Linux"));
+}
+
+#[test]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn while_rhs_runs_in_native_and_rejects_legacy_syntax() {
     let temp = TestDir::new();
     let success = run_program_with_input(&temp, "while-rhs", b"A=0 *=A<3 [ ?=A A=A+1 ] ?=A", &[]);
@@ -708,7 +723,7 @@ fn while_rhs_runs_in_native_and_rejects_legacy_syntax() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn compile_stack_201_byte_fixture_matches_reference() {
     let temp = TestDir::new();
     let source = format!(
@@ -733,7 +748,7 @@ fn compile_stack_201_byte_fixture_matches_reference() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn literal_output_matches_reference_and_preserves_runtime_state() {
     let temp = TestDir::new();
     let cases: &[(&str, &str, &[u8])] = &[
@@ -769,7 +784,7 @@ fn literal_output_matches_reference_and_preserves_runtime_state() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn literal_output_crosses_chunk_boundaries() {
     let temp = TestDir::new();
     for length in [255, 256, 511] {
@@ -794,7 +809,7 @@ fn literal_output_crosses_chunk_boundaries() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn invalid_or_oversized_literals_do_not_start_runtime() {
     let temp = TestDir::new();
     for (index, source) in [
@@ -859,7 +874,7 @@ fn wait_bounded(child: &mut Child) -> std::process::ExitStatus {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_prompts_are_visible_before_each_input() {
     let temp = TestDir::new();
     let source = temp.0.join("prompt.vtl");
@@ -900,7 +915,7 @@ fn interactive_prompts_are_visible_before_each_input() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_literal_prompt_precedes_input() {
     let temp = TestDir::new();
     let source = temp.0.join("interactive-input.vtl");
@@ -943,7 +958,7 @@ fn interactive_literal_prompt_precedes_input() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_input_bytes_eof_and_output_match_batch() {
     let temp = TestDir::new();
     let source_bytes = b"A=$ B=$ C=$ D=$ ?=A ?=B ?=C ?=D";
@@ -977,7 +992,7 @@ fn interactive_input_bytes_eof_and_output_match_batch() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_early_exit_compile_failure_and_cycle_limit() {
     let temp = TestDir::new();
     let source = temp.0.join("early.vtl");

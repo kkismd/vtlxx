@@ -92,7 +92,7 @@ fn oversized_source_is_rejected_before_build() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn batch_reads_binary_input_and_reports_guest_status() {
     let temp = TestDir::new();
     for (source, input, expected) in [
@@ -120,7 +120,7 @@ fn batch_reads_binary_input_and_reports_guest_status() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn fixed_seed_vector_matches_reference() {
     let temp = TestDir::new();
     let result = run(
@@ -134,7 +134,7 @@ fn fixed_seed_vector_matches_reference() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn native_runs_shared_programs() {
     let temp = TestDir::new();
     let input = temp.0.join("shared-input.bin");
@@ -177,7 +177,7 @@ fn native_runs_shared_programs() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn static_data_fixture_and_failures_match_reference() {
     #[derive(Clone, Copy, Debug)]
     enum Expected {
@@ -282,7 +282,7 @@ fn static_data_fixture_and_failures_match_reference() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn constant_expressions_conform_to_reference() {
     // Expected values are calculated independently of the reference implementation.
     let successes: &[(&str, &[u8], &[u8])] = &[
@@ -412,7 +412,7 @@ fn constant_expressions_conform_to_reference() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn batch_output_arrives_while_guest_is_running() {
     let temp = TestDir::new();
     let source = temp.source(b"?=\"prefix\" .LOOP:=1 ^=.LOOP #=.LOOP");
@@ -449,7 +449,7 @@ fn batch_output_arrives_while_guest_is_running() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn batch_output_and_failures_preserve_prefix_and_diagnostics() {
     let temp = TestDir::new();
     for (source, limit, status, stdout, diagnostic) in [
@@ -494,7 +494,7 @@ fn batch_output_and_failures_preserve_prefix_and_diagnostics() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn batch_output_failure_stops_guest_before_cycle_limit() {
     let temp = TestDir::new();
     let source = temp.source(b"?=\"prefix\" .LOOP:=1 ^=.LOOP #=.LOOP");
@@ -516,7 +516,7 @@ fn batch_output_failure_stops_guest_before_cycle_limit() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn busy_try_obeys_cycle_limit() {
     let temp = TestDir::new();
     let source = temp.source(b".LOOP:=1 ^=.LOOP A=` #=.LOOP");
@@ -552,7 +552,7 @@ fn wait(child: &mut Child) -> std::process::ExitStatus {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_try_then_wait_streams_before_input() {
     let temp = TestDir::new();
     let source = temp.source(b"?=` ?=\"> \" A=$ ?=A B=$ ?=B");
@@ -591,7 +591,7 @@ fn interactive_try_then_wait_streams_before_input() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_compilation_failure_does_not_wait_for_stdin() {
     let temp = TestDir::new();
     let source = temp.source(b"A=$+");
@@ -620,7 +620,7 @@ fn interactive_compilation_failure_does_not_wait_for_stdin() {
 // Exercise the real example in the native CI path, with deadlines even if input
 // handling regresses into an endless polling loop.
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn game_1024_batch_matches_reference() {
     let temp = TestDir::new();
     let input = temp.0.join("1024-input.bin");
@@ -643,7 +643,7 @@ fn game_1024_batch_matches_reference() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn cycle_defaults_and_explicit_limits_apply_to_finite_workload() {
     let temp = TestDir::new();
     let input = temp.0.join("1024-input.bin");

@@ -130,7 +130,7 @@ printf 'A' > /tmp/input.bin
 cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --runtime-input /tmp/input.bin
 ```
 
-どちらも `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `!` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれず、両 engine の cycle 値の完全一致は保証しない。
+このコマンドは `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `!` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれない。
 
 mos6502 は対話・非対話のどちらでも guest 出力を標準出力・標準エラーへ逐次送出する。対話では runtime 入力を標準入力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
 
@@ -178,7 +178,7 @@ cargo test -p vtlxx --test sim65_micro_trek_e2e -- --ignored
 python3 crates/vtlxx/tests/fixtures/micro_trek/measure_sim65.py
 ```
 
-E2E は Rust 側の 5 テストに対応する 7 入力系列を raw stdout/stderr と正常終了で比較し、別に Unix の対話モードで `COMMAND :` を入力前に受信してから X を送る。一括実行は 4,000,000,000 cycles、各子プロセスは 120 秒を上限とする。Rust 側の独立した出力期待値も維持する。CLI は内部 storage や PRNG の最終値を公開しないため、その一致は主張しない。Rust の `micro_trek_lifecycle::replay_initialization_continues_the_random_stream` は storage[192] の継続を、`micro_trek_turn_end::win_precedes_dock_and_attack_even_when_energy_and_days_are_exhausted` は勝利優先を直接検査する。実 CLI の勝利は未到達。6502 の `sim65_runtime::storage_all_cells_aliases_and_reinitialization` は 256 Cell と ring の非 alias を検査する。EOF と敗北・RETRY は上記 E2E で観測する。
+E2E は Rust 側の 5 テストに対応する 7 入力系列を raw stdout/stderr と正常終了で比較し、別に Linux の対話モードで `COMMAND :` を入力前に受信してから X を送る。一括実行は 4,000,000,000 cycles、各子プロセスは 120 秒を上限とする。Rust 側の独立した出力期待値も維持する。CLI は内部 storage や PRNG の最終値を公開しないため、その一致は主張しない。Rust の `micro_trek_lifecycle::replay_initialization_continues_the_random_stream` は storage[192] の継続を、`micro_trek_turn_end::win_precedes_dock_and_attack_even_when_energy_and_days_are_exhausted` は勝利優先を直接検査する。実 CLI の勝利は未到達。6502 の `sim65_runtime::storage_all_cells_aliases_and_reinitialization` は 256 Cell と ring の非 alias を検査する。EOF と敗北・RETRY は上記 E2E で観測する。
 
 正式 module の `ld65 -m/-Ln` 静的配置は ZP `$0000..$008c` (141 B)、CODE `$0229..$2069`、RODATA `$206a..$209a`、DATA `$209b..$20e1`、BSS `$20e2..$a78a`。arena `$2b9e..$8b9d` は 24,576 B、patch/completed bitset は各 3,072 B、定数表は 128×19 = 2,432 B、storage は 256×2 = 512 B。CPU stack は `$0100..$01ff`、cc65 software stack は `$f7f0..$ffef`、BSS 末尾から後者までの空きは 20,581 B。終端 wrap と静的重複はない。compile/runtime ZP overlay は 111 B、entry と両 status は独立した 4 B、cc65 共通 ZP は 26 B。アドレスは ABI ではない。
 
