@@ -551,7 +551,7 @@ fn batch_output_failure_stops_guest_before_cycle_limit() {
         .unwrap();
     assert_eq!(output.status.code(), Some(2), "{output:?}");
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!stderr.is_empty(), "{output:?}");
+    assert!(stderr.contains("mos6502 host: guest output:"), "{output:?}");
     assert!(!stderr.contains("cycle limit exceeded"), "{output:?}");
 }
 
