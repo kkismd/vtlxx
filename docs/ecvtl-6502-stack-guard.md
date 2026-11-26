@@ -1,5 +1,7 @@
 # EC07 コンパイル時 CPU stack guard の監査（#424）
 
+この文書の各計測値と sim6502 / cc65 startup に関する記述は、その節の監査当時の構成を保存する。現行の mos6502 製品配置については末尾の #672 の記述を参照する。
+
 ## 対象・前提
 
 Tracker #271、採用 ADR #417、設計 #418、実装 #424 に対応する。
@@ -272,3 +274,17 @@ K=24、S>=25 と入口外 S>=232 を維持する。実機の割込み等には�
 cc65 library は変更せず、先行監査の K=24、S>=25、入口外 S>=232 と
 runtime の条件付き上界145 Bを維持する。これは sim6502、同一 library、
 割込みなしの静的な評価であり、実機 IRQ/NMI の保証ではない。
+
+## mos6502 固定 raw への移行（#672）
+
+製品 host はゼロ初期化 RAM に image を配置し、S=$FF で `_main` に直接入る。
+`_main` の `JSR fe_compile_run` によりその入口では S=$FD となり、上記の
+sim6502 startup 経由の S=$FB に比べ外側の return frame が 2 B 減る。
+`session_abort` は保存した S を復元して `_main` の JSR 直後へ RTS し、
+通常・異常とも tail JMP で halt する。guard NG と adapter fatal も halt へ
+tail JMP し、追加 push はない。生成 entry は既存の手製 return frame を使う。
+
+guard 間の K=24 B、残り 1 B を確保する S>=25、入口外の従来の上界、
+runtime 64段の保守的上界 145 B は維持する。これらは割込みなしの条件に
+限り、実機の IRQ/NMI を含む安全性を意味しない。独立 sim65 fixture は
+従来の startup と guard 試験を維持する。

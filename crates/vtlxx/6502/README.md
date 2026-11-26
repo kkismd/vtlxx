@@ -104,7 +104,7 @@ IfElseの分岐先パッチとWhileの出口パッチ・ループ先頭は、`fr
 
 **6502初期targetの通常Write上限は64件**です。65件目はコンパイル失敗となり、runtimeは開始しません。64件すべてを定義するsourceでも、arena等の別の資源上限は独立に適用されます。最大64定義に対しtop-level source chunkは最大65件です。Rust referenceには64件という件数制限を設けていません。6502 `compiler/binding.s` の現在のprivate名前表は `length:u8 | name[8] | completed target:u16` の11B×64件（704B）であり、これはportableな言語仕様やruntime APIではありません。
 
-現行の直接テストは [`tests/sim65_long_write_names.rs`](../tests/sim65_long_write_names.rs)（64件成功、65件目失敗、65 chunk順序）と [`tests/long_write_names.rs`](../tests/long_write_names.rs)（Rustの65件以上、完全名照合、失敗時binding）です。長名導入時のROM/RAM/stack比較は [当時の監査記録](../../../../docs/ecvtl-6502-long-write-resources.md) にあり、その数値は現在の配置ではありません。現在の正式CLIのZP/BSS/CODE/RODATA測定は [PR #537](https://github.com/kkismd/vtlxx/pull/537) に記録されています。いずれも全経路の動的stack高水位の実測を意味しません。
+現行の直接テストは [`tests/sim65_long_write_names.rs`](../tests/sim65_long_write_names.rs)（64件成功、65件目失敗、65 chunk順序）と [`tests/long_write_names.rs`](../tests/long_write_names.rs)（Rustの65件以上、完全名照合、失敗時binding）です。長名導入時のROM/RAM/stack比較は [当時の監査記録](../../../../docs/ecvtl-6502-long-write-resources.md) にあり、その数値は現在の配置ではありません。[PR #537](https://github.com/kkismd/vtlxx/pull/537) のCLIのZP/BSS/CODE/RODATA測定も当時の構成による歴史的な値です。いずれも全経路の動的stack高水位の実測を意味しません。
 
 コンパイル時のCPU hardware stackは、statement / required_block / operand / valueで残量を検査する。Sが25未満の場合に限り、通常の復帰を行わず、`fe_compile_status=4`、exit132で即時HALTする。stdoutは空で生成runtimeは開始しない。通常のsyntax/source/backend失敗は従来どおり呼出元へ返す。閾値・linked library・入口外経路の根拠と再監査条件は[stack guard監査](../../../../docs/ecvtl-6502-stack-guard.md)を参照。
 
@@ -120,9 +120,9 @@ cargo test -p vtlxx --test sim65_frontend -- --ignored
 
 `target/sim65_cli.s` は CLI 専用entryで、`_main` から `fe_compile_run` を一度呼ぶ。compile成功時は既にfrontendが実行したruntimeの後で `halt(0)` し、compile error時は `fe_compile_status` を `$80` と OR したtarget statusで終了する。test probe用entryとは分離し、追加serial readやsentinel出力を行わない。
 
-crate root の `vtlxx6502` host binary は source を raw bytes で読み、長さを u16（最大65,535 bytes）で検証し、little-endian length header を付ける。`ca65` / `ld65` と `sim6502.lib` を使い mos6502 adapter を link し、専用 host で実行する。一時 directory は終了時に削除する。正式なホスト動作保証は Linux であり、Linux 以外の実行要求は source 読込前に拒否する。独立した sim65 fixture は引き続き維持する。
+crate root の `vtlxx6502` host binary は source を raw bytes で読み、長さを u16（最大65,535 bytes）で検証し、little-endian length header を付ける。`ca65` / `ld65` を使い mos6502 adapter を固定 raw image に link し、専用 host で実行する。一時 directory は終了時に削除する。正式なホスト動作保証は Linux であり、Linux 以外の実行要求は source 読込前に拒否する。独立した sim65 fixture は従来の設定と `sim6502.lib` を使う。
 
-repository root からの例（`ca65`、`ld65` とリンク用 `sim6502.lib` が必要。製品実行に `sim65` 実行ファイルは不要）:
+repository root からの例（製品実行には `ca65` と `ld65` が必要）:
 
 ```sh
 printf 'A=$ ?=A' > /tmp/input.vtl
@@ -149,7 +149,9 @@ cargo run -p vtlxx --bin vtlxx6502 -- /tmp/try.vtl --interactive --raw-tty
 
 source と runtime は同じ入力 session を共有するが、source frame の読み取りと compile 完了後に runtime が開始する。Wait (`$`) は入力を blocking で待ち、NUL を読み捨て、byte または EOF の -1 を返す。Try（バッククォート）は待たずに最大1 byteを消費し、未到着と raw NUL を 0、EOF を -1 として返す。EOF は後続の Wait / Try でも維持され、Fatal は guest status 6 で停止する。通常 sim65 の Try は未対応で入力を消費せず status 6 となる。
 
-mos6502 用 adapter と host の間では、private service `$FFEF` が Try、`$FFF0` が Wait、`$FFF1` が A の 1 byte 出力、`$FFF2` が A の status による非復帰の終了を担う。出力は byte をそのまま書き、flush が成功してから guest に戻る。これらは portable runtime ABI ではなく、通常の sim65 adapter とは別である。旧汎用入出力 service は提供しない。現行の sim6502 startup と `sim6502.lib` は software stack を使い、startup からの終了に `$FFF9` を参照するため、host はその終了だけを互換処理として維持する。image は引き続き sim65 v2 header を持ち、loader が software stack pointer を初期化する。
+mos6502 用 adapter と host の間では、private service `$FFEF` が Try、`$FFF0` が Wait、`$FFF1` が A の 1 byte 出力、`$FFF2` が A の status による非復帰の終了を担う。出力は byte をそのまま書き、flush が成功してから guest に戻る。これらは portable runtime ABI ではなく、通常の sim65 adapter とは別である。`$FFF3..$FFFF` は未提供 service として拒否する。
+
+製品は内部 link した header のない raw image のみを使う。配置は zero page `$0000..$00FF`、hardware stack `$0100..$01FF`、load / entry `$0200`、service 予約 `$FFEF..$FFFF` である。host は実行ごとにゼロ初期化 RAM に payload を置き、PC=`$0200`、S=`$FF`、D=0、I=1、cycles=0、IRQ/NMI なしで開始する。BSS と zero page は file に含めず、C startup、software stack、`sim6502.lib` は使用しない。loader は payload の空と最大長（65,007 B）を検査するが、任意の短縮・破損、旧形式や CPU 違いを識別できない。外部 image の入力は受け付けない。source frame の長さ header はこの image と別である。
 
 mos6502 host は標準の [`mos6502` 0.10.1](https://crates.io/crates/mos6502/0.10.1)（BSD-3-Clause）を使い、固定された依存元と version は [Cargo.lock](../../../Cargo.lock) に記録する。CPU core と cc65 は改造しない。
 
@@ -157,7 +159,7 @@ mos6502 host は標準の [`mos6502` 0.10.1](https://crates.io/crates/mos6502/0.
 
 現在のsim65用コンパイラは、生成コードと不変の静的byte列を保持する **24,576 B（24 KiB）arena** を使用する。コードと手続テンプレートsourceを共有する旧方式は[#528](https://github.com/kkismd/vtlxx/issues/528)と[#529 / PR #534](https://github.com/kkismd/vtlxx/pull/534)により廃止された。patch追跡には最大49件のoperand address表（98 B）を使用し、成功したpatchは一度だけ消費する。完成履歴のbitsetは廃止し、直前に完成したownerからのみ公開することで、ownerの完成・公開とコード境界の検査を維持している。
 
-正式sim65 CLIの同一 module・cc65 V2.18 の静的リンク計測（#652）:
+以下は #652 当時の sim65 CLI の同一 module・cc65 V2.18 による歴史的な静的リンク計測であり、現行製品の配置ではない:
 
 | 領域 | 前提 main | 変更後 |
 | --- | ---: | ---: |

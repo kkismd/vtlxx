@@ -226,6 +226,22 @@ fn require_success(stage: &str, tool: &str, output: &Output) -> Result<(), Strin
     ))
 }
 
+fn raw_link_args(config: &Path, output: &Path, objects: &[PathBuf]) -> Vec<OsString> {
+    use vtlxx6502_host::image::{LOAD, SERVICE_START};
+    let mut args = vec![
+        OsString::from("-C"),
+        config.into(),
+        OsString::from("-D"),
+        format!("VTLXX_LOAD=0x{LOAD:04x}").into(),
+        OsString::from("-D"),
+        format!("VTLXX_SERVICE=0x{SERVICE_START:04x}").into(),
+        OsString::from("-o"),
+        output.into(),
+    ];
+    args.extend(objects.iter().map(|path| path.as_os_str().to_owned()));
+    args
+}
+
 fn build_image(entropy_seed: Option<u16>) -> Result<(TempDir, PathBuf), String> {
     let crate_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let sources = [
@@ -248,7 +264,7 @@ fn build_image(entropy_seed: Option<u16>) -> Result<(TempDir, PathBuf), String> 
     for (index, source) in sources.iter().enumerate() {
         let source = crate_root.join(source);
         let object = temp.0.join(format!("{index}.o"));
-        let mut assemble_args = vec![OsStr::new("-t"), OsStr::new("sim6502")];
+        let mut assemble_args = vec![OsStr::new("-D"), OsStr::new("VTLXX_RAW")];
         let entropy_define =
             entropy_seed.map(|seed| OsString::from(format!("SIM65_ENTROPY_SEED=${seed:04X}")));
         if source.ends_with("6502/target/mos6502_adapter.s") {
@@ -265,14 +281,12 @@ fn build_image(entropy_seed: Option<u16>) -> Result<(TempDir, PathBuf), String> 
     }
 
     let executable = temp.0.join("vtlxx6502.prg");
-    let mut link_args = vec![
-        OsStr::new("-t"),
-        OsStr::new("sim6502"),
-        OsStr::new("-o"),
-        executable.as_os_str(),
-    ];
-    link_args.extend(objects.iter().map(|object| object.as_os_str()));
-    link_args.push(OsStr::new("sim6502.lib"));
+    let link_args = raw_link_args(
+        &crate_root.join("6502/target/mos6502.cfg"),
+        &executable,
+        &objects,
+    );
+    let link_args: Vec<_> = link_args.iter().map(OsString::as_os_str).collect();
     let output = run_tool("ld65", "link", &link_args, &[])?;
     require_success("link", "ld65", &output)?;
     Ok((temp, executable))

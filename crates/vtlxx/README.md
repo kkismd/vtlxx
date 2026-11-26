@@ -70,7 +70,7 @@ cargo run -p vtlxx --bin vtlxx -- path/to/program.vtl --seed 0
 
 ## NMOS 6502 コンパイラの手動実行
 
-`vtlxx6502` は VTLXX source を NMOS 6502 compiler で native code にし、`mos6502` コアを使う VTLXX 専用 host で実行します。正式なホスト動作保証は Linux です。Linux 以外では実行要求を早期に拒否します。Rust reference VMへのフォールバックもありません。実行には cc65 の `ca65`、`ld65` とリンク用 `sim6502.lib` が必要です。製品の実行に `sim65` 実行ファイルは不要です。cc65 を導入した後、repository root から実行してください。
+`vtlxx6502` は VTLXX source を NMOS 6502 compiler で native code にし、`mos6502` コアを使う VTLXX 専用 host で実行します。正式なホスト動作保証は Linux です。Linux 以外では実行要求を早期に拒否します。Rust reference VMへのフォールバックもありません。製品の実行には cc65 の `ca65`、`ld65` が必要です。独立した sim65 テストにはさらに `sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。
 
 ```sh
 cargo run -p vtlxx --bin vtlxx6502 -- \
@@ -132,7 +132,7 @@ cargo run -p vtlxx --bin vtlxx6502 -- \
 cargo test -p vtlxx --test native6502_cli -- --ignored
 ```
 
-成功時の stdout は guest が出した bytes そのものです。CLI の診断は stderr に出し、usage・file・toolchain・assemble/link・compile/runtime・cycle-limit failure は nonzero status で終了します。実行は `ca65 -t sim6502` でmos6502 用 adapter と target source を組み立て、`ld65 -t sim6502` で `sim6502.lib` と link し、一時生成物を専用 host で実行します。成功・失敗のどちらも一時生成物は削除します。
+成功時の stdout は guest が出した bytes そのものです。CLI の診断は stderr に出し、usage・file・toolchain・assemble/link・compile/runtime・cycle-limit failure は nonzero status で終了します。実行は `ca65` で `VTLXX_RAW` を指定して mos6502 用 adapter と target source を組み立て、専用設定を使う `ld65` で固定 raw image を link し、専用 host で実行します。製品の link に `sim6502.lib` は不要です。成功・失敗のどちらも一時生成物は削除します。
 
 手動統合確認:
 
