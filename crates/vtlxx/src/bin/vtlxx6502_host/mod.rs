@@ -440,6 +440,59 @@ _main: rts
 
     #[test]
     #[ignore = "requires ca65 and ld65"]
+    fn production_entry_assertion_rejects_displaced_entry() {
+        let temp = Temp::new();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let entry = temp.0.join("entry.o");
+        let stub_source = temp.0.join("stub.s");
+        let stub = temp.0.join("stub.o");
+        let prefix_source = temp.0.join("prefix.s");
+        let prefix = temp.0.join("prefix.o");
+        std::fs::write(&stub_source, ".export fe_compile_run, halt\n.exportzp fe_compile_status\n.segment \"ZEROPAGE\"\nfe_compile_status: .res 1\n.segment \"CODE\"\nfe_compile_run: rts\nhalt: rts\n.segment \"BSS\"\n.res 1\n").unwrap();
+        std::fs::write(&prefix_source, ".segment \"ENTRY\"\n.byte 0\n").unwrap();
+        for (source, object, raw) in [
+            (root.join("6502/target/sim65_cli.s"), &entry, true),
+            (stub_source, &stub, false),
+            (prefix_source, &prefix, false),
+        ] {
+            let mut command = Command::new("ca65");
+            if raw {
+                command.args(["-D", "VTLXX_RAW"]);
+            }
+            assert!(
+                command
+                    .arg(source)
+                    .arg("-o")
+                    .arg(object)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        let config = root.join("6502/target/mos6502.cfg");
+        let image = temp.0.join("entry.bin");
+        let link = |objects: &[PathBuf]| {
+            Command::new("ld65")
+                .args(crate::raw_link_args(&config, &image, objects))
+                .output()
+                .unwrap()
+        };
+        let normal = link(&[entry.clone(), stub.clone()]);
+        assert!(
+            normal.status.success(),
+            "{}",
+            String::from_utf8_lossy(&normal.stderr)
+        );
+        assert_eq!(std::fs::read(&image).unwrap()[0], 0x20); // JSR fe_compile_run
+        let displaced = link(&[prefix, entry, stub]);
+        assert!(!displaced.status.success());
+        assert!(
+            String::from_utf8_lossy(&displaced.stderr).contains("entry must match load address")
+        );
+    }
+
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
     fn mos_try_overflow_preserves_stack_eof_and_input() {
         for (case, wait) in [(16, false), (17, false), (16, true), (17, true)] {
             let (_temp, path) = compile_runtime_probe("runtime_try_capacity.s", case, wait);
