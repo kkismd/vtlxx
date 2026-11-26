@@ -2,7 +2,6 @@
 .setcpu "6502"
 
 .export serial_in, serial_try_in, serial_out, halt, entropy16
-.import _putchar, exit
 
 .segment "CODE"
 
@@ -27,11 +26,10 @@ serial_try_in:
     jmp $ffef
 
 serial_out:
-    ldx #0
-    jmp _putchar
+    jmp $fff1
 
 halt:
-    jmp exit
+    jmp $fff2
 
 entropy16:
 .ifdef SIM65_ENTROPY_SEED

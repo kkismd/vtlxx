@@ -323,12 +323,11 @@ fn execute_mos(
     let mut stderr = Vec::new();
     let outcome = {
         let mut out = io::stdout().lock();
-        let mut err = io::stderr().lock();
         if raw_tty {
             let mut tty = vtlxx6502_tty::RawTty::new(libc::STDIN_FILENO)
                 .map_err(|error| format!("raw tty: {error}"))?;
             let signal_fd = tty.signal_fd();
-            let result = runner.run_to_with_signals(&mut out, &mut err, signal_fd, &mut |woken| {
+            let result = runner.run_to_with_signals(&mut out, signal_fd, &mut |woken| {
                 if woken || tty.pending() {
                     tty.process_signals()
                 } else {
@@ -339,7 +338,7 @@ fn execute_mos(
                 .map_err(|error| format!("restore tty: {error}"))?;
             result
         } else {
-            runner.run_to(&mut out, &mut err)
+            runner.run_to(&mut out)
         }
     }
     .map_err(|error| format!("mos6502 host: {error}"))?;

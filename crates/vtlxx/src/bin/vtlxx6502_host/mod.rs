@@ -1,7 +1,6 @@
 #![allow(dead_code)] // CLI selection and live host streams are the responsibility of #600.
 
-//! Private runner for the stock sim6502 image format. This is deliberately
-//! local to the `vtlxx6502` binary; CLI selection is added by a later issue.
+//! Private runner for VTLXX images in the sim6502 image format.
 mod image;
 mod input;
 mod services;
@@ -40,7 +39,6 @@ pub(crate) struct HostRunner {
     cpu: CPU<Memory, Nmos6502>,
     input: input::HostInput,
     cycle_limit: Option<u64>,
-    software_stack_zp: u8,
 }
 
 impl HostRunner {
@@ -79,46 +77,38 @@ impl HostRunner {
             cpu,
             input,
             cycle_limit,
-            software_stack_zp: loaded.software_stack_zp,
         })
     }
 
-    pub(crate) fn run(mut self) -> Result<(HostOutcome, Vec<u8>, Vec<u8>), HostError> {
+    pub(crate) fn run(mut self) -> Result<(HostOutcome, Vec<u8>), HostError> {
         let mut stdout = Vec::new();
-        let mut stderr = Vec::new();
-        let outcome = self.run_to(&mut stdout, &mut stderr)?;
-        Ok((outcome, stdout, stderr))
+        let outcome = self.run_to(&mut stdout)?;
+        Ok((outcome, stdout))
     }
 
-    pub(crate) fn run_to(
-        &mut self,
-        stdout: &mut dyn Write,
-        stderr: &mut dyn Write,
-    ) -> Result<HostOutcome, HostError> {
-        self.run_with_callback(stdout, stderr, &mut |_| Ok(None))
+    pub(crate) fn run_to(&mut self, stdout: &mut dyn Write) -> Result<HostOutcome, HostError> {
+        self.run_with_callback(stdout, &mut |_| Ok(None))
     }
 
     #[cfg(target_os = "linux")]
     pub(crate) fn run_to_with_signals(
         &mut self,
         stdout: &mut dyn Write,
-        stderr: &mut dyn Write,
         signal_fd: std::os::fd::RawFd,
         mut callback: impl FnMut(bool) -> std::io::Result<Option<i32>>,
     ) -> Result<HostOutcome, HostError> {
         self.input
             .set_signal_fd(signal_fd)
             .map_err(HostError::Signal)?;
-        self.run_with_callback(stdout, stderr, &mut callback)
+        self.run_with_callback(stdout, &mut callback)
     }
 
     fn run_with_callback(
         &mut self,
         stdout: &mut dyn Write,
-        stderr: &mut dyn Write,
         callback: &mut dyn FnMut(bool) -> std::io::Result<Option<i32>>,
     ) -> Result<HostOutcome, HostError> {
-        let result = self.run_loop_with_callback(stdout, stderr, callback);
+        let result = self.run_loop_with_callback(stdout, callback);
         let finished = self.input.finish().map_err(HostError::Input);
         match result {
             Ok(outcome @ HostOutcome::GuestExit { status: 6, .. }) => Ok(outcome),
@@ -130,18 +120,13 @@ impl HostRunner {
         }
     }
 
-    fn run_loop(
-        &mut self,
-        stdout: &mut dyn Write,
-        stderr: &mut dyn Write,
-    ) -> Result<HostOutcome, HostError> {
-        self.run_loop_with_callback(stdout, stderr, &mut |_| Ok(None))
+    fn run_loop(&mut self, stdout: &mut dyn Write) -> Result<HostOutcome, HostError> {
+        self.run_loop_with_callback(stdout, &mut |_| Ok(None))
     }
 
     fn run_loop_with_callback(
         &mut self,
         stdout: &mut dyn Write,
-        stderr: &mut dyn Write,
         callback: &mut dyn FnMut(bool) -> std::io::Result<Option<i32>>,
     ) -> Result<HostOutcome, HostError> {
         let mut woken = false;
@@ -161,20 +146,8 @@ impl HostRunner {
             let pc = self.cpu.registers.program_counter;
             if pc == 0xffef || pc == 0xfff0 {
                 woken = !services::input_service(&mut self.cpu, pc, &mut self.input);
-            } else if (0xfff1..=0xfff9).contains(&pc) {
-                let service = services::dispatch(
-                    &mut self.cpu,
-                    pc,
-                    &mut self.input,
-                    stdout,
-                    stderr,
-                    self.software_stack_zp,
-                );
-                if matches!(&service, Err(HostError::Input(e)) if e.kind() == std::io::ErrorKind::Interrupted)
-                {
-                    woken = true;
-                    continue;
-                }
+            } else if pc >= 0xfff1 {
+                let service = services::dispatch(&mut self.cpu, pc, stdout);
                 match service? {
                     services::ServiceResult::Continue => continue,
                     services::ServiceResult::Exit(status) => {
@@ -197,8 +170,7 @@ pub(crate) fn run_with_io(
     cycle_limit: Option<u64>,
     writer: &mut impl Write,
 ) -> Result<HostOutcome, HostError> {
-    let mut stderr = std::io::stderr().lock();
-    HostRunner::new(image, input.to_vec(), cycle_limit)?.run_to(writer, &mut stderr)
+    HostRunner::new(image, input.to_vec(), cycle_limit)?.run_to(writer)
 }
 
 #[cfg(test)]
@@ -232,6 +204,10 @@ mod tests {
     }
 
     fn compile_image(mos_adapter: bool) -> (Temp, PathBuf) {
+        compile_image_with_guard(mos_adapter, false)
+    }
+
+    fn compile_image_with_guard(mos_adapter: bool, force_guard: bool) -> (Temp, PathBuf) {
         let temp = Temp::new();
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let sources = [
@@ -261,12 +237,20 @@ mod tests {
             if name.ends_with("adapter.s") {
                 command.args([OsStr::new("-D"), OsStr::new("SIM65_ENTROPY_UNAVAILABLE")]);
             }
-            let status = command
-                .arg(root.join(name))
-                .arg("-o")
-                .arg(&object)
-                .status()
+            let source = if force_guard && *name == "6502/frontend/basic.s" {
+                let original = std::fs::read_to_string(root.join(name)).unwrap();
+                assert!(original.contains("    cpx #25"));
+                let path = temp.0.join("basic.s");
+                std::fs::write(
+                    &path,
+                    original.replace("    cpx #25", "    ldx #24\n    cpx #25"),
+                )
                 .unwrap();
+                path
+            } else {
+                root.join(name)
+            };
+            let status = command.arg(source).arg("-o").arg(&object).status().unwrap();
             assert!(status.success(), "ca65 failed for {name}");
             objects.push(object);
         }
@@ -352,7 +336,7 @@ mod tests {
             let image = std::fs::read(path).unwrap();
             let mut runner = HostRunner::new(&image, vec![65], Some(2_000_000)).unwrap();
             let mut out = Vec::new();
-            let result = runner.run_to(&mut out, &mut Vec::new()).unwrap();
+            let result = runner.run_to(&mut out).unwrap();
             assert!(matches!(result, HostOutcome::GuestExit { status: 2, .. }));
             assert_eq!(out, b"K");
             assert_eq!(runner.input.try_byte(), input::InputEvent::Byte(65));
@@ -371,7 +355,7 @@ mod tests {
         runner.input = input::HostInput::interactive(vec![], directory.into());
         assert_eq!(runner.input.wait_byte(), input::InputEvent::Fatal);
         let mut out = Vec::new();
-        let result = runner.run_loop(&mut out, &mut Vec::new()).unwrap();
+        let result = runner.run_loop(&mut out).unwrap();
         assert!(matches!(result, HostOutcome::GuestExit { status: 6, .. }));
         assert_eq!(out, b"K");
         assert!(runner.input.finish().is_err());
@@ -391,7 +375,7 @@ mod tests {
             let directory = std::fs::File::open(std::env::temp_dir()).unwrap();
             runner.input = input::HostInput::interactive(prefix, directory.into());
             let mut out = Vec::new();
-            let result = runner.run_loop(&mut out, &mut Vec::new()).unwrap();
+            let result = runner.run_loop(&mut out).unwrap();
             assert!(matches!(result, HostOutcome::GuestExit { status: 6, .. }));
             assert!(out.is_empty());
             assert!(runner.input.finish().is_err());
@@ -399,12 +383,13 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires ca65, ld65, and sim65; runs the stock image directly on mos6502"]
-    fn stock_adapter_image_runs_source_compile_output_and_exit() {
-        let (_temp, path) = compile_image(false);
+    #[ignore = "requires ca65, ld65, and sim65"]
+    fn mos_adapter_image_runs_source_compile_output_and_exit() {
+        let (_temp, path) = compile_image(true);
+        let (_stock_temp, stock_path) = compile_image(false);
         let image = std::fs::read(&path).unwrap();
         let input = crate::frame_input(b"?=65", b"").unwrap();
-        let (outcome, stdout, _) = HostRunner::new(&image, input.clone(), Some(2_000_000))
+        let (outcome, stdout) = HostRunner::new(&image, input.clone(), Some(2_000_000))
             .unwrap()
             .run()
             .unwrap();
@@ -417,7 +402,7 @@ mod tests {
             panic!("expected successful guest exit, got {outcome:?}");
         };
 
-        let (limited, _, _) = HostRunner::new(&image, input.clone(), Some(exit_cycles))
+        let (limited, _) = HostRunner::new(&image, input.clone(), Some(exit_cycles))
             .unwrap()
             .run()
             .unwrap();
@@ -427,7 +412,7 @@ mod tests {
                 cycles: exit_cycles
             }
         );
-        let (complete, _, _) = HostRunner::new(&image, input, Some(exit_cycles + 1))
+        let (complete, _) = HostRunner::new(&image, input, Some(exit_cycles + 1))
             .unwrap()
             .run()
             .unwrap();
@@ -441,7 +426,7 @@ mod tests {
 
         let mut child = Command::new("sim65")
             .args(["-x", "2000000"])
-            .arg(&path)
+            .arg(&stock_path)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -461,7 +446,7 @@ mod tests {
             (vec![5, 0, b'?', b'=', b'6'], 129),
             (crate::frame_input(b"A=", b"").unwrap(), 130),
         ] {
-            let (result, output, _) = HostRunner::new(&image, framed.clone(), Some(2_000_000))
+            let (result, output) = HostRunner::new(&image, framed.clone(), Some(2_000_000))
                 .unwrap()
                 .run()
                 .unwrap();
@@ -472,7 +457,7 @@ mod tests {
             assert_eq!(status, expected_status);
             let mut child = Command::new("sim65")
                 .args(["-x", "2000000"])
-                .arg(&path)
+                .arg(&stock_path)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -487,7 +472,7 @@ mod tests {
         for (runtime_bytes, expected_stdout) in [(&b"\0A"[..], &b"65"[..]), (&b""[..], &b"-1"[..])]
         {
             let framed = crate::frame_input(b"A=$ ?=A", runtime_bytes).unwrap();
-            let (result, output, _) = HostRunner::new(&image, framed.clone(), Some(2_000_000))
+            let (result, output) = HostRunner::new(&image, framed.clone(), Some(2_000_000))
                 .unwrap()
                 .run()
                 .unwrap();
@@ -499,7 +484,7 @@ mod tests {
 
             let mut child = Command::new("sim65")
                 .args(["-x", "2000000"])
-                .arg(&path)
+                .arg(&stock_path)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -520,7 +505,7 @@ mod tests {
         // Try consumes NUL and 0xff, Wait skips NUL and returns 'A', then
         // both operations observe EOF from the same runtime session.
         let input = crate::frame_input(b"?=` ?=` ?=$ ?=` ?=$", &[0, 255, 0, 65]).unwrap();
-        let (outcome, output, _) = HostRunner::new(&image, input, Some(2_000_000))
+        let (outcome, output) = HostRunner::new(&image, input, Some(2_000_000))
             .unwrap()
             .run()
             .unwrap();
@@ -531,7 +516,7 @@ mod tests {
         let input = crate::frame_input(b"A=$+", b"Z").unwrap();
         let mut runner = HostRunner::new(&image, input, Some(2_000_000)).unwrap();
         let mut out = Vec::new();
-        let outcome = runner.run_to(&mut out, &mut Vec::new()).unwrap();
+        let outcome = runner.run_to(&mut out).unwrap();
         assert!(matches!(
             outcome,
             HostOutcome::GuestExit { status: 130, .. }
@@ -546,7 +531,7 @@ mod tests {
         let (_temp, path) = compile_image(true);
         let image = std::fs::read(path).unwrap();
         for input in [vec![], vec![5], vec![5, 0, b'?', b'=', b'6']] {
-            let (outcome, stdout, stderr) = HostRunner::new(&image, input.clone(), Some(2_000_000))
+            let (outcome, stdout) = HostRunner::new(&image, input.clone(), Some(2_000_000))
                 .unwrap()
                 .run()
                 .unwrap();
@@ -555,22 +540,41 @@ mod tests {
                 "input {input:?}: unexpected outcome: {outcome:?}"
             );
             assert!(stdout.is_empty());
-            assert!(stderr.is_empty());
         }
     }
 
     #[cfg(target_os = "linux")]
     #[test]
     fn observed_worker_failure_takes_precedence_over_successful_guest_exit() {
-        // LDA #0 / JMP $fff9: exit successfully after the worker has failed.
-        let image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9\x00\x4c\xf9\xff";
+        // LDA #0 / JMP $fff2: exit successfully after the worker has failed.
+        let image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9\x00\x4c\xf2\xff";
         let mut runner = HostRunner::new(image, vec![], Some(100)).unwrap();
         let directory = std::fs::File::open(std::env::temp_dir()).unwrap();
         runner.input = input::HostInput::interactive(vec![], directory.into());
         assert_eq!(runner.input.wait_byte(), input::InputEvent::Fatal);
-        let error = runner.run_to(&mut Vec::new(), &mut Vec::new()).unwrap_err();
+        let error = runner.run_to(&mut Vec::new()).unwrap_err();
         assert!(matches!(error, HostError::Input(_)));
         assert!(error.to_string().contains("guest input"));
+    }
+
+    #[test]
+    fn startup_exit_and_reserved_services_are_dispatched_by_runner() {
+        for pc in 0xfff3u16..=0xffff {
+            let [lo, hi] = pc.to_le_bytes();
+            let mut image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9\x2a\x4c".to_vec();
+            image.extend_from_slice(&[lo, hi]);
+            let result = HostRunner::new(&image, vec![], Some(100)).unwrap().run();
+            if pc == 0xfff9 {
+                assert!(matches!(
+                    result,
+                    Ok((HostOutcome::GuestExit { status: 42, .. }, _))
+                ));
+            } else {
+                assert!(
+                    matches!(result, Err(HostError::Service(message)) if message.contains(&format!("${pc:04x}")))
+                );
+            }
+        }
     }
 
     #[cfg(target_os = "linux")]
@@ -595,7 +599,7 @@ mod tests {
         let result = receive.recv_timeout(Duration::from_secs(5));
         drop(writer); // Also unblocks a broken implementation before joining.
         thread.join().unwrap();
-        let (outcome, output, _) = result.expect("Try blocked on an open empty pipe").unwrap();
+        let (outcome, output) = result.expect("Try blocked on an open empty pipe").unwrap();
         assert!(matches!(outcome, HostOutcome::GuestExit { status: 0, .. }));
         assert_eq!(output, b"0");
 
@@ -624,7 +628,7 @@ mod tests {
             output: Vec::new(),
             writer,
         };
-        let outcome = runner.run_to(&mut output, &mut Vec::new()).unwrap();
+        let outcome = runner.run_to(&mut output).unwrap();
         assert!(matches!(outcome, HostOutcome::GuestExit { status: 0, .. }));
         assert_eq!(output.output, b"065");
     }
@@ -640,19 +644,10 @@ mod tests {
                 Err(std::io::Error::other("injected flush failure"))
             }
         }
-        // LDA #1 / LDX #0 / JSR $fff7 / LDA #0 / JMP $fff9, with a
-        // one-byte write buffer at $0300 and the cc65 software stack at $200a.
-        let mut body = vec![
-            0xa9, 0x0a, 0x85, 0xf0, 0xa9, 0x20, 0x85, 0xf1, 0xa9, 0x00, 0x8d, 0x0a, 0x20, 0xa9,
-            0x03, 0x8d, 0x0b, 0x20, 0xa9, 0x01, 0x8d, 0x0c, 0x20, 0xa9, 0x00, 0x8d, 0x0d, 0x20,
-            0xa9, 0x01, 0xa2, 0x00, 0x20, 0xf7, 0xff, 0xa9, 0x00, 0x4c, 0xf9, 0xff,
-        ];
-        body.resize(0x100, 0xea);
-        body.push(b'X');
-        let mut image = b"sim65\x02\x00\xf0\x00\x02\x00\x02".to_vec();
-        image.extend_from_slice(&body);
+        // Output one byte and then halt; the failing service must not resume.
+        let image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9X\x20\xf1\xff\xa9\x00\x4c\xf2\xff";
         let mut writer = FailOnWrite;
-        let error = run_with_io(&image, &[], Some(100), &mut writer).unwrap_err();
+        let error = run_with_io(image, &[], Some(100), &mut writer).unwrap_err();
         assert!(matches!(error, HostError::Output(_)));
     }
 
@@ -667,17 +662,50 @@ mod tests {
                 Err(std::io::Error::other("injected flush failure"))
             }
         }
-        let mut body = vec![
-            0xa9, 0x0a, 0x85, 0xf0, 0xa9, 0x20, 0x85, 0xf1, 0xa9, 0x00, 0x8d, 0x0a, 0x20, 0xa9,
-            0x03, 0x8d, 0x0b, 0x20, 0xa9, 0x01, 0x8d, 0x0c, 0x20, 0xa9, 0x00, 0x8d, 0x0d, 0x20,
-            0xa9, 0x01, 0xa2, 0x00, 0x20, 0xf7, 0xff, 0xa9, 0x00, 0x4c, 0xf9, 0xff,
-        ];
-        body.resize(0x100, 0xea);
-        body.push(b'X');
-        let mut image = b"sim65\x02\x00\xf0\x00\x02\x00\x02".to_vec();
-        image.extend_from_slice(&body);
+        let image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9X\x20\xf1\xff\xa9\x00\x4c\xf2\xff";
         let mut writer = FailOnFlush;
-        let error = run_with_io(&image, &[], Some(100), &mut writer).unwrap_err();
+        let error = run_with_io(image, &[], Some(100), &mut writer).unwrap_err();
         assert!(matches!(error, HostError::Output(_)));
+    }
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
+    fn mos_adapter_propagates_runtime_fatal_statuses() {
+        let (_temp, path) = compile_image(true);
+        let image = std::fs::read(path).unwrap();
+        for (source, expected) in [
+            (&b"?=~"[..], 1),
+            (&b"?=1/0"[..], 3),
+            (&b"?=1%0"[..], 4),
+            (&b"?=!"[..], 5),
+            (&b".DATA:=[1] A=.DATA(1)"[..], 7),
+        ] {
+            let input = crate::frame_input(source, b"").unwrap();
+            let (outcome, output) = HostRunner::new(&image, input, Some(2_000_000))
+                .unwrap()
+                .run()
+                .unwrap();
+            assert!(
+                matches!(outcome, HostOutcome::GuestExit { status, .. } if status == expected),
+                "source {source:?}: {outcome:?}"
+            );
+            assert!(output.is_empty(), "source {source:?}: {output:?}");
+        }
+    }
+
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
+    fn mos_adapter_propagates_frontend_stack_guard_status() {
+        let (_temp, path) = compile_image_with_guard(true, true);
+        let image = std::fs::read(path).unwrap();
+        let input = crate::frame_input(b"?=42", b"").unwrap();
+        let (outcome, output) = HostRunner::new(&image, input, Some(2_000_000))
+            .unwrap()
+            .run()
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            HostOutcome::GuestExit { status: 132, .. }
+        ));
+        assert!(output.is_empty());
     }
 }
