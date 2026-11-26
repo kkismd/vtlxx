@@ -62,7 +62,7 @@ pub(super) fn dispatch(
             return_from_service(cpu);
             Ok(ServiceResult::Continue)
         }
-        0xfff2 | 0xfff9 => Ok(ServiceResult::Exit(cpu.registers.accumulator)),
+        0xfff2 => Ok(ServiceResult::Exit(cpu.registers.accumulator)),
         _ => Err(HostError::Service(format!(
             "unsupported host service at ${pc:04x}"
         ))),
@@ -119,8 +119,8 @@ mod tests {
     }
 
     #[test]
-    fn halt_and_startup_exit_return_status_without_popping_stack() {
-        for pc in [0xfff2, 0xfff9] {
+    fn halt_returns_status_without_popping_stack() {
+        for pc in [0xfff2] {
             for status in [0, 2, 255] {
                 let mut cpu = cpu();
                 cpu.registers.program_counter = pc;
@@ -136,7 +136,7 @@ mod tests {
 
     #[test]
     fn reserved_services_are_rejected_without_mutation() {
-        for pc in (0xfff3..=0xffff).filter(|&pc| pc != 0xfff9) {
+        for pc in 0xfff3..=0xffff {
             let mut cpu = cpu();
             cpu.registers.program_counter = pc;
             cpu.registers.accumulator = 0x42;

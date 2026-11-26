@@ -1,7 +1,7 @@
 #![allow(dead_code)] // CLI selection and live host streams are the responsibility of #600.
 
-//! Private runner for VTLXX images in the sim6502 image format.
-mod image;
+//! Private runner for fixed-address VTLXX raw images.
+pub(crate) mod image;
 mod input;
 mod services;
 
@@ -69,9 +69,9 @@ impl HostRunner {
         input: input::HostInput,
         cycle_limit: Option<u64>,
     ) -> Result<Self, HostError> {
-        let loaded = image::load(bytes)?;
-        let mut cpu = CPU::new(loaded.memory, Nmos6502);
-        cpu.registers.program_counter = loaded.entry;
+        let memory = image::load(bytes)?;
+        let mut cpu = CPU::new(memory, Nmos6502);
+        cpu.registers.program_counter = image::LOAD;
         cpu.registers.stack_pointer.0 = 0xff;
         Ok(Self {
             cpu,
@@ -144,7 +144,7 @@ impl HostRunner {
                 });
             }
             let pc = self.cpu.registers.program_counter;
-            if pc == 0xffef || pc == 0xfff0 {
+            if pc == image::SERVICE_START || pc == image::SERVICE_START + 1 {
                 woken = !services::input_service(&mut self.cpu, pc, &mut self.input);
             } else if pc >= 0xfff1 {
                 let service = services::dispatch(&mut self.cpu, pc, stdout);
@@ -204,10 +204,10 @@ mod tests {
     }
 
     fn compile_image(mos_adapter: bool) -> (Temp, PathBuf) {
-        compile_image_with_guard(mos_adapter, false)
+        compile_image_with_guard(mos_adapter, None)
     }
 
-    fn compile_image_with_guard(mos_adapter: bool, force_guard: bool) -> (Temp, PathBuf) {
+    fn compile_image_with_guard(mos_adapter: bool, force_guard: Option<u8>) -> (Temp, PathBuf) {
         let temp = Temp::new();
         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let sources = [
@@ -233,17 +233,21 @@ mod tests {
         for (index, name) in sources.iter().enumerate() {
             let object = temp.0.join(format!("{index}.o"));
             let mut command = Command::new("ca65");
-            command.args([OsStr::new("-t"), OsStr::new("sim6502")]);
+            if mos_adapter {
+                command.args([OsStr::new("-D"), OsStr::new("VTLXX_RAW")]);
+            } else {
+                command.args([OsStr::new("-t"), OsStr::new("sim6502")]);
+            }
             if name.ends_with("adapter.s") {
                 command.args([OsStr::new("-D"), OsStr::new("SIM65_ENTROPY_UNAVAILABLE")]);
             }
-            let source = if force_guard && *name == "6502/frontend/basic.s" {
+            let source = if let (Some(observed), "6502/frontend/basic.s") = (force_guard, *name) {
                 let original = std::fs::read_to_string(root.join(name)).unwrap();
                 assert!(original.contains("    cpx #25"));
                 let path = temp.0.join("basic.s");
                 std::fs::write(
                     &path,
-                    original.replace("    cpx #25", "    ldx #24\n    cpx #25"),
+                    original.replace("    cpx #25", &format!("    ldx #{observed}\n    cpx #25")),
                 )
                 .unwrap();
                 path
@@ -256,10 +260,18 @@ mod tests {
         }
         let image = temp.0.join("vtlxx.prg");
         let mut command = Command::new("ld65");
-        command
-            .args([OsStr::new("-t"), OsStr::new("sim6502"), OsStr::new("-o")])
-            .arg(&image);
-        command.args(&objects).arg("sim6502.lib");
+        if mos_adapter {
+            command.args(crate::raw_link_args(
+                &root.join("6502/target/mos6502.cfg"),
+                &image,
+                &objects,
+            ));
+        } else {
+            command
+                .args([OsStr::new("-t"), OsStr::new("sim6502"), OsStr::new("-o")])
+                .arg(&image);
+            command.args(&objects).arg("sim6502.lib");
+        }
         assert!(command.status().unwrap().success(), "ld65 failed");
         (temp, image)
     }
@@ -282,6 +294,10 @@ mod tests {
         if wait {
             source = source.replace("rt_try_read_char", "rt_read_char");
         }
+        source = source.replace(
+            ".segment \"CODE\"\n_main:",
+            ".import VTLXX_LOAD\n.segment \"ENTRY\"\n_main:\n.assert _main = VTLXX_LOAD, lderror, \"entry must match load\"",
+        );
         let fixture_path = temp.0.join("probe.s");
         std::fs::write(&fixture_path, source).unwrap();
         let sources = [
@@ -296,7 +312,6 @@ mod tests {
         for (index, source) in sources.iter().enumerate() {
             let object = temp.0.join(format!("probe-{index}.o"));
             let mut command = Command::new("ca65");
-            command.args(["-t", "sim6502"]);
             if index == 0 {
                 command.args(["-D", &format!("TEST_CASE={case}")]);
             }
@@ -317,15 +332,110 @@ mod tests {
         let image = temp.0.join("probe.prg");
         assert!(
             Command::new("ld65")
-                .args(["-t", "sim6502", "-o"])
-                .arg(&image)
-                .args(&objects)
-                .arg("sim6502.lib")
+                .args(crate::raw_link_args(
+                    &root.join("6502/target/mos6502.cfg"),
+                    &image,
+                    &objects,
+                ))
                 .status()
                 .unwrap()
                 .success()
         );
         (temp, image)
+    }
+
+    #[test]
+    #[ignore = "requires ca65 and ld65"]
+    fn raw_link_layout_and_rejected_placements() {
+        use mos6502::memory::Bus;
+
+        let temp = Temp::new();
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let config = root.join("6502/target/mos6502.cfg");
+        let image = temp.0.join("layout.bin");
+        let source = temp.0.join("layout.s");
+        let object = temp.0.join("layout.o");
+        let fixture = |entry_prefix: &str, bss: &str, zp: &str| {
+            format!(
+                r#"
+.import VTLXX_LOAD
+.segment "ENTRY"
+{entry_prefix}
+_main: rts
+.assert _main = VTLXX_LOAD, lderror, "entry mismatch"
+.segment "CODE"
+.byte $11
+.segment "RODATA"
+.byte $22
+.segment "DATA"
+.byte $a5, $00, $5a, $ff
+.segment "BSS"
+.res {bss}
+.segment "ZEROPAGE"
+.res {zp}
+"#
+            )
+        };
+        let assemble = |text: &str| {
+            std::fs::write(&source, text).unwrap();
+            assert!(
+                Command::new("ca65")
+                    .arg(&source)
+                    .arg("-o")
+                    .arg(&object)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        };
+        let link = |args: &[std::ffi::OsString]| {
+            Command::new("ld65")
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success()
+        };
+        assemble(&fixture("", "16", "8"));
+        let args = crate::raw_link_args(&config, &image, std::slice::from_ref(&object));
+        assert!(link(&args));
+        let payload = std::fs::read(&image).unwrap();
+        assert_eq!(payload, [0x60, 0x11, 0x22, 0xa5, 0x00, 0x5a, 0xff]);
+        let mut loaded = image::load(&payload).unwrap();
+        for address in 0..8 {
+            assert_eq!(loaded.get_byte(address), 0);
+        }
+        for address in 0x0207..0x0217 {
+            assert_eq!(loaded.get_byte(address), 0);
+        }
+
+        // Neither placement symbol has a default.
+        for name in ["VTLXX_LOAD=", "VTLXX_SERVICE="] {
+            let mut missing = args.clone();
+            let index = missing
+                .iter()
+                .position(|arg| arg.to_string_lossy().starts_with(name))
+                .unwrap();
+            missing.drain(index - 1..=index);
+            assert!(!link(&missing), "missing {name} unexpectedly linked");
+        }
+        // Shrinking the service limit also counts BSS in MAIN's capacity.
+        let mut narrow = args.clone();
+        let index = narrow
+            .iter()
+            .position(|arg| arg.to_string_lossy().starts_with("VTLXX_SERVICE="))
+            .unwrap();
+        narrow[index] = "VTLXX_SERVICE=0x0207".into();
+        assert!(!link(&narrow));
+
+        for (prefix, bss, zp) in [
+            (".byte 0", "16", "8"),
+            ("", "$ff00", "8"),
+            ("", "16", "$101"),
+        ] {
+            assemble(&fixture(prefix, bss, zp));
+            assert!(!link(&args), "invalid placement linked successfully");
+        }
     }
 
     #[test]
@@ -543,11 +653,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn runner_initial_state_and_ram_are_fresh() {
+        use mos6502::{memory::Bus, registers::Status};
+        let mut first = HostRunner::new(&[0x60], vec![], None).unwrap();
+        assert_eq!(first.cpu.registers.program_counter, image::LOAD);
+        assert_eq!(first.cpu.registers.stack_pointer.0, 0xff);
+        assert!(!first.cpu.registers.status.contains(Status::PS_DECIMAL_MODE));
+        assert!(
+            first
+                .cpu
+                .registers
+                .status
+                .contains(Status::PS_DISABLE_INTERRUPTS)
+        );
+        assert_eq!(first.cpu.cycles, 0);
+        first.cpu.memory.set_byte(0x0300, 0xa5);
+        let mut second = HostRunner::new(&[0x60], vec![], None).unwrap();
+        assert_eq!(second.cpu.memory.get_byte(0x0300), 0);
+    }
+
     #[cfg(target_os = "linux")]
     #[test]
     fn observed_worker_failure_takes_precedence_over_successful_guest_exit() {
         // LDA #0 / JMP $fff2: exit successfully after the worker has failed.
-        let image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9\x00\x4c\xf2\xff";
+        let image = b"\xa9\x00\x4c\xf2\xff";
         let mut runner = HostRunner::new(image, vec![], Some(100)).unwrap();
         let directory = std::fs::File::open(std::env::temp_dir()).unwrap();
         runner.input = input::HostInput::interactive(vec![], directory.into());
@@ -558,22 +688,15 @@ mod tests {
     }
 
     #[test]
-    fn startup_exit_and_reserved_services_are_dispatched_by_runner() {
+    fn reserved_services_are_rejected_by_runner() {
         for pc in 0xfff3u16..=0xffff {
             let [lo, hi] = pc.to_le_bytes();
-            let mut image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9\x2a\x4c".to_vec();
+            let mut image = b"\xa9\x2a\x4c".to_vec();
             image.extend_from_slice(&[lo, hi]);
             let result = HostRunner::new(&image, vec![], Some(100)).unwrap().run();
-            if pc == 0xfff9 {
-                assert!(matches!(
-                    result,
-                    Ok((HostOutcome::GuestExit { status: 42, .. }, _))
-                ));
-            } else {
-                assert!(
-                    matches!(result, Err(HostError::Service(message)) if message.contains(&format!("${pc:04x}")))
-                );
-            }
+            assert!(
+                matches!(result, Err(HostError::Service(message)) if message.contains(&format!("${pc:04x}")))
+            );
         }
     }
 
@@ -645,8 +768,7 @@ mod tests {
             }
         }
         // After output, the guest would write a sentinel and halt.
-        let image =
-            b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9X\x20\xf1\xff\xa9\x42\x8d\x00\x03\x4c\xf2\xff";
+        let image = b"\xa9X\x20\xf1\xff\xa9\x42\x8d\x00\x03\x4c\xf2\xff";
         let mut writer = FailOnWrite;
         let mut runner = HostRunner::new(image, vec![], Some(100)).unwrap();
         let error = runner.run_to(&mut writer).unwrap_err();
@@ -665,8 +787,7 @@ mod tests {
                 Err(std::io::Error::other("injected flush failure"))
             }
         }
-        let image =
-            b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9X\x20\xf1\xff\xa9\x42\x8d\x00\x03\x4c\xf2\xff";
+        let image = b"\xa9X\x20\xf1\xff\xa9\x42\x8d\x00\x03\x4c\xf2\xff";
         let mut writer = FailOnFlush;
         let mut runner = HostRunner::new(image, vec![], Some(100)).unwrap();
         let error = runner.run_to(&mut writer).unwrap_err();
@@ -708,17 +829,43 @@ mod tests {
     #[test]
     #[ignore = "requires ca65 and ld65"]
     fn mos_adapter_propagates_frontend_stack_guard_status() {
-        let (_temp, path) = compile_image_with_guard(true, true);
+        for observed in [24, 25] {
+            let (_temp, path) = compile_image_with_guard(true, Some(observed));
+            let image = std::fs::read(path).unwrap();
+            // Exercises value-first and stack-root operand paths, as in sim65_frontend.
+            let input = crate::frame_input(b"~=40 ?=~+2", b"").unwrap();
+            let mut runner = HostRunner::new(&image, input, Some(2_000_000)).unwrap();
+            let mut output = Vec::new();
+            let outcome = runner.run_to(&mut output).unwrap();
+            assert_eq!(runner.cpu.registers.program_counter, 0xfff2);
+            assert!(
+                matches!(outcome, HostOutcome::GuestExit { status, .. } if status == if observed == 24 { 132 } else { 0 })
+            );
+            assert_eq!(
+                output,
+                if observed == 24 {
+                    b"".as_slice()
+                } else {
+                    b"42".as_slice()
+                }
+            );
+        }
+        let source = format!(
+            "%=0 [ {}A={}0+0{}{} ?=A",
+            "%=1 [ ".repeat(15),
+            "0+(".repeat(16),
+            ")".repeat(16),
+            " ]".repeat(16)
+        );
+        assert_eq!(source.len(), 201);
+        let (_temp, path) = compile_image(true);
         let image = std::fs::read(path).unwrap();
-        let input = crate::frame_input(b"?=42", b"").unwrap();
+        let input = crate::frame_input(source.as_bytes(), b"").unwrap();
         let (outcome, output) = HostRunner::new(&image, input, Some(2_000_000))
             .unwrap()
             .run()
             .unwrap();
-        assert!(matches!(
-            outcome,
-            HostOutcome::GuestExit { status: 132, .. }
-        ));
-        assert!(output.is_empty());
+        assert!(matches!(outcome, HostOutcome::GuestExit { status: 0, .. }));
+        assert_eq!(output, b"0");
     }
 }

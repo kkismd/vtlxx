@@ -70,7 +70,7 @@ cargo run -p vtlxx --bin vtlxx -- path/to/program.vtl --seed 0
 
 ## NMOS 6502 コンパイラの手動実行
 
-`vtlxx6502` は VTLXX source を NMOS 6502 compiler で native code にし、`mos6502` コアを使う VTLXX 専用 host で実行します。正式なホスト動作保証は Linux です。Linux 以外では実行要求を早期に拒否します。Rust reference VMへのフォールバックもありません。実行には cc65 の `ca65`、`ld65` とリンク用 `sim6502.lib` が必要です。製品の実行に `sim65` 実行ファイルは不要です。cc65 を導入した後、repository root から実行してください。
+`vtlxx6502` は VTLXX source を NMOS 6502 compiler で native code にし、`mos6502` コアを使う VTLXX 専用 host で実行します。正式なホスト動作保証は Linux です。Linux 以外では実行要求を早期に拒否します。Rust reference VMへのフォールバックもありません。製品の実行には cc65 の `ca65`、`ld65` が必要です。独立した sim65 テストにはさらに `sim65` と `sim6502.lib` が必要です。cc65 を導入した後、repository root から実行してください。
 
 ```sh
 cargo run -p vtlxx --bin vtlxx6502 -- \

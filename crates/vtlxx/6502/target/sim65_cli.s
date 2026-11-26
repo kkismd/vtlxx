@@ -5,7 +5,13 @@
 .importzp fe_compile_status
 .import halt
 
+.ifdef VTLXX_RAW
+.import VTLXX_LOAD
+.segment "ENTRY"
+.assert _main = VTLXX_LOAD, lderror, "entry must match load address"
+.else
 .segment "CODE"
+.endif
 .export _main
 
 _main:
