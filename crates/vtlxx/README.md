@@ -70,7 +70,7 @@ cargo run -p vtlxx --bin vtlxx -- path/to/program.vtl --seed 0
 
 ## NMOS 6502 コンパイラの手動実行
 
-`vtlxx6502` は VTLXX source を NMOS 6502 compiler で native code にし、既定では `mos6502` コアを使う VTLXX 専用 host で実行します。正式なホスト動作保証は Linux です。Linux 以外では既定または明示の `mos6502` を早期に拒否し、別 engine へ自動切替しません。Rust reference VMへのフォールバックもありません。実行には cc65 の `ca65`、`ld65` とリンク用 `sim6502.lib` が必要です。既定の実行に `sim65` 実行ファイルは不要です。cc65 を導入した後、repository root から実行してください。
+`vtlxx6502` は VTLXX source を NMOS 6502 compiler で native code にし、`mos6502` コアを使う VTLXX 専用 host で実行します。正式なホスト動作保証は Linux です。Linux 以外では実行要求を早期に拒否します。Rust reference VMへのフォールバックもありません。実行には cc65 の `ca65`、`ld65` とリンク用 `sim6502.lib` が必要です。製品の実行に `sim65` 実行ファイルは不要です。cc65 を導入した後、repository root から実行してください。
 
 ```sh
 cargo run -p vtlxx --bin vtlxx6502 -- \
@@ -108,9 +108,9 @@ ASCII: 65
 
 サンプルは1文字を読み、その ASCII 値を十進数で表示して正常終了します。追加の入力は不要です。EOF の場合は `ASCII: -1` を表示します。
 
-逐字入力には Linux の TTY で `--interactive --raw-tty` を指定します。raw mode は echo を無効にし、終了時に端末設定を復元します。`--raw-tty` は mos6502 専用で、非対話、非TTY、明示 sim65 との組合せでは使用できません。既定の mos6502 では `--engine` の指定は不要です。
+逐字入力には Linux の TTY で `--interactive --raw-tty` を指定します。raw mode は echo を無効にし、終了時に端末設定を復元します。`--raw-tty` は非対話や非TTYでは使用できません。
 
-対話モードの stdin は pipe や file にも接続できます。再現可能な入力を使う一括実行には `--runtime-input path/to/input.bin` を使えます。このオプションと `--interactive` は併用できません。非対話で入力を指定しない場合は EOF です。mos6502 は対話・非対話のどちらでも guest 出力を逐次送出します。標準 sim65 の非対話実行では終了後に出力を収集します。
+対話モードの stdin は pipe や file にも接続できます。再現可能な入力を使う一括実行には `--runtime-input path/to/input.bin` を使えます。このオプションと `--interactive` は併用できません。非対話で入力を指定しない場合は EOF です。mos6502 は対話・非対話のどちらでも guest 出力を逐次送出します。
 
 実行上限は一括モードでは既定で 4,000,000 guest cycles、対話モードでは無制限です。どちらのモードでも `--cycle-limit` に正の10進数を指定できます。
 
@@ -126,24 +126,18 @@ cargo run -p vtlxx --bin vtlxx6502 -- \
   path/to/program.vtl --seed -1
 ```
 
-たとえば `program.vtl` に `A=$ ?=A`、`input.bin` に byte `0x41` を置くと、stdout に `65` が出ます。source-level の入力経路は次の ignored integration test でも実機相当の `sim65` 実行を通して確認できます。
+たとえば `program.vtl` に `A=$ ?=A`、`input.bin` に byte `0x41` を置くと、stdout に `65` が出ます。source-level の入力経路は次の ignored integration test でも製品 CLI の実行を通して確認できます。
 
 ```sh
-cargo test -p vtlxx --test sim65_cli -- --ignored
+cargo test -p vtlxx --test native6502_cli -- --ignored
 ```
 
-標準 `sim65` を使う場合は `--engine sim65` を明示し、別途 `sim65` 実行ファイルを PATH に用意します。この経路では非ブロッキング入力（バッククォート）は未対応で、入力を消費せず status 6 で停止します。Linux 以外の sim65 経路は正式な動作保証の対象ではありません。
-
-```sh
-cargo run -p vtlxx --bin vtlxx6502 -- path/to/program.vtl --engine sim65
-```
-
-成功時の stdout は guest が出した bytes そのものです。CLI の診断は stderr に出し、usage・file・toolchain・assemble/link・compile/runtime・cycle-limit failure は nonzero status で終了します。実行は `ca65 -t sim6502` で選択した engine 用 adapter と target source を組み立て、`ld65 -t sim6502` で `sim6502.lib` と link し、一時生成物を選択した engine で実行します。成功・失敗のどちらも一時生成物は削除します。
+成功時の stdout は guest が出した bytes そのものです。CLI の診断は stderr に出し、usage・file・toolchain・assemble/link・compile/runtime・cycle-limit failure は nonzero status で終了します。実行は `ca65 -t sim6502` でmos6502 用 adapter と target source を組み立て、`ld65 -t sim6502` で `sim6502.lib` と link し、一時生成物を専用 host で実行します。成功・失敗のどちらも一時生成物は削除します。
 
 手動統合確認:
 
 ```sh
-cargo test -p vtlxx --test sim65_cli -- --ignored
+cargo test -p vtlxx --test native6502_cli -- --ignored
 ```
 
 ## 基本モデル
@@ -599,7 +593,7 @@ user-defined Write binding は、利用者向けには「手続き」と呼び�
 
 **手続きの定義件数は名前長とは別の制限**です。Rust reference は通常手続きに人為的な64件上限を設けず、6502初期targetは通常手続きの定義を最大64件まで受け付けます。ただしarena等の別の資源上限により、64件の定義が常に成功する保証はありません。65件目の定義ではコンパイルに失敗し、6502では生成された runtime を実行しません。テンプレート用の名前空間は採用ADR [#528](https://github.com/kkismd/vtlxx/issues/528) により廃止されています。
 
-廃止された手続テンプレート構文（例: `&=a{} [ {}=A ]`、`a{A}=()`、`a{A}=1`）は、Rust・6502のどちらでも**コンパイル時の構文エラー**になります。通常Writeの定義と呼出は引き続き利用できます。拒否の回帰は [`tests/source_execution.rs`](tests/source_execution.rs)、[`tests/sim65_frontend.rs`](tests/sim65_frontend.rs)、[`tests/sim65_cli.rs`](tests/sim65_cli.rs) で確認します。
+廃止された手続テンプレート構文（例: `&=a{} [ {}=A ]`、`a{A}=()`、`a{A}=1`）は、Rust・6502のどちらでも**コンパイル時の構文エラー**になります。通常Writeの定義と呼出は引き続き利用できます。拒否の回帰は [`tests/source_execution.rs`](tests/source_execution.rs)、[`tests/sim65_frontend.rs`](tests/sim65_frontend.rs)、[`tests/native6502_cli.rs`](tests/native6502_cli.rs) で確認します。
 
 例:
 
@@ -773,7 +767,7 @@ cargo run -p vtlxx --bin vtlxx -- crates/vtlxx/examples/1024.vtl --raw-tty
 cargo run -p vtlxx --bin vtlxx6502 -- crates/vtlxx/examples/1024.vtl --interactive --raw-tty
 ```
 
-6502 CLI は既定で mos6502 を使い、リンクには cc65 が必要です（`--engine mos6502` も指定できます）。標準 sim65 はこの example が使う非ブロッキング入力に対応していません。Rust CLI の非ブロッキング入力は Unix 対応であり、非 Unix ではこの example の入力方式を利用できません。raw でない通常の端末では Enter が必要になる場合があります。pipe や入力ファイルなど非 TTY の固定入力には raw 指定は不要です。
+6502 CLI は mos6502 を使い、リンクには cc65 が必要です。Rust CLI の非ブロッキング入力は Unix 対応であり、非 Unix ではこの example の入力方式を利用できません。raw でない通常の端末では Enter が必要になる場合があります。pipe や入力ファイルなど非 TTY の固定入力には raw 指定は不要です。
 
 固定入力による即終了と移動・再開・終了の列について、[`tests/sim65_examples.rs`](tests/sim65_examples.rs) で Rust と actual 6502 の正常終了・stdout 一致を検証します。例えば次は改行のない固定入力で、cycle 上限を `256000000` とした一括実行です。
 
@@ -793,7 +787,7 @@ printf 'X\n' | cargo run -p vtlxx --bin vtlxx -- \
   crates/vtlxx/examples/micro_trek.vtl --seed 0
 ```
 
-6502/sim65 でも同じ `--seed N` を指定でき、seed行をruntime入力へ含めません。stdinの先頭byteが最初のゲームコマンドになります。入力がEOFの場合もゲーム初期化と `COMMAND :` 表示の後に正常終了します。
+6502 CLI でも同じ `--seed N` を指定でき、seed行をruntime入力へ含めません。stdinの先頭byteが最初のゲームコマンドになります。入力がEOFの場合もゲーム初期化と `COMMAND :` 表示の後に正常終了します。
 
 ## Example: Eight Queens
 
@@ -831,7 +825,7 @@ cargo run -p vtlxx --bin vtlxx -- crates/vtlxx/examples/mandelbrot.vtl
 cargo run -p vtlxx --bin vtlxx6502 -- crates/vtlxx/examples/mandelbrot.vtl --cycle-limit 1200000000
 ```
 
-6502 CLI の既定エンジンは mos6502 です。sim65 でも `--engine sim65` を指定して実行でき、どちらも既定の cycle 上限を超えるため上記の上限を指定します。出力行末の空白は描画の一部です。
+6502 CLI では既定の cycle 上限を超えるため上記の上限を指定します。出力行末の空白は描画の一部です。
 
 ## Example: 固定迷路の DFS
 

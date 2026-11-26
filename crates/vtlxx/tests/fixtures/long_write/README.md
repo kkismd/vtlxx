@@ -1,6 +1,6 @@
 # 長い通常Write名の適合テスト
 
-採用ADR [#453](https://github.com/kkismd/vtlxx/issues/453) と [#528](https://github.com/kkismd/vtlxx/issues/528) に基づき、通常Writeの名前と失敗時の状態を検査する。6502のテストはca65、ld65、sim65を必要とする。
+採用ADR [#453](https://github.com/kkismd/vtlxx/issues/453) と [#528](https://github.com/kkismd/vtlxx/issues/528) に基づき、通常Writeの名前と失敗時の状態を検査する。製品 CLI のテストは Linux、ca65、ld65 を必要とし、独立した低レベル試験には sim65 も必要とする。
 
 | source | 両処理系の検査 | profile固有の検査 |
 | --- | --- | --- |
