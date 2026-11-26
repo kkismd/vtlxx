@@ -472,9 +472,8 @@ fn execute_mos(
         HostRunner::new(&image, input.to_vec(), limit)
     }
     .map_err(|error| format!("mos6502 host: {error}"))?;
-    let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    let outcome = if interactive {
+    let outcome = {
         let mut out = io::stdout().lock();
         let mut err = io::stderr().lock();
         if raw_tty {
@@ -494,17 +493,8 @@ fn execute_mos(
         } else {
             runner.run_to(&mut out, &mut err)
         }
-    } else {
-        runner.run_to(&mut stdout, &mut stderr)
     }
     .map_err(|error| format!("mos6502 host: {error}"))?;
-    if !interactive && !stderr.is_empty() {
-        io::stderr()
-            .write_all(&stderr)
-            .and_then(|()| io::stderr().flush())
-            .map_err(|error| format!("mos6502 host: write stderr: {error}"))?;
-        stderr.clear();
-    }
     let status = match outcome {
         HostOutcome::GuestExit { status, .. } => i32::from(status),
         HostOutcome::CycleLimit { .. } => {
@@ -518,7 +508,7 @@ fn execute_mos(
     };
     Ok(Output {
         status: std::process::ExitStatus::from_raw(status << 8),
-        stdout,
+        stdout: Vec::new(),
         stderr,
     })
 }

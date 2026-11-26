@@ -133,7 +133,7 @@ cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --engine sim65 --runtime-in
 
 どちらも `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `!` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれず、両 engine の cycle 値の完全一致は保証しない。
 
-対話では runtime 入力と出力を標準入出力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
+mos6502 は対話・非対話のどちらでも guest 出力を標準出力・標準エラーへ逐次送出する。標準 sim65 の非対話実行では終了後に出力を収集する。対話では runtime 入力を標準入力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
 
 ```sh
 cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --interactive
