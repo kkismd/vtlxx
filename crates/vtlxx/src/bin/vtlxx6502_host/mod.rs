@@ -389,10 +389,10 @@ mod tests {
         let (_stock_temp, stock_path) = compile_image(false);
         let image = std::fs::read(&path).unwrap();
         let input = crate::frame_input(b"?=65", b"").unwrap();
-        let (outcome, stdout) = HostRunner::new(&image, input.clone(), Some(2_000_000))
-            .unwrap()
-            .run()
-            .unwrap();
+        let mut runner = HostRunner::new(&image, input.clone(), Some(2_000_000)).unwrap();
+        let mut stdout = Vec::new();
+        let outcome = runner.run_to(&mut stdout).unwrap();
+        assert_eq!(runner.cpu.registers.program_counter, 0xfff2);
         assert_eq!(stdout, b"65");
         let HostOutcome::GuestExit {
             status: 0,
@@ -446,10 +446,10 @@ mod tests {
             (vec![5, 0, b'?', b'=', b'6'], 129),
             (crate::frame_input(b"A=", b"").unwrap(), 130),
         ] {
-            let (result, output) = HostRunner::new(&image, framed.clone(), Some(2_000_000))
-                .unwrap()
-                .run()
-                .unwrap();
+            let mut runner = HostRunner::new(&image, framed.clone(), Some(2_000_000)).unwrap();
+            let mut output = Vec::new();
+            let result = runner.run_to(&mut output).unwrap();
+            assert_eq!(runner.cpu.registers.program_counter, 0xfff2);
             assert_eq!(output, b"");
             let HostOutcome::GuestExit { status, .. } = result else {
                 panic!("expected frontend guest exit, got {result:?}");
@@ -644,11 +644,14 @@ mod tests {
                 Err(std::io::Error::other("injected flush failure"))
             }
         }
-        // Output one byte and then halt; the failing service must not resume.
-        let image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9X\x20\xf1\xff\xa9\x00\x4c\xf2\xff";
+        // After output, the guest would write a sentinel and halt.
+        let image =
+            b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9X\x20\xf1\xff\xa9\x42\x8d\x00\x03\x4c\xf2\xff";
         let mut writer = FailOnWrite;
-        let error = run_with_io(image, &[], Some(100), &mut writer).unwrap_err();
+        let mut runner = HostRunner::new(image, vec![], Some(100)).unwrap();
+        let error = runner.run_to(&mut writer).unwrap_err();
         assert!(matches!(error, HostError::Output(_)));
+        assert_output_stopped(&mut runner);
     }
 
     #[test]
@@ -662,10 +665,20 @@ mod tests {
                 Err(std::io::Error::other("injected flush failure"))
             }
         }
-        let image = b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9X\x20\xf1\xff\xa9\x00\x4c\xf2\xff";
+        let image =
+            b"sim65\x02\x00\xf0\x00\x02\x00\x02\xa9X\x20\xf1\xff\xa9\x42\x8d\x00\x03\x4c\xf2\xff";
         let mut writer = FailOnFlush;
-        let error = run_with_io(image, &[], Some(100), &mut writer).unwrap_err();
+        let mut runner = HostRunner::new(image, vec![], Some(100)).unwrap();
+        let error = runner.run_to(&mut writer).unwrap_err();
         assert!(matches!(error, HostError::Output(_)));
+        assert_output_stopped(&mut runner);
+    }
+
+    fn assert_output_stopped(runner: &mut HostRunner) {
+        use mos6502::memory::Bus;
+        assert_eq!(runner.cpu.registers.program_counter, 0xfff1);
+        assert_eq!(runner.cpu.registers.stack_pointer.0, 0xfd);
+        assert_eq!(runner.cpu.memory.get_byte(0x0300), 0);
     }
     #[test]
     #[ignore = "requires ca65 and ld65"]
@@ -680,10 +693,10 @@ mod tests {
             (&b".DATA:=[1] A=.DATA(1)"[..], 7),
         ] {
             let input = crate::frame_input(source, b"").unwrap();
-            let (outcome, output) = HostRunner::new(&image, input, Some(2_000_000))
-                .unwrap()
-                .run()
-                .unwrap();
+            let mut runner = HostRunner::new(&image, input, Some(2_000_000)).unwrap();
+            let mut output = Vec::new();
+            let outcome = runner.run_to(&mut output).unwrap();
+            assert_eq!(runner.cpu.registers.program_counter, 0xfff2);
             assert!(
                 matches!(outcome, HostOutcome::GuestExit { status, .. } if status == expected),
                 "source {source:?}: {outcome:?}"
