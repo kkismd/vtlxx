@@ -451,6 +451,112 @@ fn default_and_explicit_mos_match_on_cycle_limit() {
 
 #[test]
 #[ignore = "requires ca65 and ld65; run with --ignored"]
+fn batch_output_arrives_while_guest_is_running() {
+    let temp = TestDir::new();
+    let source = temp.source(b"?=\"prefix\" .LOOP:=1 ^=.LOOP #=.LOOP");
+    for engine in [None, Some("mos6502")] {
+        let mut command = cli();
+        command.arg(&source).args(["--cycle-limit", "1200000000"]);
+        if let Some(engine) = engine {
+            command.args(["--engine", engine]);
+        }
+        let mut child = TimedChild(
+            command
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .unwrap(),
+        );
+        let mut stdout = child.0.stdout.take().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let reader = std::thread::spawn(move || {
+            let mut prefix = [0; 6];
+            let result = stdout.read_exact(&mut prefix);
+            let _ = tx.send(result.map(|()| prefix));
+        });
+        let received = rx.recv_timeout(Duration::from_secs(20));
+        let running = child.0.try_wait().unwrap().is_none();
+        let _ = child.0.kill();
+        let _ = child.0.wait();
+        reader.join().unwrap();
+        assert_eq!(received.unwrap().unwrap(), *b"prefix", "{engine:?}");
+        assert!(
+            running,
+            "guest exited before prefix was observed: {engine:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires ca65 and ld65; run with --ignored"]
+fn batch_output_and_failures_preserve_prefix_and_diagnostics() {
+    let temp = TestDir::new();
+    for (source, limit, status, stdout, diagnostic) in [
+        (
+            &b"?=\"first\" ?=\"second\""[..],
+            "200000000",
+            0,
+            &b"firstsecond"[..],
+            "",
+        ),
+        (b"?=\"prefix\" ?=1/0", "200000000", 3, b"prefix", "status 3"),
+        (
+            b"?=\"prefix\" .LOOP:=1 ^=.LOOP #=.LOOP",
+            "2000000",
+            126,
+            b"prefix",
+            "cycle limit exceeded",
+        ),
+        (
+            b"?=\"prefix\" A=",
+            "200000000",
+            130,
+            b"",
+            "compilation failed",
+        ),
+    ] {
+        let path = temp.source(source);
+        let output = cli()
+            .arg(path)
+            .args(["--cycle-limit", limit])
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(status), "{output:?}");
+        assert_eq!(output.stdout, stdout, "{output:?}");
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if diagnostic.is_empty() {
+            assert!(stderr.is_empty(), "{output:?}");
+        } else {
+            assert_eq!(stderr.matches(diagnostic).count(), 1, "{output:?}");
+        }
+    }
+}
+
+#[test]
+#[ignore = "requires ca65 and ld65; run with --ignored"]
+fn batch_output_failure_stops_guest_before_cycle_limit() {
+    let temp = TestDir::new();
+    let source = temp.source(b"?=\"prefix\" .LOOP:=1 ^=.LOOP #=.LOOP");
+    let output = cli()
+        .arg(source)
+        .args(["--cycle-limit", "2000000"])
+        .stdout(Stdio::from(
+            fs::OpenOptions::new()
+                .write(true)
+                .open("/dev/full")
+                .unwrap(),
+        ))
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2), "{output:?}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("mos6502 host: guest output:"), "{output:?}");
+    assert!(!stderr.contains("cycle limit exceeded"), "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65 and ld65; run with --ignored"]
 fn busy_try_obeys_cycle_limit() {
     let temp = TestDir::new();
     let source = temp.source(b".LOOP:=1 ^=.LOOP A=` #=.LOOP");

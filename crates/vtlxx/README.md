@@ -110,7 +110,7 @@ ASCII: 65
 
 逐字入力には Linux の TTY で `--interactive --raw-tty` を指定します。raw mode は echo を無効にし、終了時に端末設定を復元します。`--raw-tty` は mos6502 専用で、非対話、非TTY、明示 sim65 との組合せでは使用できません。既定の mos6502 では `--engine` の指定は不要です。
 
-対話モードの stdin は pipe や file にも接続できます。再現可能な入力を使う一括実行には `--runtime-input path/to/input.bin` を使えます。このオプションと `--interactive` は併用できません。対話モードでは stdout を逐次出力します。
+対話モードの stdin は pipe や file にも接続できます。再現可能な入力を使う一括実行には `--runtime-input path/to/input.bin` を使えます。このオプションと `--interactive` は併用できません。非対話で入力を指定しない場合は EOF です。mos6502 は対話・非対話のどちらでも guest 出力を逐次送出します。標準 sim65 の非対話実行では終了後に出力を収集します。
 
 実行上限は一括モードでは既定で 4,000,000 guest cycles、対話モードでは無制限です。どちらのモードでも `--cycle-limit` に正の10進数を指定できます。
 
