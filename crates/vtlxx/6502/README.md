@@ -132,7 +132,7 @@ cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --runtime-input /tmp/input.
 
 このコマンドは `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `!` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれない。
 
-mos6502 は対話・非対話のどちらでも guest 出力を標準出力・標準エラーへ逐次送出する。対話では runtime 入力を標準入力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
+mos6502 は対話・非対話のどちらでも guest 出力を標準出力へ逐次送出する。host の診断は標準エラーへ出す。対話では runtime 入力を標準入力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
 
 ```sh
 cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --interactive
@@ -148,6 +148,8 @@ cargo run -p vtlxx --bin vtlxx6502 -- /tmp/try.vtl --interactive --raw-tty
 `--raw-tty` は mos6502 の `--interactive` と TTY stdin が必要で、echo を無効にする。正常終了・エラーおよび SIGINT / SIGTERM / SIGHUP / SIGQUIT では端末設定を復元する。SIGTSTP では停止前に復元し、SIGCONT 後に再適用する。捕捉できない SIGKILL / SIGSTOP ではこの復元を保証できない。
 
 source と runtime は同じ入力 session を共有するが、source frame の読み取りと compile 完了後に runtime が開始する。Wait (`$`) は入力を blocking で待ち、NUL を読み捨て、byte または EOF の -1 を返す。Try（バッククォート）は待たずに最大1 byteを消費し、未到着と raw NUL を 0、EOF を -1 として返す。EOF は後続の Wait / Try でも維持され、Fatal は guest status 6 で停止する。通常 sim65 の Try は未対応で入力を消費せず status 6 となる。
+
+mos6502 用 adapter と host の間では、private service `$FFEF` が Try、`$FFF0` が Wait、`$FFF1` が A の 1 byte 出力、`$FFF2` が A の status による非復帰の終了を担う。出力は byte をそのまま書き、flush が成功してから guest に戻る。これらは portable runtime ABI ではなく、通常の sim65 adapter とは別である。旧汎用入出力 service は提供しない。現行の sim6502 startup と `sim6502.lib` は software stack を使い、startup からの終了に `$FFF9` を参照するため、host はその終了だけを互換処理として維持する。image は引き続き sim65 v2 header を持ち、loader が software stack pointer を初期化する。
 
 mos6502 host は標準の [`mos6502` 0.10.1](https://crates.io/crates/mos6502/0.10.1)（BSD-3-Clause）を使い、固定された依存元と version は [Cargo.lock](../../../Cargo.lock) に記録する。CPU core と cc65 は改造しない。
 

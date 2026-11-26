@@ -9,8 +9,6 @@ const INITIAL_CC65_SP: u16 = 0xffef;
 pub(super) struct LoadedImage {
     pub(super) memory: Memory,
     pub(super) entry: u16,
-    #[allow(dead_code)]
-    pub(super) software_stack_zp: u8,
 }
 
 pub(super) fn load(bytes: &[u8]) -> Result<LoadedImage, HostError> {
@@ -52,11 +50,7 @@ pub(super) fn load(bytes: &[u8]) -> Result<LoadedImage, HostError> {
     }
     memory.set_byte(u16::from(bytes[7]), INITIAL_CC65_SP as u8);
     memory.set_byte(u16::from(bytes[7]) + 1, (INITIAL_CC65_SP >> 8) as u8);
-    Ok(LoadedImage {
-        memory,
-        entry,
-        software_stack_zp: bytes[7],
-    })
+    Ok(LoadedImage { memory, entry })
 }
 
 #[cfg(test)]

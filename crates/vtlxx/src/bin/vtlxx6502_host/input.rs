@@ -72,22 +72,6 @@ impl HostInput {
         self.next(false)
     }
 
-    pub(super) fn read_for_pv(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if buffer.is_empty() {
-            return Ok(0);
-        }
-        match self.wait_byte() {
-            InputEvent::Byte(byte) => {
-                buffer[0] = byte;
-                Ok(1)
-            }
-            InputEvent::Eof => Ok(0),
-            InputEvent::Fatal => Err(io::Error::other("input worker failed")),
-            InputEvent::Interrupted => Err(io::Error::from(io::ErrorKind::Interrupted)),
-            InputEvent::NotReady => unreachable!(),
-        }
-    }
-
     pub(super) fn finish(&mut self) -> io::Result<()> {
         #[cfg(target_os = "linux")]
         if let Some(live) = &mut self.live {
@@ -102,12 +86,6 @@ impl HostInput {
             live.set_signal_fd(fd)?;
         }
         Ok(())
-    }
-}
-
-impl Read for HostInput {
-    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        self.read_for_pv(buffer)
     }
 }
 
@@ -335,11 +313,10 @@ mod live {
         use super::*;
 
         #[test]
-        fn prefix_and_zero_length_read_do_not_start_worker() {
+        fn prefix_does_not_start_worker() {
             let (reader, _writer) = io::pipe().unwrap();
             let mut input = super::super::HostInput::interactive(vec![1, 2], reader.into());
-            assert_eq!(input.read_for_pv(&mut []).unwrap(), 0);
-            assert_eq!(input.wait_byte(), InputEvent::Byte(1));
+            assert_eq!(input.try_byte(), InputEvent::Byte(1));
             assert_eq!(input.wait_byte(), InputEvent::Byte(2));
             assert!(input.live.as_ref().unwrap().worker.is_none());
             assert_eq!(input.try_byte(), InputEvent::NotReady);
@@ -385,13 +362,11 @@ mod tests {
     fn memory_paths_share_position_and_sticky_eof() {
         let mut input = HostInput::memory(vec![0, 255, 7]);
         assert_eq!(input.try_byte(), InputEvent::Byte(0));
-        let mut bytes = [0; 2];
-        assert_eq!(input.read_for_pv(&mut bytes).unwrap(), 1);
-        assert_eq!(bytes[0], 255);
+        assert_eq!(input.wait_byte(), InputEvent::Byte(255));
         assert_eq!(input.wait_byte(), InputEvent::Byte(7));
         assert_eq!(input.wait_byte(), InputEvent::Eof);
         assert_eq!(input.try_byte(), InputEvent::Eof);
-        assert_eq!(input.read_for_pv(&mut bytes).unwrap(), 0);
+        assert_eq!(input.wait_byte(), InputEvent::Eof);
     }
 
     #[cfg(target_os = "linux")]
@@ -426,23 +401,20 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    fn pvread_waits_for_arrival_and_zero_length_does_not_start_worker() {
+    fn wait_waits_for_arrival() {
         use std::{
             io::Write,
             time::{Duration, Instant},
         };
         let (reader, mut writer) = io::pipe().unwrap();
         let mut input = HostInput::interactive(vec![], reader.into());
-        assert_eq!(input.read_for_pv(&mut []).unwrap(), 0);
         let producer = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));
             writer.write_all(b"z").unwrap();
         });
         let start = Instant::now();
-        let mut byte = [0];
-        assert_eq!(input.read_for_pv(&mut byte).unwrap(), 1);
+        assert_eq!(input.wait_byte(), InputEvent::Byte(b'z'));
         assert!(start.elapsed() >= Duration::from_millis(75));
-        assert_eq!(byte, *b"z");
         producer.join().unwrap();
         input.finish().unwrap();
     }
