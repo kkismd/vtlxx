@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::process::{Child, Command, Output, Stdio};
+#[cfg(target_os = "linux")]
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -51,7 +52,6 @@ fn run(target: bool, seed: i16, input: &[u8]) -> Output {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if target {
-        command.args(["--engine", "sim65"]);
         fs::write(&path, input).unwrap();
         command
             .arg("--runtime-input")
@@ -112,24 +112,24 @@ fn compare_seed(seed: i16, input: &[u8]) {
     assert_eq!(rust.stderr, target.stderr, "input {input:?}");
 }
 #[test]
-#[ignore = "requires ca65, ld65, and sim65"]
+#[ignore = "requires ca65, ld65, and Linux mos6502"]
 fn displays_then_x_without_turn_end() {
     compare(b"G\nL\nS\nR\n?\nX\n");
 }
 #[test]
-#[ignore = "requires ca65, ld65, and sim65"]
+#[ignore = "requires ca65, ld65, and Linux mos6502"]
 fn invalid_numeric_retry_cancel_and_eof() {
     compare(b"P\nbad\n0\nX\n");
     compare(b"P\nbad\n");
 }
 #[test]
-#[ignore = "requires ca65, ld65, and sim65"]
+#[ignore = "requires ca65, ld65, and Linux mos6502"]
 fn actions_and_outside_warp_follow_fixed_tracks() {
     compare(b"P\n10\nT\n0\nW\n1\n0\nR\nX\n");
     compare(b"W\n89\n0\nX\n");
 }
 #[test]
-#[ignore = "requires ca65, ld65, and sim65"]
+#[ignore = "requires ca65, ld65, and Linux mos6502"]
 fn two_defeats_invalid_retry_yes_then_no() {
     let mut input = b"W\n1\n0\n".repeat(30);
     input.extend_from_slice(b"bad\nY\n");
@@ -138,29 +138,28 @@ fn two_defeats_invalid_retry_yes_then_no() {
     compare(&input);
 }
 #[test]
-#[ignore = "requires ca65, ld65, and sim65"]
+#[ignore = "requires ca65, ld65, and Linux mos6502"]
 fn initial_eof_is_normal_exit() {
     compare_seed(0, b"");
 }
 #[test]
-#[ignore = "requires ca65, ld65, and sim65"]
+#[ignore = "requires ca65, ld65, and Linux mos6502"]
 fn seed_boundaries_match_rust_and_repeat_on_6502() {
     for seed in [0, 1, -1, -32768, 32767] {
         compare_seed(seed, b"X\n");
     }
 }
 #[test]
-#[ignore = "requires ca65, ld65, and sim65"]
+#[ignore = "requires ca65, ld65, and Linux mos6502"]
 fn initial_eof_matches_after_startup() {
     compare_seed(0, b"");
 }
-#[cfg(unix)]
+#[cfg(target_os = "linux")]
 #[test]
-#[ignore = "requires ca65, ld65, and sim65"]
+#[ignore = "requires ca65, ld65, and Linux mos6502"]
 fn interactive_prompt_is_visible_before_input() {
     let mut command = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"));
     command.process_group(0);
-    command.args(["--engine", "sim65"]);
     let mut child = Guard(
         command
             .arg(SOURCE)

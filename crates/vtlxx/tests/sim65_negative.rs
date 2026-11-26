@@ -118,7 +118,6 @@ fn cli(temp: &TestDir, name: &str, source: &[u8]) -> Output {
     let path = temp.0.join(format!("{name}.vtl"));
     fs::write(&path, source).unwrap();
     Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(path)
         .args(["--cycle-limit", CYCLE_LIMIT])
         .output()
@@ -197,7 +196,7 @@ fn assert_cli_failure(
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored --nocapture"]
+#[ignore = "requires Linux, ca65, ld65, and sim65; run with --ignored --nocapture"]
 fn compile_failures_do_not_start_runtime_and_report_expected_causes() {
     let temp = TestDir::new();
     let probe = build_probe(&temp);

@@ -28,7 +28,6 @@ impl Drop for SourceFile {
 fn run(source: &str) -> Output {
     let source = SourceFile::new(source);
     Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(&source.0)
         .args(["--cycle-limit", "200000000"])
         .output()
@@ -60,7 +59,7 @@ fn name(n: usize) -> String {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires ca65, ld65, and Linux mos6502; run with --ignored"]
 fn names_bind_completely_and_share_the_stack() {
     let source = "&=a [ ?=\"a\" ] &=ab [ ?=\"b\" ] &=read [ A=~ ] &=reads [ read=~ ] &=reader [ reads=~+1 ] &=eightchr [ %=1 [ reader=~ ] ] a=() ab=() read=2+3 eightchr=7 ?=A";
     let mut reference = vtlxx::Machine::new();
@@ -74,7 +73,7 @@ fn names_bind_completely_and_share_the_stack() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires ca65, ld65, and Linux mos6502; run with --ignored"]
 fn invalid_names_and_definitions_do_not_start_runtime() {
     for source in [
         "&= [ ]",
@@ -100,7 +99,7 @@ fn invalid_names_and_definitions_do_not_start_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires ca65, ld65, and Linux mos6502; run with --ignored"]
 fn sixty_four_definitions_and_deep_calls_succeed_but_sixty_five_fail() {
     let mut definitions = String::new();
     for i in 0..64 {
@@ -116,7 +115,7 @@ fn sixty_four_definitions_and_deep_calls_succeed_but_sixty_five_fail() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires ca65, ld65, and Linux mos6502; run with --ignored"]
 fn sixty_five_top_level_chunks_run_in_source_order() {
     let mut source = String::new();
     let mut expected = Vec::new();

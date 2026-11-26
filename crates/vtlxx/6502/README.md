@@ -120,20 +120,19 @@ cargo test -p vtlxx --test sim65_frontend -- --ignored
 
 `target/sim65_cli.s` は CLI 専用entryで、`_main` から `fe_compile_run` を一度呼ぶ。compile成功時は既にfrontendが実行したruntimeの後で `halt(0)` し、compile error時は `fe_compile_status` を `$80` と OR したtarget statusで終了する。test probe用entryとは分離し、追加serial readやsentinel出力を行わない。
 
-crate root の `vtlxx6502` host binary は source を raw bytes で読み、長さを u16（最大65,535 bytes）で検証し、little-endian length header を付ける。`ca65` / `ld65` と `sim6502.lib` が必要で、実行ごとに選択した engine 用 adapter を他の target code と別途組み立てて link する。一時 directory は各実行で作成し、終了時に削除する。既定は `mos6502` コアを使用する VTLXX 専用 host で、`--engine mos6502` も同じ経路である。正式なホスト動作保証は Linux であり、Linux 以外の暗黙・明示 mos6502 要求は source 読込前に拒否し、sim65 へ fallback しない。host は汎用 sim6502 emulator ではなく、この CLI が必要とする service のみを実装する。標準 sim65 は `--engine sim65` で明示できるが、Linux 以外の動作保証はない。両 engine の image を共用しない。
+crate root の `vtlxx6502` host binary は source を raw bytes で読み、長さを u16（最大65,535 bytes）で検証し、little-endian length header を付ける。`ca65` / `ld65` と `sim6502.lib` を使い mos6502 adapter を link し、専用 host で実行する。一時 directory は終了時に削除する。正式なホスト動作保証は Linux であり、Linux 以外の実行要求は source 読込前に拒否する。独立した sim65 fixture は引き続き維持する。
 
-repository root からの例（`ca65`、`ld65` とリンク用 `sim6502.lib` が必要。`sim65` 実行ファイルは明示 sim65 の場合のみ必要）:
+repository root からの例（`ca65`、`ld65` とリンク用 `sim6502.lib` が必要。製品実行に `sim65` 実行ファイルは不要）:
 
 ```sh
 printf 'A=$ ?=A' > /tmp/input.vtl
 printf 'A' > /tmp/input.bin
 cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --runtime-input /tmp/input.bin
-cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --engine sim65 --runtime-input /tmp/input.bin --seed 123 --cycle-limit 4000000
 ```
 
-どちらも `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `!` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれず、両 engine の cycle 値の完全一致は保証しない。
+このコマンドは `65` を出力する。非対話では `--runtime-input` が指定されなければ runtime 入力は空の EOF であり、stdin を待たない。`--seed` は符号付き16 bit の初期 seed を指定し、省略時は OS entropy を使う。固定 seed により `!` の値を再現できる。`--cycle-limit` は正の guest cycle 数で、非対話の既定は 4,000,000、対話時の既定は無制限である。上限到達時は status 126 で終了する。入力待ち時間は guest cycles に含まれない。
 
-mos6502 は対話・非対話のどちらでも guest 出力を標準出力・標準エラーへ逐次送出する。標準 sim65 の非対話実行では終了後に出力を収集する。対話では runtime 入力を標準入力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
+mos6502 は対話・非対話のどちらでも guest 出力を標準出力・標準エラーへ逐次送出する。対話では runtime 入力を標準入力に接続する。`--interactive` と `--runtime-input` は併用できない。端末の既定 canonical mode では通常、改行まで入力が届かない。
 
 ```sh
 cargo run -p vtlxx --bin vtlxx6502 -- /tmp/input.vtl --interactive
@@ -179,11 +178,11 @@ cargo test -p vtlxx --test sim65_micro_trek_e2e -- --ignored
 python3 crates/vtlxx/tests/fixtures/micro_trek/measure_sim65.py
 ```
 
-E2E は Rust 側の 5 テストに対応する 7 入力系列を raw stdout/stderr と正常終了で比較し、別に Unix の対話モードで `COMMAND :` を入力前に受信してから X を送る。一括実行は 4,000,000,000 cycles、各子プロセスは 120 秒を上限とする。Rust 側の独立した出力期待値も維持する。CLI は内部 storage や PRNG の最終値を公開しないため、その一致は主張しない。Rust の `micro_trek_lifecycle::replay_initialization_continues_the_random_stream` は storage[192] の継続を、`micro_trek_turn_end::win_precedes_dock_and_attack_even_when_energy_and_days_are_exhausted` は勝利優先を直接検査する。実 CLI の勝利は未到達。6502 の `sim65_runtime::storage_all_cells_aliases_and_reinitialization` は 256 Cell と ring の非 alias を検査する。EOF と敗北・RETRY は上記 E2E で観測する。
+E2E は Rust 側の 5 テストに対応する 7 入力系列を raw stdout/stderr と正常終了で比較し、別に Linux の対話モードで `COMMAND :` を入力前に受信してから X を送る。一括実行は 4,000,000,000 cycles、各子プロセスは 120 秒を上限とする。Rust 側の独立した出力期待値も維持する。CLI は内部 storage や PRNG の最終値を公開しないため、その一致は主張しない。Rust の `micro_trek_lifecycle::replay_initialization_continues_the_random_stream` は storage[192] の継続を、`micro_trek_turn_end::win_precedes_dock_and_attack_even_when_energy_and_days_are_exhausted` は勝利優先を直接検査する。実 CLI の勝利は未到達。6502 の `sim65_runtime::storage_all_cells_aliases_and_reinitialization` は 256 Cell と ring の非 alias を検査する。EOF と敗北・RETRY は上記 E2E で観測する。
 
 正式 module の `ld65 -m/-Ln` 静的配置は ZP `$0000..$008c` (141 B)、CODE `$0229..$2069`、RODATA `$206a..$209a`、DATA `$209b..$20e1`、BSS `$20e2..$a78a`。arena `$2b9e..$8b9d` は 24,576 B、patch/completed bitset は各 3,072 B、定数表は 128×19 = 2,432 B、storage は 256×2 = 512 B。CPU stack は `$0100..$01ff`、cc65 software stack は `$f7f0..$ffef`、BSS 末尾から後者までの空きは 20,581 B。終端 wrap と静的重複はない。compile/runtime ZP overlay は 111 B、entry と両 status は独立した 4 B、cc65 共通 ZP は 26 B。アドレスは ABI ではない。
 
-上記 script は production と同じ module の link map/labels を生成し、sim65 `-c` で総 cycles を別実行で取得する。EOF 30,211,835、表示後 X 31,352,775、2 回敗北・RETRY 47,418,752 cycles。compile/runtime 相別は未計測。script は別途 frontend の一時コピーに成功した `fe_build_driver` の直後、runtime 開始前の `cc_cursor` を出力して停止する診断を挿入する。診断 binary の arena は `$2bad`、cursor は `$687f`、生成量 15,570 B、残り 9,006 B。ゲームは P0a を使わない。この値は診断 binary の測定であり production CLI の直接観測ではない。
+測定当時の script は同じ module の link map/labels を生成し、sim65 `-c` で総 cycles を別実行で取得した。現在の script は製品 build と source list が異なり、`compiler/session.s` が含まれないため、再利用時には確認が必要である。EOF 30,211,835、表示後 X 31,352,775、2 回敗北・RETRY 47,418,752 cycles。compile/runtime 相別は未計測。script は別途 frontend の一時コピーに成功した `fe_build_driver` の直後、runtime 開始前の `cc_cursor` を出力して停止する診断を挿入する。診断 binary の arena は `$2bad`、cursor は `$687f`、生成量 15,570 B、残り 9,006 B。ゲームは P0a を使わない。この値は診断 binary の測定であり production CLI の直接観測ではない。
 
 動的 CPU S、value/work stack、cc65 software SP の最大使用量は本測定では未計測で、全経路の動的安全性は未証明。静的非重複はその証明ではない。compile guard は S < 25 を検出するが runtime や IRQ/NMI に適用しない。この測定時点の共有 arena と template 専用テストは #528 によって廃止された。現行の arena と owner の検証は `sim65_backend` を参照。EC09 #463 の完了判定には、未測定の stack と相別 cycles、および実 CLI 勝利未到達を含めて評価が必要。
 

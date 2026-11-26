@@ -46,13 +46,7 @@ fn run(temp: &TestDir, source: &[u8], input: &[u8], extra: &[&str]) -> Output {
     fs::write(&input_path, input).unwrap();
     cli()
         .arg(source)
-        .args([
-            "--engine",
-            "mos6502",
-            "--cycle-limit",
-            "200000000",
-            "--runtime-input",
-        ])
+        .args(["--cycle-limit", "200000000", "--runtime-input"])
         .arg(input_path)
         .args(extra)
         .output()
@@ -64,30 +58,16 @@ fn argument_errors_precede_source_read() {
     let help = cli().arg("--help").output().unwrap();
     assert!(help.status.success());
     let text = String::from_utf8_lossy(&help.stdout);
-    assert!(text.contains("--engine") && text.contains("--raw-tty"));
-    assert!(text.contains("mos6502") && text.contains("Linux"));
+    assert!(!text.contains("--engine") && text.contains("--raw-tty"));
+    assert!(text.contains("6502") && text.contains("Linux"));
     for args in [
         vec!["missing.vtl", "--engine"],
         vec!["missing.vtl", "--engine", "bad"],
-        vec!["missing.vtl", "--engine", "sim65", "--engine", "mos6502"],
+        vec!["missing.vtl", "--engine", "sim65"],
+        vec!["missing.vtl", "--engine", "mos6502"],
         vec!["missing.vtl", "--raw-tty"],
         vec!["missing.vtl", "--raw-tty", "--raw-tty"],
         vec!["missing.vtl", "--interactive", "--raw-tty"],
-        vec![
-            "missing.vtl",
-            "--engine",
-            "sim65",
-            "--interactive",
-            "--raw-tty",
-        ],
-        vec!["missing.vtl", "--engine", "mos6502", "--raw-tty"],
-        vec![
-            "missing.vtl",
-            "--engine",
-            "mos6502",
-            "--interactive",
-            "--raw-tty",
-        ],
     ] {
         let result = cli().args(&args).stdin(Stdio::null()).output().unwrap();
         let stderr = String::from_utf8_lossy(&result.stderr);
@@ -105,18 +85,14 @@ fn argument_errors_precede_source_read() {
 fn oversized_source_is_rejected_before_build() {
     let temp = TestDir::new();
     let source = temp.source(&vec![b' '; 65536]);
-    let result = cli()
-        .arg(source)
-        .args(["--engine", "mos6502"])
-        .output()
-        .unwrap();
+    let result = cli().arg(source).output().unwrap();
     assert_eq!(result.status.code(), Some(2));
     assert!(result.stdout.is_empty());
     assert!(String::from_utf8_lossy(&result.stderr).contains("maximum supported length"));
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn batch_reads_binary_input_and_reports_guest_status() {
     let temp = TestDir::new();
     for (source, input, expected) in [
@@ -136,7 +112,7 @@ fn batch_reads_binary_input_and_reports_guest_status() {
     let source = temp.source(b"?=65");
     let limited = cli()
         .arg(source)
-        .args(["--engine", "mos6502", "--cycle-limit", "1"])
+        .args(["--cycle-limit", "1"])
         .output()
         .unwrap();
     assert_eq!(limited.status.code(), Some(126), "{limited:?}");
@@ -144,7 +120,7 @@ fn batch_reads_binary_input_and_reports_guest_status() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn fixed_seed_vector_matches_reference() {
     let temp = TestDir::new();
     let result = run(
@@ -158,8 +134,8 @@ fn fixed_seed_vector_matches_reference() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn product_engines_match_on_shared_programs() {
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn native_runs_shared_programs() {
     let temp = TestDir::new();
     let input = temp.0.join("shared-input.bin");
     fs::write(&input, [0, 0, 65]).unwrap();
@@ -171,8 +147,8 @@ fn product_engines_match_on_shared_programs() {
         ("?=42 A=", 130, &b""[..]),
     ] {
         let path = temp.source(source.as_bytes());
-        let mut outputs = Vec::new();
-        for engine in [None, Some("sim65"), Some("mos6502")] {
+        {
+            let engine = None::<&str>;
             let mut command = cli();
             command
                 .arg(&path)
@@ -184,9 +160,6 @@ fn product_engines_match_on_shared_programs() {
                     "--runtime-input",
                 ])
                 .arg(&input);
-            if let Some(engine) = engine {
-                command.args(["--engine", engine]);
-            }
             let output = command.output().unwrap();
             assert_eq!(
                 output.status.code(),
@@ -199,16 +172,13 @@ fn product_engines_match_on_shared_programs() {
             } else {
                 assert!(String::from_utf8_lossy(&output.stderr).contains("compilation failed"));
             }
-            outputs.push(output);
         }
-        assert_eq!(outputs[0].stdout, outputs[2].stdout);
-        assert_eq!(outputs[0].stderr, outputs[2].stderr);
     }
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn static_data_fixture_and_failures_match_all_engines() {
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn static_data_fixture_and_failures_match_reference() {
     #[derive(Clone, Copy, Debug)]
     enum Expected {
         Success(&'static [u8]),
@@ -261,10 +231,11 @@ fn static_data_fixture_and_failures_match_all_engines() {
                 );
             }
         }
-        for engine in ["sim65", "mos6502"] {
+        {
+            let engine = "native";
             let output = cli()
                 .arg(&path)
-                .args(["--engine", engine, "--cycle-limit", "200000000"])
+                .args(["--cycle-limit", "200000000"])
                 .output()
                 .unwrap();
             let diagnostic = String::from_utf8_lossy(&output.stderr);
@@ -297,9 +268,10 @@ fn static_data_fixture_and_failures_match_all_engines() {
         }
     }
     // Whole-program compilation must suppress even an earlier output statement.
-    for engine in ["sim65", "mos6502"] {
+    {
+        let engine = "native";
         let path = temp.source(b"?=42 .DATA:=[256]");
-        let output = cli().arg(path).args(["--engine", engine]).output().unwrap();
+        let output = cli().arg(path).output().unwrap();
         assert!(!output.status.success(), "{engine}: {output:?}");
         assert!(output.stdout.is_empty(), "{engine}: {output:?}");
         assert!(
@@ -310,8 +282,8 @@ fn static_data_fixture_and_failures_match_all_engines() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn constant_expressions_conform_across_all_engines() {
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn constant_expressions_conform_to_reference() {
     // Expected values are calculated independently of the reference implementation.
     let successes: &[(&str, &[u8], &[u8])] = &[
         ("layout", b".STATE:=1 .NEXT:=.STATE+1 .WIDTH:=8 .HEIGHT:=8 .SIZE:=.WIDTH*.HEIGHT .BASE:=.SIZE+7 .ALIAS:=.BASE ?=.NEXT ?=() ?=.SIZE ?=() ?=.BASE ?=() ?=.ALIAS", b"2\n64\n71\n71"),
@@ -360,20 +332,30 @@ fn constant_expressions_conform_across_all_engines() {
     let temp = TestDir::new();
     for (name, source, expected) in successes {
         let path = temp.source(source);
-        for engine in ["reference", "sim65", "mos6502"] {
-            let mut command = if engine == "reference" {
+        for is_reference in [true, false] {
+            let mut command = if is_reference {
                 Command::new(env!("CARGO_BIN_EXE_vtlxx"))
             } else {
                 cli()
             };
             command.arg(&path).stdin(Stdio::null());
-            if engine != "reference" {
-                command.args(["--engine", engine, "--cycle-limit", "200000000"]);
+            if !is_reference {
+                command.args(["--cycle-limit", "200000000"]);
             }
             let output = command.output().unwrap();
-            assert_eq!(output.status.code(), Some(0), "{name} {engine}: {output:?}");
-            assert_eq!(&output.stdout, expected, "{name} {engine}: {output:?}");
-            assert!(output.stderr.is_empty(), "{name} {engine}: {output:?}");
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{name} reference={is_reference}: {output:?}"
+            );
+            assert_eq!(
+                &output.stdout, expected,
+                "{name} reference={is_reference}: {output:?}"
+            );
+            assert!(
+                output.stderr.is_empty(),
+                "{name} reference={is_reference}: {output:?}"
+            );
         }
     }
     for (name, source, status) in failures.iter().copied().chain(std::iter::once((
@@ -382,22 +364,22 @@ fn constant_expressions_conform_across_all_engines() {
         None,
     ))) {
         let path = temp.source(source);
-        for engine in ["reference", "sim65", "mos6502"] {
-            let mut command = if engine == "reference" {
+        for is_reference in [true, false] {
+            let mut command = if is_reference {
                 Command::new(env!("CARGO_BIN_EXE_vtlxx"))
             } else {
                 cli()
             };
             command.arg(&path).stdin(Stdio::null());
-            if engine != "reference" {
-                command.args(["--engine", engine, "--cycle-limit", "200000000"]);
+            if !is_reference {
+                command.args(["--cycle-limit", "200000000"]);
             }
             let output = command.output().unwrap();
             let diagnostic = String::from_utf8_lossy(&output.stderr);
-            if engine == "reference" {
+            if is_reference {
                 assert!(
                     !output.status.success() && diagnostic.contains("Compile("),
-                    "{name} {engine}: {output:?}"
+                    "{name} reference={is_reference}: {output:?}"
                 );
                 assert_eq!(
                     output.stdout,
@@ -406,23 +388,23 @@ fn constant_expressions_conform_across_all_engines() {
                     } else {
                         &b""[..]
                     },
-                    "{name} {engine}: {output:?}"
+                    "{name} reference={is_reference}: {output:?}"
                 );
             } else {
                 assert!(
                     matches!(output.status.code(), Some(130 | 131)),
-                    "{name} {engine}: {output:?}"
+                    "{name} reference={is_reference}: {output:?}"
                 );
                 if let Some(code) = status {
                     assert_eq!(
                         output.status.code(),
                         Some(code),
-                        "{name} {engine}: {output:?}"
+                        "{name} reference={is_reference}: {output:?}"
                     );
                 }
                 assert!(
                     output.stdout.is_empty() && diagnostic.contains("compilation failed"),
-                    "{name} {engine}: {output:?}"
+                    "{name} reference={is_reference}: {output:?}"
                 );
             }
         }
@@ -430,36 +412,14 @@ fn constant_expressions_conform_across_all_engines() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
-fn default_and_explicit_mos_match_on_cycle_limit() {
-    let temp = TestDir::new();
-    let source = temp.source(b".LOOP:=1 ^=.LOOP #=.LOOP");
-    let mut outputs = Vec::new();
-    for engine in [None, Some("mos6502")] {
-        let mut command = cli();
-        command.arg(&source).args(["--cycle-limit", "100000"]);
-        if let Some(engine) = engine {
-            command.args(["--engine", engine]);
-        }
-        outputs.push(command.output().unwrap());
-    }
-    assert_eq!(outputs[0].status.code(), Some(126));
-    assert_eq!(outputs[0].status.code(), outputs[1].status.code());
-    assert_eq!(outputs[0].stdout, outputs[1].stdout);
-    assert_eq!(outputs[0].stderr, outputs[1].stderr);
-}
-
-#[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn batch_output_arrives_while_guest_is_running() {
     let temp = TestDir::new();
     let source = temp.source(b"?=\"prefix\" .LOOP:=1 ^=.LOOP #=.LOOP");
-    for engine in [None, Some("mos6502")] {
+    {
+        let engine = None::<&str>;
         let mut command = cli();
         command.arg(&source).args(["--cycle-limit", "1200000000"]);
-        if let Some(engine) = engine {
-            command.args(["--engine", engine]);
-        }
         let mut child = TimedChild(
             command
                 .stdin(Stdio::null())
@@ -489,7 +449,7 @@ fn batch_output_arrives_while_guest_is_running() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn batch_output_and_failures_preserve_prefix_and_diagnostics() {
     let temp = TestDir::new();
     for (source, limit, status, stdout, diagnostic) in [
@@ -534,7 +494,7 @@ fn batch_output_and_failures_preserve_prefix_and_diagnostics() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn batch_output_failure_stops_guest_before_cycle_limit() {
     let temp = TestDir::new();
     let source = temp.source(b"?=\"prefix\" .LOOP:=1 ^=.LOOP #=.LOOP");
@@ -556,7 +516,7 @@ fn batch_output_failure_stops_guest_before_cycle_limit() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn busy_try_obeys_cycle_limit() {
     let temp = TestDir::new();
     let source = temp.source(b".LOOP:=1 ^=.LOOP A=` #=.LOOP");
@@ -592,7 +552,7 @@ fn wait(child: &mut Child) -> std::process::ExitStatus {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_try_then_wait_streams_before_input() {
     let temp = TestDir::new();
     let source = temp.source(b"?=` ?=\"> \" A=$ ?=A B=$ ?=B");
@@ -631,14 +591,14 @@ fn interactive_try_then_wait_streams_before_input() {
 }
 
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_compilation_failure_does_not_wait_for_stdin() {
     let temp = TestDir::new();
     let source = temp.source(b"A=$+");
     let mut child = TimedChild(
         cli()
             .arg(source)
-            .args(["--engine", "mos6502", "--interactive"])
+            .arg("--interactive")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -660,7 +620,7 @@ fn interactive_compilation_failure_does_not_wait_for_stdin() {
 // Exercise the real example in the native CI path, with deadlines even if input
 // handling regresses into an endless polling loop.
 #[test]
-#[ignore = "requires ca65 and ld65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn game_1024_batch_matches_reference() {
     let temp = TestDir::new();
     let input = temp.0.join("1024-input.bin");
@@ -673,13 +633,7 @@ fn game_1024_batch_matches_reference() {
     let mut native = cli();
     native
         .arg(source)
-        .args([
-            "--engine",
-            "mos6502",
-            "--cycle-limit",
-            "200000000",
-            "--runtime-input",
-        ])
+        .args(["--cycle-limit", "200000000", "--runtime-input"])
         .arg(&input);
     let reference = output_with_deadline(&mut reference);
     let native = output_with_deadline(&mut native);
@@ -688,7 +642,47 @@ fn game_1024_batch_matches_reference() {
     assert_eq!(reference.stdout, native.stdout);
 }
 
+#[test]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn cycle_defaults_and_explicit_limits_apply_to_finite_workload() {
+    let temp = TestDir::new();
+    let input = temp.0.join("1024-input.bin");
+    fs::write(&input, b"hJkLrQ").unwrap();
+    let source = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/1024.vtl");
+    let mut outputs = Vec::new();
+    for (interactive, limit) in [
+        (false, None),
+        (true, Some("4000000")),
+        (false, Some("200000000")),
+        (true, None),
+    ] {
+        let mut command = cli();
+        command.arg(source).args(["--seed", "4660"]);
+        if interactive {
+            command.arg("--interactive").stdin(Stdio::piped());
+        } else {
+            command.arg("--runtime-input").arg(&input);
+        }
+        if let Some(limit) = limit {
+            command.args(["--cycle-limit", limit]);
+        }
+        outputs.push(output_with_input_and_deadline(
+            &mut command,
+            interactive.then_some(&b"hJkLrQ"[..]),
+        ));
+    }
+    assert_eq!(outputs[0].status.code(), Some(126), "{:?}", outputs[0]);
+    assert_eq!(outputs[1].status.code(), Some(126), "{:?}", outputs[1]);
+    assert!(outputs[2].status.success(), "{:?}", outputs[2]);
+    assert!(outputs[3].status.success(), "{:?}", outputs[3]);
+    assert_eq!(outputs[2].stdout, outputs[3].stdout);
+}
+
 fn output_with_deadline(command: &mut Command) -> Output {
+    output_with_input_and_deadline(command, None)
+}
+
+fn output_with_input_and_deadline(command: &mut Command, input: Option<&[u8]>) -> Output {
     let mut child = TimedChild(
         command
             .stdout(Stdio::piped())
@@ -696,6 +690,9 @@ fn output_with_deadline(command: &mut Command) -> Output {
             .spawn()
             .unwrap(),
     );
+    if let Some(input) = input {
+        child.0.stdin.take().unwrap().write_all(input).unwrap();
+    }
     let mut stdout = child.0.stdout.take().unwrap();
     let mut stderr = child.0.stderr.take().unwrap();
     let out = std::thread::spawn(move || {

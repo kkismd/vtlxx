@@ -38,7 +38,6 @@ impl Drop for TestDir {
 
 fn run_cli(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .args(args)
         .output()
         .unwrap()
@@ -51,7 +50,6 @@ fn run_program_with_input(temp: &TestDir, name: &str, source: &[u8], input: &[u8
     fs::write(&input_path, input).unwrap();
 
     Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(&source_path)
         .arg("--runtime-input")
         .arg(&input_path)
@@ -132,7 +130,7 @@ fn invalid_seed_arguments_are_rejected_before_reading_source_or_starting_cc65() 
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn compiles_native_source_and_reads_binary_runtime_input() {
     let temp = TestDir::new();
     let source = temp.0.join("program.vtl");
@@ -141,7 +139,6 @@ fn compiles_native_source_and_reads_binary_runtime_input() {
     fs::write(&input, [0, 0xff, 65]).unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(&source)
         .arg("--runtime-input")
         .arg(&input)
@@ -156,14 +153,13 @@ fn compiles_native_source_and_reads_binary_runtime_input() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn cycle_limit_option_is_passed_to_sim65() {
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn explicit_cycle_limit_stops_execution() {
     let temp = TestDir::new();
     let source = temp.0.join("cycle-limit.vtl");
     fs::write(&source, b"A=1").unwrap();
 
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(&source)
         .args(["--cycle-limit", "1"])
         .output()
@@ -174,7 +170,7 @@ fn cycle_limit_option_is_passed_to_sim65() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
     let temp = TestDir::new();
     let source = temp.0.join("random.vtl");
@@ -189,7 +185,6 @@ fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
     ];
     for (seed, expected) in cases {
         let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-            .args(["--engine", "sim65"])
             .arg(&source)
             .args(["--seed", &seed.to_string(), "--cycle-limit", "200000000"])
             .output()
@@ -206,26 +201,24 @@ fn cli_seed_matches_the_fixed_xorshift16_reference_vectors() {
             .output()
             .unwrap();
         assert!(rust.status.success(), "seed={seed}: {rust:?}");
-        assert_eq!(output.stdout, rust.stdout, "Rust/sim65 seed={seed}");
+        assert_eq!(output.stdout, rust.stdout, "Rust/native seed={seed}");
         let repeated = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-            .args(["--engine", "sim65"])
             .arg(&source)
             .args(["--seed", &seed.to_string(), "--cycle-limit", "200000000"])
             .output()
             .unwrap();
         assert!(repeated.status.success(), "seed={seed}: {repeated:?}");
-        assert_eq!(output.stdout, repeated.stdout, "sim65 repeat seed={seed}");
+        assert_eq!(output.stdout, repeated.stdout, "native repeat seed={seed}");
     }
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn cli_without_seed_uses_os_entropy_for_bang() {
     let temp = TestDir::new();
     let source = temp.0.join("os-entropy.vtl");
     fs::write(&source, b"A=! ?=A").unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(&source)
         .output()
         .unwrap();
@@ -242,7 +235,7 @@ fn cli_without_seed_uses_os_entropy_for_bang() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn cli_char_literals_execute_and_old_entropy_spelling_is_rejected() {
     let temp = TestDir::new();
     let output = run_program_with_input(
@@ -267,7 +260,7 @@ fn cli_char_literals_execute_and_old_entropy_spelling_is_rejected() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn runtime_input_primary_read_matches_waiting_input_semantics() {
     let temp = TestDir::new();
     let cases: &[RuntimeInputCase] = &[
@@ -301,7 +294,7 @@ fn runtime_input_primary_read_matches_waiting_input_semantics() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn removed_template_syntax_fails_before_runtime() {
     let temp = TestDir::new();
     for (index, form) in removed_templates::FORMS.iter().enumerate() {
@@ -318,7 +311,7 @@ fn removed_template_syntax_fails_before_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn dotted_constants_compile_and_execute_in_source_order() {
     let temp = TestDir::new();
     let cases: &[(&str, &str, &[u8])] = &[
@@ -371,7 +364,7 @@ fn dotted_constants_compile_and_execute_in_source_order() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn constant_table_accepts_128_entries_and_rejects_129() {
     let temp = TestDir::new();
     let definitions: String = (0..128).map(|i| format!(".N{i}:={i}+0\n")).collect();
@@ -383,7 +376,6 @@ fn constant_table_accepts_128_entries_and_rejects_129() {
             .collect();
         fs::write(&path, format!("{definitions}{references}")).unwrap();
         let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-            .args(["--engine", "sim65"])
             .arg(&path)
             .args(["--cycle-limit", "200000000"])
             .output()
@@ -394,7 +386,6 @@ fn constant_table_accepts_128_entries_and_rejects_129() {
     }
     fs::write(&path, format!("?=42\n{definitions}.EXTRA:=1\n")).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(&path)
         .args(["--cycle-limit", "200000000"])
         .output()
@@ -404,7 +395,7 @@ fn constant_table_accepts_128_entries_and_rejects_129() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn static_bytes_compile_and_resolve_nested_indices() {
     let temp = TestDir::new();
     let cases: &[(&str, &str, &[u8])] = &[
@@ -436,7 +427,7 @@ fn static_bytes_compile_and_resolve_nested_indices() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn static_bytes_share_the_constant_table_limit() {
     let temp = TestDir::new();
     let definitions: String = (0..127).map(|i| format!(".N{i}:={i}+0\n")).collect();
@@ -449,7 +440,7 @@ fn static_bytes_share_the_constant_table_limit() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn static_byte_index_nesting_is_bounded() {
     let temp = TestDir::new();
     let nested = |depth: usize| format!("{}0{}", ".DATA(".repeat(depth), ")".repeat(depth));
@@ -462,7 +453,7 @@ fn static_byte_index_nesting_is_bounded() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn invalid_static_byte_sources_do_not_start_runtime() {
     let temp = TestDir::new();
     let cases = [
@@ -512,7 +503,7 @@ fn invalid_static_byte_sources_do_not_start_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn static_byte_reads_report_out_of_range_at_runtime() {
     let temp = TestDir::new();
     for (index, source) in [
@@ -538,7 +529,7 @@ fn static_byte_reads_report_out_of_range_at_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn oversized_static_bytes_do_not_start_runtime() {
     let temp = TestDir::new();
     // Exceed the entire 24 KiB arena, while keeping the source framing valid.
@@ -553,7 +544,7 @@ fn oversized_static_bytes_do_not_start_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn dotted_constant_errors_do_not_start_runtime() {
     let temp = TestDir::new();
     let cases = [
@@ -633,7 +624,7 @@ fn dotted_constant_errors_do_not_start_runtime() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn dotted_constant_sources_match_both_implementations() {
     use vtlxx::Machine;
 
@@ -689,12 +680,12 @@ fn dotted_constant_sources_match_both_implementations() {
 }
 
 #[test]
+#[cfg(target_os = "linux")]
 fn oversized_source_is_rejected_before_toolchain_start() {
     let temp = TestDir::new();
     let source = temp.0.join("oversized.vtl");
     fs::write(&source, vec![b' '; u16::MAX as usize + 1]).unwrap();
     let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(&source)
         .output()
         .unwrap();
@@ -704,8 +695,22 @@ fn oversized_source_is_rejected_before_toolchain_start() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn while_rhs_runs_in_sim65_and_rejects_legacy_syntax() {
+#[cfg(not(target_os = "linux"))]
+fn execution_is_rejected_before_source_or_tool_access() {
+    let temp = TestDir::new();
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .arg(temp.0.join("missing.vtl"))
+        .env("PATH", &temp.0)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("supported only on Linux"));
+}
+
+#[test]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn while_rhs_runs_in_native_and_rejects_legacy_syntax() {
     let temp = TestDir::new();
     let success = run_program_with_input(&temp, "while-rhs", b"A=0 *=A<3 [ ?=A A=A+1 ] ?=A", &[]);
     assert!(success.status.success(), "{:?}", success.stderr);
@@ -718,7 +723,7 @@ fn while_rhs_runs_in_sim65_and_rejects_legacy_syntax() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn compile_stack_201_byte_fixture_matches_reference() {
     let temp = TestDir::new();
     let source = format!(
@@ -743,7 +748,7 @@ fn compile_stack_201_byte_fixture_matches_reference() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn literal_output_matches_reference_and_preserves_runtime_state() {
     let temp = TestDir::new();
     let cases: &[(&str, &str, &[u8])] = &[
@@ -779,7 +784,7 @@ fn literal_output_matches_reference_and_preserves_runtime_state() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn literal_output_crosses_chunk_boundaries() {
     let temp = TestDir::new();
     for length in [255, 256, 511] {
@@ -804,7 +809,7 @@ fn literal_output_crosses_chunk_boundaries() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn invalid_or_oversized_literals_do_not_start_runtime() {
     let temp = TestDir::new();
     for (index, source) in [
@@ -825,6 +830,7 @@ fn invalid_or_oversized_literals_do_not_start_runtime() {
             run_program_with_input(&temp, &format!("invalid-{index}"), source.as_bytes(), b"");
         assert!(!result.status.success(), "{source}: {result:?}");
         assert!(result.stdout.is_empty(), "{source}: {result:?}");
+        assert_eq!(result.status.code(), Some(130), "{source}: {result:?}");
         assert!(
             String::from_utf8_lossy(&result.stderr).contains("syntax error"),
             "{source}: {result:?}"
@@ -868,14 +874,13 @@ fn wait_bounded(child: &mut Child) -> std::process::ExitStatus {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_prompts_are_visible_before_each_input() {
     let temp = TestDir::new();
     let source = temp.0.join("prompt.vtl");
     fs::write(&source, b"$=62 $=32 A=$ ?=A $=62 $=32 B=$ ?=B").unwrap();
     let mut child = TimedChild(
         Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-            .args(["--engine", "sim65"])
             .arg(&source)
             .arg("--interactive")
             .stdin(Stdio::piped())
@@ -910,7 +915,7 @@ fn interactive_prompts_are_visible_before_each_input() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_literal_prompt_precedes_input() {
     let temp = TestDir::new();
     let source = temp.0.join("interactive-input.vtl");
@@ -921,7 +926,6 @@ fn interactive_literal_prompt_precedes_input() {
     .unwrap();
     let mut child = TimedChild(
         Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-            .args(["--engine", "sim65"])
             .arg(&source)
             .arg("--interactive")
             .stdin(Stdio::piped())
@@ -954,7 +958,7 @@ fn interactive_literal_prompt_precedes_input() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_input_bytes_eof_and_output_match_batch() {
     let temp = TestDir::new();
     let source_bytes = b"A=$ B=$ C=$ D=$ ?=A ?=B ?=C ?=D";
@@ -965,7 +969,6 @@ fn interactive_input_bytes_eof_and_output_match_batch() {
     fs::write(&source, source_bytes).unwrap();
     let mut child = TimedChild(
         Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-            .args(["--engine", "sim65"])
             .arg(&source)
             .arg("--interactive")
             .stdin(Stdio::piped())
@@ -989,14 +992,13 @@ fn interactive_input_bytes_eof_and_output_match_batch() {
 }
 
 #[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn interactive_early_exit_compile_failure_and_cycle_limit() {
     let temp = TestDir::new();
     let source = temp.0.join("early.vtl");
     fs::write(&source, b"?=42").unwrap();
     let mut child = TimedChild(
         Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-            .args(["--engine", "sim65"])
             .arg(&source)
             .arg("--interactive")
             .stdin(Stdio::piped())
@@ -1018,7 +1020,6 @@ fn interactive_early_exit_compile_failure_and_cycle_limit() {
     assert_eq!(output, b"42");
 
     let limited = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(&source)
         .args(["--interactive", "--cycle-limit", "1"])
         .stdin(Stdio::null())
@@ -1030,7 +1031,6 @@ fn interactive_early_exit_compile_failure_and_cycle_limit() {
 
     fs::write(&source, b"A=").unwrap();
     let invalid = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-        .args(["--engine", "sim65"])
         .arg(&source)
         .arg("--interactive")
         .stdin(Stdio::null())
@@ -1039,59 +1039,4 @@ fn interactive_early_exit_compile_failure_and_cycle_limit() {
     assert!(!invalid.status.success());
     assert!(invalid.stdout.is_empty());
     assert!(String::from_utf8_lossy(&invalid.stderr).contains("compilation failed"));
-}
-
-#[cfg(unix)]
-#[test]
-#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
-fn interactive_cycle_limit_arguments_are_forwarded_only_when_requested() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let temp = TestDir::new();
-    let source = temp.0.join("arguments.vtl");
-    let log = temp.0.join("sim65-args");
-    let wrapper = temp.0.join("sim65");
-    fs::write(&source, b"A=1").unwrap();
-    let real = Command::new("which").arg("sim65").output().unwrap();
-    assert!(real.status.success());
-    let real = String::from_utf8(real.stdout).unwrap();
-    fs::write(
-        &wrapper,
-        format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$SIM65_ARGS_LOG\"\nexec '{}' \"$@\"\n",
-            real.trim().replace('\'', "'\\''")
-        ),
-    )
-    .unwrap();
-    fs::set_permissions(&wrapper, fs::Permissions::from_mode(0o755)).unwrap();
-    let path = std::env::join_paths(
-        std::iter::once(temp.0.clone())
-            .chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
-    )
-    .unwrap();
-    for (extra, expected) in [
-        (vec!["--interactive"], None),
-        (
-            vec!["--interactive", "--cycle-limit", "4000000"],
-            Some("4000000"),
-        ),
-        (vec![], Some("4000000")),
-    ] {
-        let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
-            .args(["--engine", "sim65"])
-            .arg(&source)
-            .args(extra)
-            .env("PATH", &path)
-            .env("SIM65_ARGS_LOG", &log)
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{:?}", output.stderr);
-        let args = fs::read_to_string(&log).unwrap();
-        let args: Vec<_> = args.lines().collect();
-        match expected {
-            Some(limit) => assert!(args.windows(2).any(|w| w == ["-x", limit]), "{args:?}"),
-            None => assert!(!args.contains(&"-x"), "{args:?}"),
-        }
-    }
 }

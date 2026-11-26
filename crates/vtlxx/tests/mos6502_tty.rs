@@ -56,17 +56,11 @@ impl Terminal {
         self.spawn_mode(source, true)
     }
     fn spawn_mode(&self, source: &str, raw: bool) -> Child {
-        self.spawn_with_engine(source, raw, true)
-    }
-    fn spawn_with_engine(&self, source: &str, raw: bool, explicit_engine: bool) -> Child {
         fs::write(&self.path, source).unwrap();
         let fd = unsafe { libc::dup(self.slave.as_raw_fd()) };
         assert!(fd >= 0);
         let mut command = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"));
         command.arg(&self.path).arg("--interactive");
-        if explicit_engine {
-            command.args(["--engine", "mos6502"]);
-        }
         if raw {
             command.arg("--raw-tty");
         }
@@ -82,9 +76,9 @@ impl Terminal {
 }
 #[test]
 #[ignore = "requires ca65 and ld65 and a Linux PTY"]
-fn default_engine_raw_terminal_restores_after_input() {
+fn raw_terminal_restores_after_input() {
     let mut tty = Terminal::new();
-    let mut child = tty.spawn_with_engine("?=\">\" A=$ ?=A", true, false);
+    let mut child = tty.spawn_mode("?=\">\" A=$ ?=A", true);
     let output = read_prompt(&mut child);
     assert_eq!(
         attributes(tty.slave.as_raw_fd()).c_lflag & (libc::ICANON | libc::ECHO),

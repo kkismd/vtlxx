@@ -1,8 +1,11 @@
 use std::ffi::OsStr;
 use std::fs;
+#[cfg(target_os = "linux")]
 use std::io::{Read, Write};
 use std::path::Path;
+#[cfg(target_os = "linux")]
 use std::process::{Command, Output, Stdio};
+#[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
 const EXAMPLES_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples");
@@ -24,14 +27,13 @@ enum Disposition {
 #[derive(Clone, Copy, Debug)]
 struct ExampleCase {
     name: &'static str,
-    engine: &'static str,
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     disposition: Disposition,
 }
 
 const EXAMPLES: &[ExampleCase] = &[
     ExampleCase {
         name: "1024.vtl",
-        engine: "mos6502",
         disposition: Disposition::Portable {
             expected_stdout: None,
             cycle_limit: Some(256_000_000),
@@ -40,7 +42,6 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "eight_queens.vtl",
-        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(include_bytes!("fixtures/eight_queens_example_output.txt")),
             cycle_limit: Some(256_000_000),
@@ -49,7 +50,6 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "eight_queens_storage.vtl",
-        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(include_bytes!("fixtures/eight_queens_example_output.txt")),
             cycle_limit: Some(256_000_000),
@@ -58,7 +58,6 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "interactive_input.vtl",
-        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"ENTER ONE CHARACTER: ASCII: 65\n"),
             cycle_limit: None,
@@ -67,7 +66,6 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "mandelbrot.vtl",
-        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(include_bytes!("fixtures/mandelbrot_example_output.txt")),
             cycle_limit: Some(1_200_000_000),
@@ -76,7 +74,6 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "maze_dfs.vtl",
-        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"7\n"),
             cycle_limit: None,
@@ -85,7 +82,6 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "micro_trek.vtl",
-        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: None,
             cycle_limit: Some(4_000_000_000),
@@ -94,7 +90,6 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "rpn_evaluator.vtl",
-        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"7\n"),
             cycle_limit: None,
@@ -103,7 +98,6 @@ const EXAMPLES: &[ExampleCase] = &[
     },
     ExampleCase {
         name: "sim65_cli.vtl",
-        engine: "sim65",
         disposition: Disposition::Portable {
             expected_stdout: Some(b"42"),
             cycle_limit: None,
@@ -113,8 +107,7 @@ const EXAMPLES: &[ExampleCase] = &[
 ];
 
 #[test]
-#[ignore = "requires ca65, ld65, sim65, and Linux mos6502; run with --ignored"]
-fn registered_examples_match_the_rust_reference_when_portable() {
+fn manifest_matches_examples() {
     let examples_dir = Path::new(EXAMPLES_DIR);
     let mut actual_names = fs::read_dir(examples_dir)
         .unwrap_or_else(|error| panic!("read {}: {error}", examples_dir.display()))
@@ -142,7 +135,13 @@ fn registered_examples_match_the_rust_reference_when_portable() {
         manifest_names.windows(2).all(|pair| pair[0] != pair[1]),
         "duplicate manifest name"
     );
+}
 
+#[test]
+#[cfg(target_os = "linux")]
+#[ignore = "requires ca65, ld65, and Linux mos6502; run with --ignored"]
+fn registered_examples_match_the_rust_reference_when_portable() {
+    let examples_dir = Path::new(EXAMPLES_DIR);
     let mut failures = Vec::new();
     for case in EXAMPLES {
         if let Disposition::Deferred {
@@ -157,26 +156,14 @@ fn registered_examples_match_the_rust_reference_when_portable() {
             );
             continue;
         }
-        if case.name == "1024.vtl" && !cfg!(target_os = "linux") {
-            println!(
-                "1024.vtl: not run: mos6502 host requires Linux{}",
-                if cfg!(unix) {
-                    ""
-                } else {
-                    "; Rust CLI Try input also requires Unix"
-                }
-            );
-            continue;
-        }
         if let Err(error) = check_example(case, examples_dir) {
             eprintln!("{error}");
             failures.push(error);
         }
     }
-    if cfg!(target_os = "linux") {
+    {
         let moves = ExampleCase {
             name: "1024.vtl",
-            engine: "mos6502",
             disposition: Disposition::Portable {
                 expected_stdout: None,
                 cycle_limit: Some(256_000_000),
@@ -195,6 +182,7 @@ fn registered_examples_match_the_rust_reference_when_portable() {
     );
 }
 
+#[cfg(target_os = "linux")]
 fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> {
     let source = examples_dir.join(case.name);
     let Disposition::Portable {
@@ -210,7 +198,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
         &source,
         None,
         runtime_input,
-        None,
+        false,
     )
     .map_err(|error| format!("{}: {error}", case.name))?;
     if rust.status.code().is_none() {
@@ -230,7 +218,7 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
         &source,
         cycle_limit,
         runtime_input,
-        Some(case.engine),
+        true,
     )
     .map_err(|error| format!("{}: {error}", case.name))?;
     if target.status.code().is_none() {
@@ -292,18 +280,16 @@ fn check_example(case: &ExampleCase, examples_dir: &Path) -> Result<(), String> 
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn run(
     binary: &str,
     source: &Path,
     cycle_limit: Option<u32>,
     runtime_input: Option<&[u8]>,
-    engine: Option<&str>,
+    target: bool,
 ) -> Result<Output, String> {
     let mut command = Command::new(binary);
     command.arg(source);
-    if let Some(engine) = engine {
-        command.args(["--engine", engine]);
-    }
     if source
         .file_name()
         .is_some_and(|name| name == "micro_trek.vtl")
@@ -313,7 +299,7 @@ fn run(
     if let Some(cycle_limit) = cycle_limit {
         command.arg("--cycle-limit").arg(cycle_limit.to_string());
     }
-    if engine.is_some() && runtime_input.is_some() {
+    if target && runtime_input.is_some() {
         let fixture = if runtime_input
             == Some(include_bytes!("fixtures/interactive_input.txt").as_slice())
         {
@@ -334,7 +320,7 @@ fn run(
         );
     }
     if source.file_name().is_some_and(|name| name == "1024.vtl") {
-        if engine.is_none() {
+        if !target {
             let fixture = if runtime_input
                 == Some(include_bytes!("fixtures/1024_quit.txt").as_slice())
             {
@@ -353,9 +339,7 @@ fn run(
         }
         return output_with_deadline(&mut command, binary);
     }
-    if engine.is_none()
-        && let Some(input) = runtime_input
-    {
+    if !target && let Some(input) = runtime_input {
         let mut child = command
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -380,6 +364,7 @@ fn run(
 
 // Drain both pipes concurrently so a full pipe cannot prevent completion.
 // Always reap the child, including on timeout or a wait error.
+#[cfg(target_os = "linux")]
 fn output_with_deadline(command: &mut Command, binary: &str) -> Result<Output, String> {
     let mut child = command
         .stdout(Stdio::piped())
@@ -427,6 +412,7 @@ fn output_with_deadline(command: &mut Command, binary: &str) -> Result<Output, S
     })
 }
 
+#[cfg(target_os = "linux")]
 fn assert_eight_queens_output(name: &str, output: &[u8]) -> Result<(), String> {
     let lines = output.split(|byte| *byte == b'\n').collect::<Vec<_>>();
     if lines.len() != 94 || !lines.last().is_some_and(|line| line.is_empty()) || lines[92] != b"92"
@@ -455,6 +441,7 @@ fn assert_eight_queens_output(name: &str, output: &[u8]) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
 fn describe_bytes(bytes: &[u8]) -> String {
     format!("{} bytes ({bytes:?})", bytes.len())
 }
