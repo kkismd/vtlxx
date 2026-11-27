@@ -29,6 +29,7 @@ Rust package `vtlxx`、path `crates/vtlxx/`、CLI `vtlxx` / `vtlxx6502` は正�
 - [#191](https://github.com/kkismd/vtlxx/issues/191): anonymous block / structured control の設計
 - [#265](https://github.com/kkismd/vtlxx/issues/265): anonymous block の `[ ... ]` 一本化
 - [#280](https://github.com/kkismd/vtlxx/issues/280): value stack 接続記号を `~` に変更
+- [#679](https://github.com/kkismd/vtlxx/issues/679): 16進リテラルと文字入出力の位置による判定
 - [#634](https://github.com/kkismd/vtlxx/issues/634): 名前付き整数の宣言式。[#469](https://github.com/kkismd/vtlxx/issues/469) の右辺をリテラル1個に限る判断を置換し、その他の契約と [#255](https://github.com/kkismd/vtlxx/issues/255) の定義順を継承
 - [#217](https://github.com/kkismd/vtlxx/issues/217): target profile ごとの indexed storage の容量とアドレス規則
 - [#433](https://github.com/kkismd/vtlxx/issues/433), [#528](https://github.com/kkismd/vtlxx/issues/528): SourceProcedure・手続テンプレートの廃止
@@ -144,7 +145,7 @@ cargo test -p vtlxx --test native6502_cli -- --ignored
 
 ### Cell
 
-実行時の値は signed 16-bit integer (`i16`) です。
+実行時の値は signed 16-bit integer (`i16`) です。16進リテラルは `0..65535` の raw 16-bit pattern を同じ Cell に格納します。例えば `$7FFF` は `32767`、`$8000` は `-32768`、`$ACE1` は `-21279`、`$CAFE` は `-13570`、`$FFFF` は `-1` です（採用 ADR [#679](https://github.com/kkismd/vtlxx/issues/679)）。
 
 `+`, `-`, `*` は 16 bit で wrap します。
 
@@ -263,12 +264,23 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 
 | surface | 意味 |
 | --- | --- |
-| `123`, `-7` | integer literal |
+| `123`, `-7`, `$ACE1` | 十進または16進 integer literal |
+| `$` | 待機文字入力 |
 | `A` .. `Z` | register read |
 | `!` | PRNG PrimaryRead（xorshift16 から次の値を読む） |
 | `'c'` | ASCII文字リテラル（文字 `c` の byte 値） |
 | `@(expr)` | storage read |
 | `(expr)` | grouping |
+
+16進リテラルは `$` に続く ASCII 大文字の `0..9` / `A..F` を1〜4桁で書きます。先頭の0も1桁として数え、5桁以上、小文字、符号付き16進数は使えません。十進リテラルの範囲は従来どおり `-32768..32767` です。通常式で値を読む位置の `$` は、直後が16進数字ならリテラル、そうでなければ待機文字入力です。`$-1` は入力値から1を引く式です。名前付き整数、静的バイト列、直接ラベルのリテラル位置では裸の `$` は使えません。
+
+```vtl
+  A=$       ; 1 byte 入力（NULを読み捨て、EOFは-1）
+  ?=A       ; 入力値を十進表示
+  $=$41     ; 文字 A を出力
+```
+
+文字列とコメント内の `$` はリテラルや入力として解釈しません。
 
 主な binary operator:
 
@@ -323,7 +335,8 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 .WIDTH := 8
 .HEIGHT := 8
 .SIZE := .WIDTH*.HEIGHT
-.BASE := .SIZE+7
+.BASE := $CAFE
+.NEXT := .BASE+$1
 .END := .BASE+.SIZE-1
 .LOOP := 1
   A=.BASE
@@ -331,7 +344,7 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
   #=.LOOP
 ```
 
-名前本体は ASCII 大文字で始まる 2〜16 byte の `[A-Z][A-Z0-9_]+` で、接頭の `.` は長さに含めず、名前表にも保存しません。1文字の `A`〜`Z` は従来どおり register です。右辺には符号付き十進リテラルまたは定義済み整数名を1個以上書き、`+`、`-`、`*` でつなげられます。各リテラルは `-32768..32767` の範囲で、単項 minus はリテラルにのみ使えます。演算子に優先順位はなく左から評価し、各演算は signed 16-bit Cell で wrap します。例えば `2+3*4` は `20`、`32767+1` は `-32768` です。
+名前本体は ASCII 大文字で始まる 2〜16 byte の `[A-Z][A-Z0-9_]+` で、接頭の `.` は長さに含めず、名前表にも保存しません。1文字の `A`〜`Z` は従来どおり register です。右辺には符号付き十進リテラル、16進リテラルまたは定義済み整数名を1個以上書き、`+`、`-`、`*` でつなげられます。十進リテラルは `-32768..32767` の範囲で、負号を付けられるのは十進リテラルだけです。演算子に優先順位はなく左から評価し、各演算は signed 16-bit Cell で wrap します。例えば `2+3*4` は `20`、`32767+1` は `-32768` です。
 
 右辺の途中に空白・タブ・改行は入れられません。括弧、除算、剰余、比較、文字リテラル、register、入出力、乱数、stack、静的バイト列名や添字は使えません。例えば `.AA:=1 +2`、`.BB:=(1+2)`、`.CC:=-.AA` は不正です。これは通常式の grouping や除余を制限するものではありません。静的バイト列の要素に式や定数名を使うこともできません。
 
@@ -348,10 +361,11 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 ```vtl
 .WIDTH := 5
 .LEVEL := ["#####" "# @ #" "#$ .#"]
+.PATTERN := [$00, $18 " " $00FF]
 $=.LEVEL(0) $=.LEVEL(.WIDTH+2) ?=()
 ```
 
-これは `#@` と改行を出力します。要素は十進数 `0..255` または印字可能 ASCII の二重引用文字列で、空列も使えます。空白・改行または comma で区切り、文字列外の `;` は行末までコメントです。文字列に escape や改行は使えません。要素はそのまま連結され、改行や終端 byte は追加されません。`[` は `:=` と同じ物理行に置き、内容は複数行にできます。長さは最大 32768 byte で、実際の target 容量にも制限されます。
+これは `#@` と改行を出力します。要素は十進数または16進数の `0..255`（`$00FF` は可、`$0100` と `$FFFF` は不可）、または印字可能 ASCII の二重引用文字列で、空列も使えます。空白・改行または comma で区切り、文字列外の `;` は行末までコメントです。文字列に escape や改行は使えません。要素はそのまま連結され、改行や終端 byte は追加されません。`[` は `:=` と同じ物理行に置き、内容は複数行にできます。長さは最大 32768 byte で、実際の target 容量にも制限されます。
 
 添字は 0 始まりで、読み取った byte は符号なし `0..255` の Cell になります。負の添字、長さ以上の添字、空列の読み取りは runtime error です。失敗した読み取りは添字を含む stack を変更しません（添字式の先行する副作用は残ります）。可変 Cell の循環 storage `@` と異なり、静的バイト列は書き換えや循環を行いません。
 
@@ -400,7 +414,7 @@ signed decimal text を出力します。
 ### Character output
 
 ```vtl
-  $=65
+  $=$41
 ```
 
 Cell の low 8 bits を 1 byte として出力します。この例は `A` を出力します。
@@ -487,12 +501,12 @@ RHS の先頭に `~` を置くと、既存 stack top を最初の value とし�
   A=A+1
 ```
 
-label は decimal `0..32767` です。同じ executable owner 内で一意でなければなりません。
+直接数値ラベルには十進または16進リテラルを使い、範囲は `0..32767` です（`$7FFF` は可、`$8000` と `$FFFF` は不可）。定義済みの名前付き整数も指定できます。同じ executable owner 内で一意でなければなりません。
 
 ### Unconditional jump
 
 ```vtl
-  #=10
+  #=$A
 ```
 
 同じ owner の numeric label へ jump します。forward / backward の両方を使えます。

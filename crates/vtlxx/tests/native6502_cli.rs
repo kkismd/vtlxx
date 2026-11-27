@@ -714,6 +714,84 @@ fn dotted_constant_sources_match_both_implementations() {
 }
 
 #[test]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn hexadecimal_sources_match_reference() {
+    use std::io::Cursor;
+    use vtlxx::Machine;
+
+    let temp = TestDir::new();
+    let cases: &[(&str, &str, &[u8], &[u8])] = &[
+        (
+            "values",
+            ".NUM:=$7FFF+$1 .CALC:=$2+$3*$4 .DATA:=[\"AB\", $0 $A, $00FF] ?=$7FFF ?=\",\" ?=$8000 ?=\",\" ?=$FFFF ?=\",\" ?=.NUM ?=\",\" ?=.CALC ?=\",\" ?=.DATA(0) ?=\",\" ?=.DATA(1) ?=\",\" ?=.DATA(2) ?=\",\" ?=.DATA(3) ?=\",\" ?=.DATA(4)",
+            b"",
+            b"32767,-32768,-1,-32768,20,65,66,0,10,255",
+        ),
+        (
+            "labels",
+            "#=$7FFF ?=9 ^=$7FFF ?=1 #=$0 ?=9 ^=$0 ?=2",
+            b"",
+            b"12",
+        ),
+        (
+            "input",
+            "A=$ B=$+1 C=$==65 D=$CAFE $=$41 $=$ E=$ F=$ ?=A ?=\",\" ?=B ?=\",\" ?=C ?=\",\" ?=D ?=\",\" ?=E ?=\",\" ?=F",
+            &[0, 65, 66, 65, 67, 68],
+            b"AC65,67,1,-13570,68,-1",
+        ),
+    ];
+    for &(name, source, input, expected) in cases {
+        let mut machine = Machine::new();
+        machine.set_input(Cursor::new(input.to_vec()));
+        machine.execute_source(source).unwrap();
+        let target = run_program_with_input(&temp, name, source.as_bytes(), input);
+        assert!(target.status.success(), "{name}: {target:?}");
+        assert_eq!(machine.output(), expected, "{name}");
+        assert_eq!(target.stdout, machine.output(), "{name}");
+    }
+
+    for (index, invalid) in [
+        "A=$10000",
+        "A=$00000",
+        "A=$ff",
+        "A=$1G",
+        "A=$1$2",
+        "A=-$1",
+        "A=+$1",
+        ".NUM:=$",
+        ".NUM:=-$1",
+        ".NUM:=$00000",
+        ".NUM:=$a",
+        ".NUM:=$1G",
+        ".DATA:=[$]",
+        ".DATA:=[$0100]",
+        ".DATA:=[$FFFF]",
+        ".DATA:=[$ff]",
+        "^=$",
+        "#=$",
+        "^=$8000",
+        "#=$FFFF",
+        "^=$00000",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let source = format!("?=42 &=p [ ?=1 ] {invalid}");
+        let mut machine = Machine::new();
+        assert!(machine.execute_source(&source).is_err(), "{source}");
+        assert_eq!(machine.output(), b"42", "{source}");
+        let target = run_program_with_input(
+            &temp,
+            &format!("hex-shared-error-{index}"),
+            source.as_bytes(),
+            b"",
+        );
+        assert!(!target.status.success(), "{source}: {target:?}");
+        assert!(target.stdout.is_empty(), "{source}: {target:?}");
+    }
+}
+
+#[test]
 #[cfg(target_os = "linux")]
 fn oversized_source_is_rejected_before_toolchain_start() {
     let temp = TestDir::new();
