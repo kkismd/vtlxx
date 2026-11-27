@@ -1049,6 +1049,59 @@ fn malformed_source_never_starts_runtime() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn hexadecimal_literals_share_cell_and_existing_input_semantics() {
+    expect(
+        "?=$0 ?=$A ?=$00FF ?=$7FFF ?=$8000 ?=$ACE1 ?=$CAFE ?=$FFFF",
+        0,
+        b"01025532767-32768-21279-13570-1Z",
+    );
+    expect(
+        ".NUM:=$FFFF+$1 .DATA:=[$0,10,$00FF] ?=.NUM ?=.DATA(1) ?=.DATA(2)",
+        0,
+        b"010255Z",
+    );
+    expect("#=$10 ?=9 ^=$10 ?=$A+1 %=($A==10) [ ?=7 ]", 0, b"117Z");
+    expect("^=$7FFF ; $FFFF is a comment", 0, b"Z");
+    let output = build_and_run_read_char(b"$=$41 A=$+1 B=$==65 ?=A ?=B ?=$", &[64, 65, 66]);
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"A65166", "{output:?}");
+    let output = build_and_run_read_char(b"$=$ $=$41", b"B");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"BA", "{output:?}");
+    let output = build_and_run_read_char(b"A=$41 ?=A B=$", b"Z");
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"65", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn malformed_hexadecimal_literals_fail_before_runtime() {
+    for source in [
+        "A=$00000",
+        "A=$12345",
+        "A=$a",
+        "A=$1G",
+        "A=+$41",
+        "A=-$41",
+        ".NUM:=$",
+        ".NUM:=$00000",
+        ".NUM:=-$1",
+        ".DATA:=[$]",
+        ".DATA:=[$0100]",
+        ".DATA:=[$FFFF]",
+        "^=$",
+        "#=$",
+        "^=$8000",
+        "#=$FFFF",
+    ] {
+        let result = build_and_run(format!("?=42 {source}").as_bytes(), b"Z");
+        assert!(!result.status.success(), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn primary_read_waits_discards_nul_and_maps_ff_and_eof() {
     let output = build_and_run_read_char(
         b"A=$ B=$ C=$ D=$ E=$ ?=A ?=B ?=C ?=D ?=E",

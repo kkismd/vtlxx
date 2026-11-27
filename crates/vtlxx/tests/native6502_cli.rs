@@ -261,6 +261,40 @@ fn cli_char_literals_execute_and_old_entropy_spelling_is_rejected() {
 
 #[test]
 #[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn hexadecimal_literals_and_input_execute_in_the_cli() {
+    let temp = TestDir::new();
+    assert_runtime_input_output(&temp, "hex", b".NUM:=$FFFF+$1 .DATA:=[$0,10,$00FF] #=$10 ?=9 ^=$10 ?=.NUM ?=.DATA(1) ?=.DATA(2) ?=$7FFF ?=$8000 ?=$ACE1 ?=$CAFE ?=$FFFF $=$41 A=$ ?=A", b"B", b"01025532767-32768-21279-13570-1A66");
+    for (index, source) in [
+        "A=$00000",
+        "A=$a",
+        "A=$1G",
+        "A=+$1",
+        ".NUM:=$",
+        ".NUM:=-$1",
+        ".DATA:=[$]",
+        ".DATA:=[$0100]",
+        ".DATA:=[$FFFF]",
+        "^=$",
+        "#=$8000",
+        "^=$FFFF",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let source = format!("?=42 {source}");
+        let result = run_program_with_input(
+            &temp,
+            &format!("hex-invalid-{index}"),
+            source.as_bytes(),
+            b"Z",
+        );
+        assert!(!result.status.success(), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn runtime_input_primary_read_matches_waiting_input_semantics() {
     let temp = TestDir::new();
     let cases: &[RuntimeInputCase] = &[

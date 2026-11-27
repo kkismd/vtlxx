@@ -1016,7 +1016,15 @@ constant_expression_value:
     beq @name
     lda #1
     sta fe_defer_error
+    lda look_byte
+    cmp #'$'
+    bne :+
+    jsr take
+    jsr parse_hex
+    jmp @parsed
+:
     jsr parse_literal
+@parsed:
     lda #0
     sta fe_defer_error
     ; parse_literal treats a non-byte immediately after '-' as literal error.
@@ -1080,11 +1088,18 @@ static_definition:
     lda look_byte
     cmp #'"'
     beq @string
+    cmp #'$'
+    beq @hex
     cmp #'0'
     jcc syntax_error
     cmp #'9'+1
     jcs syntax_error
     jsr parse_literal
+    jmp @byte
+@hex:
+    jsr take
+    jsr parse_hex
+@byte:
     lda literal+1
     jne literal_error
     lda literal
@@ -1198,9 +1213,13 @@ expect_comma:
 resolve_label_operand:
     jsr peek
     lda look_state
+    cmp #3
+    jeq source_error
     cmp #1
     jne syntax_error
     lda look_byte
+    cmp #'$'
+    beq @hex
     cmp #'-'
     beq @decimal
     cmp #'0'
@@ -1224,6 +1243,10 @@ resolve_label_operand:
     jsr parse_literal
     lda negative
     bne @bad_range
+    jmp @range
+@hex:
+    jsr take
+    jsr parse_hex
 @range:
     ; A set high bit is either a negative named value or >32767.
     lda literal+1
@@ -1625,6 +1648,19 @@ value:
     jmp cc_push_const
 @read_char:
     jsr take
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    bne @input
+    jsr hex_digit
+    bcc @input
+    jsr parse_hex
+    lda literal
+    ldx literal+1
+    jmp cc_push_const
+@input:
     lda #<rt_read_char
     ldx #>rt_read_char
     jmp cc_call
@@ -1709,6 +1745,68 @@ close_group:
     cmp #')'
     jne syntax_error
     jmp take
+
+; Convert look_byte to a nibble in A, carry set if it is a hex digit.
+hex_digit:
+    lda look_byte
+    cmp #'0'
+    bcc @no
+    cmp #'9'+1
+    bcc @decimal
+    cmp #'A'
+    bcc @no
+    cmp #'F'+1
+    bcs @no
+    sec
+    sbc #'A'-10
+    sec
+    rts
+@decimal:
+    sec
+    sbc #'0'
+    sec
+    rts
+@no:
+    clc
+    rts
+
+; '$' already consumed. negative is free scratch except in decimal labels.
+parse_hex:
+    lda #0
+    sta literal
+    sta literal+1
+    sta negative
+@next:
+    jsr peek
+    lda look_state
+    cmp #3
+    jeq source_error
+    cmp #1
+    bne @end
+    jsr hex_digit
+    bcc @end
+    ldx negative
+    cpx #4
+    jcs literal_error
+    sta digit
+    asl literal
+    rol literal+1
+    asl literal
+    rol literal+1
+    asl literal
+    rol literal+1
+    asl literal
+    rol literal+1
+    lda literal
+    ora digit
+    sta literal
+    inc negative
+    jsr take
+    jmp @next
+@end:
+    lda negative
+    jeq literal_error
+    rts
 
 ; Signed decimal literal. Check before multiply so overflow cannot wrap.
 parse_literal:
