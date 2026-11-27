@@ -349,6 +349,33 @@ fn failure_returns_to_caller_for_truncated_input_and_eof_classification() {
         cases.push((truncated, 65));
         cases.push((frame(bytes), frame_end_status));
     }
+    // A transport failure after either '$' or a hexadecimal digit is not
+    // the same as reaching the declared frame end, in all four contexts.
+    for source in [
+        "A=$",
+        "A=$A",
+        ".NUM:=$",
+        ".NUM:=$A",
+        ".DATA:=[$",
+        ".DATA:=[$A",
+        "^=$",
+        "^=$A",
+        "#=$",
+        "#=$A",
+    ] {
+        let bytes = source.as_bytes();
+        let mut truncated = ((bytes.len() + 1) as u16).to_le_bytes().to_vec();
+        truncated.extend_from_slice(bytes);
+        cases.push((truncated, 65));
+    }
+    for source in [".NUM:=$", ".DATA:=[$", "^=$", "#=$"] {
+        let result = run_probe(&probe, source.as_bytes());
+        assert!(
+            matches!(result.status.code(), Some(66 | 67)),
+            "{source}: {result:?}"
+        );
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
     for (input, expected) in cases {
         let result = run_probe_input(&probe, &input);
         assert_eq!(
