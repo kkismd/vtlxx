@@ -2,6 +2,29 @@ use crate::executable::RuntimeError;
 
 pub type Cell = i16;
 
+/// Scan the digits after `$`, leaving the first non-hex character to the caller.
+pub(crate) fn scan_hex(chars: impl Iterator<Item = char>) -> Result<(u16, usize), ()> {
+    let mut value = 0u16;
+    let mut count = 0;
+    for c in chars {
+        let digit = match c {
+            '0'..='9' => c as u16 - '0' as u16,
+            'A'..='F' => c as u16 - 'A' as u16 + 10,
+            _ => break,
+        };
+        count += 1;
+        if count > 4 {
+            return Err(());
+        }
+        value = (value << 4) | digit;
+    }
+    if count == 0 {
+        Err(())
+    } else {
+        Ok((value, count))
+    }
+}
+
 pub(crate) fn add(lhs: Cell, rhs: Cell) -> Cell {
     lhs.wrapping_add(rhs)
 }

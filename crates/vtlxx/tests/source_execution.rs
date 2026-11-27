@@ -1,5 +1,96 @@
 use vtlxx::{CompileError, Machine, RuntimeError, SourceError};
 
+#[test]
+fn hex_literals_work_in_all_constant_positions() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(concat!(
+            ".AA:=$E000+1 .BB:=$2+$3*$4 ",
+            ".DATA:=[\"A\",$00 $A $00FF 255] ",
+            "A=$0 B=$A C=$00FF D=$7FFF E=$8000 F=$ACE1 G=$CAFE H=$FFFF ",
+            "I=.AA J=.BB K=.DATA(0) L=.DATA(1) M=.DATA(2) N=.DATA(3) ",
+            "O=$FFFF==-1 P=$2+$3*$4 #=$10 P=99 ^=$10 Q=1; comment"
+        ))
+        .unwrap();
+    for (index, value) in [
+        0, 10, 255, 32767, -32768, -21279, -13570, -1, -8191, 20, 65, 0, 10, 255, 1, 20, 1,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert_eq!(machine.register(index), Some(value), "register {index}");
+    }
+    machine.execute_source("#=$7FFF ^=$7FFF R=$41").unwrap();
+    assert_eq!(machine.register(17), Some(65));
+}
+
+#[test]
+fn malformed_hex_and_out_of_range_literals_fail_compilation() {
+    for literal in [
+        "$00000", "$10000", "$12345", "$a", "$ff", "$1f", "$1G", "$$", "-$1", "+$1", "$1$2",
+    ] {
+        for source in [
+            format!("A={literal}"),
+            format!(".AA:={literal}"),
+            format!(".AA:=[{literal}]"),
+            format!("^={literal}"),
+            format!("#={literal}"),
+        ] {
+            assert!(
+                matches!(
+                    Machine::new().execute_source(&source),
+                    Err(SourceError::Compile(_))
+                ),
+                "{source}"
+            );
+        }
+    }
+    for source in [
+        ".AA:=$",
+        ".AA:=[$]",
+        "^=$",
+        "#=$",
+        ".AA:=[$0100]",
+        ".AA:=[$FFFF]",
+        "^=$8000",
+        "#=$FFFF",
+        ".AA:=[$1\"x\"]",
+        ".AA:=$1Afoo",
+    ] {
+        assert!(
+            matches!(
+                Machine::new().execute_source(source),
+                Err(SourceError::Compile(_))
+            ),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn malformed_hex_preserves_committed_effects_and_discards_failed_owner() {
+    for bad in [".AA:=$10000", ".AA:=[$0100]", "&=q [ A=$10000 ]"] {
+        let mut machine = Machine::new();
+        let source = format!("A=$41 &=p [ B=$42 ] {bad}");
+        assert!(
+            matches!(
+                machine.execute_source(&source),
+                Err(SourceError::Compile(_))
+            ),
+            "{source}"
+        );
+        assert_eq!(machine.register(0), Some(65));
+        machine.execute_source("p=()").unwrap();
+        assert_eq!(machine.register(1), Some(66));
+        if bad.starts_with("&=q") {
+            assert!(matches!(
+                machine.execute_source("q=()"),
+                Err(SourceError::Compile(_))
+            ));
+        }
+    }
+}
+
 #[path = "common/removed_templates.rs"]
 mod removed_templates;
 

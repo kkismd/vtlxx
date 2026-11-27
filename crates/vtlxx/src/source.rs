@@ -155,6 +155,12 @@ impl NameTable {
 
     fn integer_value(&self, expression: &str, pos: &mut usize) -> Result<i16, CompileError> {
         let bytes = expression.as_bytes();
+        if bytes.get(*pos) == Some(&b'$') {
+            let (value, count) =
+                cell::scan_hex(expression[*pos + 1..].chars()).map_err(|_| CompileError::Syntax)?;
+            *pos += count + 1;
+            return Ok(value as i16);
+        }
         if bytes.get(*pos) == Some(&b'.') {
             *pos += 1;
             let start = *pos;
@@ -410,7 +416,7 @@ impl<'a> SourceReader<'a> {
                     self.read_array_string(&mut elements)?;
                     last = Last::Element;
                 }
-                Some(byte) if byte.is_ascii_digit() => {
+                Some(byte) if byte.is_ascii_digit() || byte == b'$' => {
                     if last == Last::Element && !separated {
                         return Err(CompileError::Syntax);
                     }
@@ -444,15 +450,26 @@ impl<'a> SourceReader<'a> {
 
     fn read_array_number(&mut self, elements: &mut Vec<u8>) -> Result<(), CompileError> {
         let mut value: u32 = 0;
-        while let Some(byte) = self.array_byte() {
-            if !byte.is_ascii_digit() {
-                break;
-            }
-            value = value * 10 + u32::from(byte - b'0');
+        if self.array_byte() == Some(b'$') {
+            self.bump_array_byte();
+            let (raw, count) = cell::scan_hex(self.lines[self.line][self.offset..].chars())
+                .map_err(|_| CompileError::Syntax)?;
+            value = u32::from(raw);
             if value > 255 {
                 return Err(CompileError::Syntax);
             }
-            self.bump_array_byte();
+            self.offset += count;
+        } else {
+            while let Some(byte) = self.array_byte() {
+                if !byte.is_ascii_digit() {
+                    break;
+                }
+                value = value * 10 + u32::from(byte - b'0');
+                if value > 255 {
+                    return Err(CompileError::Syntax);
+                }
+                self.bump_array_byte();
+            }
         }
         elements.push(value as u8);
         if elements.len() > MAX_STATIC_DATA_LEN {
@@ -700,7 +717,14 @@ fn compile_statement(
                     .map_err(|_| CompileError::Builder)?;
                 return Ok(());
             }
-            let label: i32 = if rhs.bytes().all(|byte| byte.is_ascii_digit()) && !rhs.is_empty() {
+            let label: i32 = if let Some(hex) = rhs.strip_prefix('$') {
+                let (value, count) =
+                    cell::scan_hex(hex.chars()).map_err(|_| CompileError::Syntax)?;
+                if count != hex.len() || value > i16::MAX as u16 {
+                    return Err(CompileError::Syntax);
+                }
+                i32::from(value)
+            } else if rhs.bytes().all(|byte| byte.is_ascii_digit()) && !rhs.is_empty() {
                 rhs.parse().map_err(|_| CompileError::Syntax)?
             } else {
                 i32::from(

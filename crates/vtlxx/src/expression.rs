@@ -2,6 +2,7 @@ use crate::{
     Cell,
     binding::SourceRole,
     builder::CodeBuilder,
+    cell,
     executable::Instruction,
     machine::Machine,
     primitive::Primitive,
@@ -98,6 +99,19 @@ impl Parser<'_> {
         }
         if current == '.' {
             return self.named_value();
+        }
+        if current == '$'
+            && self
+                .chars
+                .get(self.position + 1)
+                .is_some_and(|c| matches!(c, '0'..='9' | 'A'..='F'))
+        {
+            let (value, count) = cell::scan_hex(self.chars[self.position + 1..].iter().copied())
+                .map_err(|_| CompileError::Syntax)?;
+            self.position += count + 1;
+            self.instructions
+                .push(Instruction::PushConst(value as Cell));
+            return Ok(());
         }
         if current.is_ascii_digit()
             || (current == '-'
@@ -236,6 +250,26 @@ mod tests {
         let mut builder = CodeBuilder::new();
         compile_rhs(source, machine, &NameTable::default(), &mut builder).unwrap();
         builder.finish().unwrap().into_instructions()
+    }
+
+    #[test]
+    fn hex_literals_lower_to_existing_constants() {
+        let machine = Machine::new();
+        for (source, value) in [
+            ("$0", 0),
+            ("$A", 10),
+            ("$00FF", 255),
+            ("$7FFF", 32767),
+            ("$8000", -32768),
+            ("$ACE1", -21279),
+            ("$CAFE", -13570),
+            ("$FFFF", -1),
+        ] {
+            assert_eq!(
+                instructions(&machine, source),
+                vec![Instruction::PushConst(value), Instruction::Return]
+            );
+        }
     }
 
     #[test]

@@ -3,6 +3,20 @@ use vtlxx::{InputEvent, Machine, ReadMode, RuntimeError, RuntimeInput, SourceErr
 
 struct ScriptedInput(Vec<io::Result<InputEvent>>);
 
+#[test]
+fn hex_literals_do_not_consume_character_input() {
+    let mut machine = Machine::new();
+    machine.set_input(Cursor::new(vec![0, 65, 66, 65, 67, 68]));
+    machine
+        .execute_source("A=$ B=$+1 C=$==65 D=$CAFE $=$41 $=$ E=$ F=$")
+        .unwrap();
+    assert_eq!(
+        [0, 1, 2, 3, 4, 5].map(|i| machine.register(i).unwrap()),
+        [65, 67, 1, -13570, 68, -1]
+    );
+    assert_eq!(machine.output(), b"AC");
+}
+
 impl RuntimeInput for ScriptedInput {
     fn read_event(&mut self, _: ReadMode) -> io::Result<InputEvent> {
         self.0.remove(0)
