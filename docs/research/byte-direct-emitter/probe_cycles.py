@@ -28,7 +28,7 @@ def main():
                            ["sim6502.lib"], check=True)
             result = subprocess.run(["sim65", "-c", "-x", "30000000", str(program)],
                                     check=True, capture_output=True, text=True)
-            print(f"case {case}: stdout={result.stdout.strip()!r} {result.stderr.strip()}")
+            print(f"case {case}: {result.stdout.strip()} {result.stderr.strip()}")
 
 
 if __name__ == "__main__":
