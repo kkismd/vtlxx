@@ -43,6 +43,8 @@ byte_base: .byte $a9, $89, $29, $09, $49, $69, $e9
 ; Private ABI: A=operation 0..6 (LOAD, STORE, AND, OR, XOR, ADD,
 ; SUB), X=kind (0 immediate, 1 raw address, 2 Cell byte), and
 ; cc_byte_operand=immediate/address or index,selector (0 low, 1 high).
+; Immediate uses only the low byte; the high byte is ignored. The caller
+; validates the source value as u8 before invoking this private entry.
 ; All input is saved before owner/reserve calls. em_word, em_index and
 ; em_patch are emitter-owned compile-phase scratch, dead on return.
 cc_byte_op:

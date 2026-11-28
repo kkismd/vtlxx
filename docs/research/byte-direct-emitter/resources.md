@@ -50,7 +50,7 @@ frontend からの呼出し位置とそこで生存する frame を含む guard 
 ## probe と cycles
 
 `cargo test -p vtlxx --test sim65_backend -- --ignored --test-threads=1` は
-9 件成功。新規 case 58–70 で全20合法 opcode/mode、全 Cell の byte と格納、
+9 件成功。新規 case 58–71 で全20合法 opcode/mode、全 Cell の byte と格納、
 通常実行、owner 不正、容量境界、内部不正入力、fatal 診断と復帰を確認する。
 既存 guard probe は `cargo test -p vtlxx --test sim65_frontend compile_stack_guard
 -- --ignored --test-threads=1` で実行できる。probe で観測した個別経路は、
@@ -60,7 +60,7 @@ frontend からの呼出し位置とそこで生存する frame を含む guard 
 python3 docs/research/byte-direct-emitter/probe_cycles.py
 ```
 
-sim65 V2.18 の `-c` は case 58 が 334381 cycles、case 59 が 305829 cycles。
+sim65 V2.18 の `-c` は case 58 が 334381 cycles、case 59 が 305929 cycles。
 いずれも sim6502 startup から終了までの総数で、fixture の compile、検査、
 runtime、出力、終了を含む。命令生成単独の時間でも、両 case の差を用いた
 操作単価でもない。実機の bus や MMIO は測定していない。

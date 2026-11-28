@@ -84,7 +84,7 @@ _main:
     lda sp+1
     sta software_sp+1
     jsr probe_session
-.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 48 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57 .or TEST_CASE = 60 .or TEST_CASE = 61 .or TEST_CASE = 62 .or TEST_CASE = 63 .or TEST_CASE = 64 .or TEST_CASE = 66 .or TEST_CASE = 67 .or TEST_CASE = 68 .or TEST_CASE = 69 .or TEST_CASE = 70
+.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 48 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57 .or TEST_CASE = 60 .or TEST_CASE = 61 .or TEST_CASE = 62 .or TEST_CASE = 63 .or TEST_CASE = 64 .or TEST_CASE = 66 .or TEST_CASE = 67 .or TEST_CASE = 68 .or TEST_CASE = 69 .or TEST_CASE = 70 .or TEST_CASE = 71
     bcs :+
     jmp bad
 :
@@ -97,7 +97,7 @@ _main:
     lda #1
 .elseif TEST_CASE = 4 .or TEST_CASE = 16 .or TEST_CASE = 32 .or TEST_CASE = 48 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57
     lda #2
-.elseif TEST_CASE = 34 .or TEST_CASE = 52 .or TEST_CASE = 60 .or TEST_CASE = 61 .or TEST_CASE = 64 .or TEST_CASE = 66 .or TEST_CASE = 67 .or TEST_CASE = 68 .or TEST_CASE = 69 .or TEST_CASE = 70
+.elseif TEST_CASE = 34 .or TEST_CASE = 52 .or TEST_CASE = 60 .or TEST_CASE = 61 .or TEST_CASE = 64 .or TEST_CASE = 66 .or TEST_CASE = 67 .or TEST_CASE = 68 .or TEST_CASE = 69 .or TEST_CASE = 70 .or TEST_CASE = 71
     lda #3
 .elseif TEST_CASE = 11
     lda #4
@@ -1435,7 +1435,17 @@ probe_session:
     jsr cc_complete_owner
     jsr rt_init
     lda #$55
-    sta rt_stack
+    ldx #$a6
+    jsr rt_push              ; a live Cell with nonzero high byte
+    lda rt_depth
+    cmp #1
+    jne bad
+    lda rt_stack
+    cmp #$55
+    jne bad
+    lda rt_stack+1
+    cmp #$a6
+    jne bad
     lda #3
     sta rt_regs
     lda #$aa
@@ -1461,6 +1471,12 @@ probe_session:
     jne bad
     lda rt_stack
     cmp #$55
+    jne bad
+    lda rt_stack+1
+    cmp #$a6
+    jne bad
+    lda rt_depth
+    cmp #1
     jne bad
 .elseif TEST_CASE = 60
     ; No active owner.
@@ -1564,6 +1580,15 @@ probe_session:
     jsr cc_begin_owner
     lda #0
     ldx #3
+    jsr cc_byte_op
+.elseif TEST_CASE = 71
+    ; STORE cannot use a Cell byte operand.
+    jsr cc_begin_owner
+    lda #0
+    sta cc_byte_operand
+    sta cc_byte_operand+1
+    lda #1
+    ldx #2
     jsr cc_byte_op
 .else
     .error "unknown backend probe case"
