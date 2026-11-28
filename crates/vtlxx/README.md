@@ -30,6 +30,7 @@ Rust package `vtlxx`、path `crates/vtlxx/`、CLI `vtlxx` / `vtlxx6502` は正�
 - [#265](https://github.com/kkismd/vtlxx/issues/265): anonymous block の `[ ... ]` 一本化
 - [#280](https://github.com/kkismd/vtlxx/issues/280): value stack 接続記号を `~` に変更
 - [#679](https://github.com/kkismd/vtlxx/issues/679): 16進リテラルと文字入出力の位置による判定
+- [#688](https://github.com/kkismd/vtlxx/issues/688): 16 bit の AND・OR・XOR
 - [#634](https://github.com/kkismd/vtlxx/issues/634): 名前付き整数の宣言式。[#469](https://github.com/kkismd/vtlxx/issues/469) の右辺をリテラル1個に限る判断を置換し、その他の契約と [#255](https://github.com/kkismd/vtlxx/issues/255) の定義順を継承
 - [#217](https://github.com/kkismd/vtlxx/issues/217): target profile ごとの indexed storage の容量とアドレス規則
 - [#433](https://github.com/kkismd/vtlxx/issues/433), [#528](https://github.com/kkismd/vtlxx/issues/528): SourceProcedure・手続テンプレートの廃止
@@ -154,6 +155,8 @@ cargo test -p vtlxx --test native6502_cli -- --ignored
 ```
 
 `/` と `%` は signed integer division / remainder です。0 除算は runtime error です。`-32768/-1` は `-32768`、`-32768%-1` は `0` になります。
+
+`&`、`|`、`^` は両 Cell の raw 16 bit をそれぞれ AND、OR、XOR し、結果を同じ signed Cell として扱います。8 bit への切り詰めや真偽値への正規化はありません。
 
 比較結果は `0` または `1` です。条件判定では `0` が偽、0 以外が真です。
 
@@ -291,6 +294,9 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 | `*` | multiply |
 | `/` | divide |
 | `%` | remainder |
+| `&` | bitwise AND |
+| `\|` | bitwise OR |
+| `^` | bitwise XOR |
 | `==`, `!=` | equality |
 | `<`, `<=`, `>`, `>=` | comparison |
 
@@ -325,6 +331,18 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 
 これは `14` です。
 
+bitwise 演算も同じ優先順位で、例えば `B|C&D` は `(B|C)&D` です。両 operand を左から右へ必ず評価し、短絡しません。
+
+専用の bitwise NOT はありません。`B^-1` または `B^$FFFF` で全16 bitを反転できます。例えば mask `M` を使う操作は次のように書けます。
+
+```vtl
+  B=B|M       ; set
+  B=B&(M^-1)  ; clear（全16 bitの mask を反転）
+  B=B^M       ; toggle
+  T=(B&M)!=0  ; test
+  C=B&(M^255) ; 8 bit に限定した clear（B と M が 0..255 の場合）
+```
+
 単項 minus 演算子はありません。`-7` のような負の integer literal は使えますが、`-A` は使えません。
 
 ### 名前付き整数
@@ -346,7 +364,7 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 
 名前本体は ASCII 大文字で始まる 2〜16 byte の `[A-Z][A-Z0-9_]+` で、接頭の `.` は長さに含めず、名前表にも保存しません。1文字の `A`〜`Z` は従来どおり register です。右辺には符号付き十進リテラル、16進リテラルまたは定義済み整数名を1個以上書き、`+`、`-`、`*` でつなげられます。十進リテラルは `-32768..32767` の範囲で、負号を付けられるのは十進リテラルだけです。演算子に優先順位はなく左から評価し、各演算は signed 16-bit Cell で wrap します。例えば `2+3*4` は `20`、`32767+1` は `-32768` です。
 
-右辺の途中に空白・タブ・改行は入れられません。括弧、除算、剰余、比較、文字リテラル、register、入出力、乱数、stack、静的バイト列名や添字は使えません。例えば `.AA:=1 +2`、`.BB:=(1+2)`、`.CC:=-.AA` は不正です。これは通常式の grouping や除余を制限するものではありません。静的バイト列の要素に式や定数名を使うこともできません。
+右辺の途中に空白・タブ・改行は入れられません。括弧、除算、剰余、比較、bitwise 演算、文字リテラル、register、入出力、乱数、stack、静的バイト列名や添字は使えません。例えば `.AA:=1 +2`、`.BB:=(1+2)`、`.CC:=-.AA` は不正です。これは通常式の grouping や除余を制限するものではありません。静的バイト列の要素や直接ラベルに式を使うこともできません。静的バイト列の要素に定数名も使えません。
 
 宣言の前後は通常の statement と同じ区切りを使います。例えば `A=1 .MAX:=10 B=.MAX` や `.MAX:=10 .MIN:=-1` のように同じ行に書けます。`.` と名前、`:` と `=` はそれぞれ連続させ、`:=` の前後には ASCII space / HTAB を入れられます。式の直後には空白、改行、`;` コメントまたは source の終端が必要です。旧宣言 `==NAME,value` と、`.` を付けない複数文字の定数参照は受理しません。式の等価比較 `==` は引き続き使えます。
 
