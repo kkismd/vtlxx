@@ -19,6 +19,7 @@
 .import cc_literal_output_begin, cc_literal_output_byte, cc_literal_output_finish
 .import rt_init, rt_load_storage, rt_store_storage
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
+.import rt_and, rt_or, rt_xor
 .import cell_add, cell_sub, cell_mul
 .importzp rt_lhs, rt_rhs, rt_result
 .import rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
@@ -71,9 +72,10 @@ constant_char = zp_phase + 37
 constant_ptr = zp_phase + 38
 
 .segment "RODATA"
-operator_chars: .byte '+','-','*','/','%','<','>'
-operator_low:   .byte <rt_add,<rt_sub,<rt_mul,<rt_div,<rt_rem,<rt_lt,<rt_gt
-operator_high:  .byte >rt_add,>rt_sub,>rt_mul,>rt_div,>rt_rem,>rt_lt,>rt_gt
+operator_chars: .byte '+','-','*','/','%','<','>','&','|','^'
+operator_low:   .byte <rt_add,<rt_sub,<rt_mul,<rt_div,<rt_rem,<rt_lt,<rt_gt,<rt_and,<rt_or,<rt_xor
+operator_high:  .byte >rt_add,>rt_sub,>rt_mul,>rt_div,>rt_rem,>rt_lt,>rt_gt,>rt_and,>rt_or,>rt_xor
+operator_count = * - operator_high
 
 .segment "BSS"
 constant_name: .res 16
@@ -1916,7 +1918,7 @@ operator:
     cmp operator_chars,x
     beq @found
     inx
-    cpx #7
+    cpx #operator_count
     bne @find
     jmp syntax_error
 @found:

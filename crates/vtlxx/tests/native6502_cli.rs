@@ -261,6 +261,68 @@ fn cli_char_literals_execute_and_old_entropy_spelling_is_rejected() {
 
 #[test]
 #[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn bitwise_operators_execute_and_reject_invalid_forms() {
+    let temp = TestDir::new();
+    let source = concat!(
+        "A=1|2&4 B=1|(2&4) C=2+3&1 D=(128&128)!=0 ",
+        "~=5 E=~^3 @=1|2,42 F=@(7&3) %=1&1 [ G=9 ] ",
+        "H=$CAFE&$00FF I=$8000|$1 J=$ACE1^$FFFF ",
+        "&=p [ K=7 ] p=() #=1 K=99 ^=1 L=1!=2 M=B^-1 ",
+        "?=A ?=\",\" ?=B ?=\",\" ?=C ?=\",\" ?=D ?=\",\" ",
+        "?=E ?=\",\" ?=F ?=\",\" ?=G ?=\",\" ?=H ?=\",\" ",
+        "?=I ?=\",\" ?=J ?=\",\" ?=K ?=\",\" ?=L ?=\",\" ?=M"
+    );
+    assert_runtime_input_output(
+        &temp,
+        "bitwise",
+        source.as_bytes(),
+        b"",
+        b"0,1,1,1,6,42,9,254,-32767,21278,7,1,-2",
+    );
+    assert_runtime_input_output(
+        &temp,
+        "bitwise-input-order",
+        b"A=($*256)|$ B=0&$ C=-1|$ D=$^$ E=$ F=$ ?=A ?=\",\" ?=B ?=\",\" ?=C ?=\",\" ?=D ?=\",\" ?=E ?=\",\" ?=F",
+        &[1, 2, 3, 4, 5, 6, 7, 8],
+        b"258,0,-1,3,7,8",
+    );
+    for (index, source) in [
+        "A=&",
+        "A=|",
+        "A=^",
+        "A=1&",
+        "A=1|",
+        "A=1^",
+        "A=1&&2",
+        "A=1||2",
+        "A=1^^2",
+        "A=&1",
+        "A=|1",
+        "A=^1",
+        "|1",
+        ".MASK:=1|2",
+        ".MASK:=$1|$2",
+        ".DATA:=[1&2]",
+        "^=1|2",
+        "#=1^2",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let source = format!("?=42 {source}");
+        let result = run_program_with_input(
+            &temp,
+            &format!("bitwise-invalid-{index}"),
+            source.as_bytes(),
+            b"Z",
+        );
+        assert!(!result.status.success(), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn hexadecimal_literals_and_input_execute_in_the_cli() {
     let temp = TestDir::new();
     assert_runtime_input_output(&temp, "hex", b".NUM:=$FFFF+$1 .DATA:=[$0,10,$00FF] #=$10 ?=9 ^=$10 ?=.NUM ?=.DATA(1) ?=.DATA(2) ?=$7FFF ?=$8000 ?=$ACE1 ?=$CAFE ?=$FFFF $=$41 A=$ ?=A", b"B", b"01025532767-32768-21279-13570-1A66");
