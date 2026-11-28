@@ -777,6 +777,87 @@ fn dotted_constant_sources_match_both_implementations() {
 
 #[test]
 #[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn bitwise_sources_match_reference() {
+    use std::io::Cursor;
+    use vtlxx::Machine;
+
+    let temp = TestDir::new();
+    let cases: &[(&str, &str, &[u8], &[u8])] = &[
+        (
+            "decimal-bits",
+            "?=255&-256 ?=\",\" ?=255|-256 ?=\",\" ?=255^-256 ?=\",\" ?=-32768&32767 ?=\",\" ?=-32768|1 ?=\",\" ?=-32768^32767 ?=\",\" ?=1|2&4 ?=\",\" ?=1|(2&4) ?=\",\" ?=5^-1 ~=42 ~=255&-256 ?=\",\" ?=~ ?=\",\" ?=~",
+            b"",
+            b"0,-1,-1,0,-32767,-1,0,1,-6,0,42",
+        ),
+        (
+            "masks",
+            "A=160 B=A|5 C=B&(5^-1) D=C^128 E=(D&32)!=0 F=255&((160|5)^(5&255)) ?=B ?=\",\" ?=C ?=\",\" ?=D ?=\",\" ?=E ?=\",\" ?=F",
+            b"",
+            b"165,160,32,1,160",
+        ),
+        (
+            "hex-bits",
+            "?=$CAFE&$00FF ?=\",\" ?=$8000|$1 ?=\",\" ?=$ACE1^$FFFF &=p [ A=7 ] p=() #=1 A=99 ^=1 ?=\",\" ?=A",
+            b"",
+            b"254,-32767,21278,7",
+        ),
+        (
+            "input-order",
+            "A=($*256)|$ B=0&$ C=-1|$ D=$^$ E=$ F=$ ?=A ?=\",\" ?=B ?=\",\" ?=C ?=\",\" ?=D ?=\",\" ?=E ?=\",\" ?=F",
+            &[1, 2, 3, 4, 5, 6, 7, 8],
+            b"258,0,-1,3,7,8",
+        ),
+    ];
+    for &(name, source, input, expected) in cases {
+        let mut machine = Machine::new();
+        machine.set_input(Cursor::new(input.to_vec()));
+        machine.execute_source(source).unwrap();
+        let target = run_program_with_input(&temp, name, source.as_bytes(), input);
+        assert!(target.status.success(), "{name}: {target:?}");
+        assert_eq!(machine.output(), expected, "{name}");
+        assert_eq!(target.stdout, machine.output(), "{name}");
+    }
+
+    for (index, invalid) in [
+        "A=&",
+        "A=|",
+        "A=^",
+        "A=1&",
+        "A=1|",
+        "A=1^",
+        "A=1&&2",
+        "A=1||2",
+        "A=1^^2",
+        "A=&1",
+        "A=|1",
+        "A=^1",
+        "|1",
+        ".MASK:=1|2",
+        ".MASK:=$1|$2",
+        ".DATA:=[1&2]",
+        "^=1|2",
+        "#=1^2",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let source = format!("?=42 &=p [ ?=1 ] {invalid}");
+        let mut machine = Machine::new();
+        assert!(machine.execute_source(&source).is_err(), "{source}");
+        assert_eq!(machine.output(), b"42", "{source}");
+        let target = run_program_with_input(
+            &temp,
+            &format!("bitwise-shared-error-{index}"),
+            source.as_bytes(),
+            b"",
+        );
+        assert!(!target.status.success(), "{source}: {target:?}");
+        assert!(target.stdout.is_empty(), "{source}: {target:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
 fn hexadecimal_sources_match_reference() {
     use std::io::Cursor;
     use vtlxx::Machine;
