@@ -389,6 +389,9 @@ impl Machine {
             (Primitive::Mul, Some(('*', SourceRole::BinaryOperator))),
             (Primitive::Div, Some(('/', SourceRole::BinaryOperator))),
             (Primitive::Rem, Some(('%', SourceRole::BinaryOperator))),
+            (Primitive::BitAnd, Some(('&', SourceRole::BinaryOperator))),
+            (Primitive::BitOr, Some(('|', SourceRole::BinaryOperator))),
+            (Primitive::BitXor, Some(('^', SourceRole::BinaryOperator))),
             (Primitive::Lt, Some(('<', SourceRole::BinaryOperator))),
             (Primitive::Gt, Some(('>', SourceRole::BinaryOperator))),
             (Primitive::Eq, None),
@@ -540,6 +543,9 @@ mod tests {
             ('*', SourceRole::BinaryOperator, Primitive::Mul),
             ('/', SourceRole::BinaryOperator, Primitive::Div),
             ('%', SourceRole::BinaryOperator, Primitive::Rem),
+            ('&', SourceRole::BinaryOperator, Primitive::BitAnd),
+            ('|', SourceRole::BinaryOperator, Primitive::BitOr),
+            ('^', SourceRole::BinaryOperator, Primitive::BitXor),
             ('<', SourceRole::BinaryOperator, Primitive::Lt),
             ('>', SourceRole::BinaryOperator, Primitive::Gt),
         ] {
@@ -551,12 +557,21 @@ mod tests {
         for primitive in [Primitive::Eq, Primitive::Ne, Primitive::Le, Primitive::Ge] {
             assert!(machine.builtin_id(primitive).is_some());
         }
-        for identity in ['#', '^', '&', '[', '|', '='] {
+        for identity in ['#', '[', '='] {
             for role in [
                 SourceRole::Write,
                 SourceRole::PrimaryRead,
                 SourceRole::AppliedRead,
                 SourceRole::BinaryOperator,
+            ] {
+                assert_eq!(machine.resolve(identity, role), None);
+            }
+        }
+        for identity in ['&', '|', '^'] {
+            for role in [
+                SourceRole::Write,
+                SourceRole::PrimaryRead,
+                SourceRole::AppliedRead,
             ] {
                 assert_eq!(machine.resolve(identity, role), None);
             }
