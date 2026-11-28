@@ -5,6 +5,8 @@ use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "common/free_memory.rs"]
+mod free_memory;
 #[path = "common/removed_templates.rs"]
 mod removed_templates;
 
@@ -151,16 +153,41 @@ fn build_and_run_custom_with_adapter(
         objects.push(object);
     }
     let executable = temp.0.join("frontend.prg");
+    let map = temp.0.join("frontend.map");
     let mut args = vec![
         OsStr::new("-t"),
         OsStr::new("sim6502"),
         OsStr::new("-o"),
         executable.as_os_str(),
+        OsStr::new("-m"),
+        map.as_os_str(),
     ];
     args.extend(objects.iter().map(|object| object.as_os_str()));
     args.push(OsStr::new("sim6502.lib"));
     let output = run("ld65", &args, &[]);
     assert!(output.status.success(), "link: {output:?}");
+
+    if input
+        .windows(b".BASE:=-4096".len())
+        .any(|w| w == b".BASE:=-4096")
+    {
+        // Confirm the active cc65 configuration still reserves its software
+        // stack above $f000, as well as checking the linked segments.
+        let target = run("cl65", &[OsStr::new("--print-target-path")], &[]);
+        assert!(target.status.success(), "{target:?}");
+        let target = String::from_utf8(target.stdout).unwrap();
+        let config = fs::read_to_string(Path::new(target.trim()).join("../cfg/sim6502.cfg"))
+            .expect("active sim6502 configuration");
+        assert!(
+            config.contains("value = $0800"),
+            "software stack size changed"
+        );
+        assert!(
+            config.contains("$FDF0 - __STACKSIZE__"),
+            "software stack placement changed"
+        );
+        free_memory::assert_free(&map, 0xf000, 0xf003);
+    }
 
     run(
         "sim65",
@@ -171,6 +198,68 @@ fn build_and_run_custom_with_adapter(
         ],
         input,
     )
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn byte_memory_reads_writes_and_nested_calls() {
+    for (source, expected) in [
+        (".BASE:=-4096 :=.BASE,128 ?=:(.BASE)", "128"),
+        (".BASE:=-4096 :=.BASE,128 @=0,.BASE ?=:(@(0))", "128"),
+        (".BASE:=-4096 :=.BASE+1,255 @=1,1 ?=@(:(.BASE+1)-254)", "1"),
+        (
+            ".BASE:=-4096 :=.BASE+1,255 .DATA:=[1,0] ?=:(.BASE+.DATA(0))",
+            "255",
+        ),
+        (
+            ".BASE:=-4096 :=.BASE+1,255 ?=:(.BASE+:(.BASE+1)-254)",
+            "255",
+        ),
+        (
+            ".BASE:=-4096 :=42,.BASE,65 ~=.BASE+1,66 :=~ ~=.BASE+2,67 :=() ?=:(.BASE) ?=:(.BASE+1) ?=:(.BASE+2) ?=~",
+            "65666742",
+        ),
+        (
+            ".BASE:=-4096 :=(.BASE+1),256 :=.BASE,-1 ?=:(.BASE) ?=:(.BASE+1)",
+            "2550",
+        ),
+    ] {
+        let output = build_and_run(source.as_bytes(), b"Z");
+        assert!(output.status.success(), "{source}: {output:?}");
+        assert_eq!(output.stdout, format!("{expected}Z").as_bytes(), "{source}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn byte_memory_rejects_bad_syntax_before_runtime() {
+    for source in [
+        "?=42 A=:",
+        "?=42 A=:()",
+        "?=42 :=",
+        "?=42 A=:(1",
+        "?=42 A=1:2",
+        "?=42 :=1,",
+        "?=42 A=:(1,)",
+    ] {
+        let output = build_and_run(source.as_bytes(), b"Z");
+        assert!(!output.status.success(), "{source}: {output:?}");
+        assert!(output.stdout.is_empty(), "{source}: {output:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn byte_memory_runtime_underflow_and_input_order() {
+    for source in [":=()", ":=1", "?=:(~)"] {
+        let output = build_and_run(source.as_bytes(), b"Z");
+        assert!(!output.status.success(), "{source}: {output:?}");
+        assert!(output.stdout.is_empty(), "{source}: {output:?}");
+    }
+    let source = b".BASE:=-4096 ~=.BASE :=~,$ ?=:(.BASE) ?=$";
+    let output = build_and_run(source, b"ABZ");
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"6566Z");
 }
 
 fn build_and_run(source: &[u8], runtime_input: &[u8]) -> Output {
@@ -1246,25 +1335,30 @@ fn run_stack_probe(source: &str, basic: &str) -> Output {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn compile_stack_guard_comparison_boundary_preserves_operand_modes() {
-    for observed in [24, 25] {
-        // Change the comparison input, never TXS or the live return frames.
-        // Both the value-first and stack-root operand entry branches execute.
-        let basic = stack_probe_basic()
-            .replace("    cpx #25", &format!("    ldx #{observed}\n    cpx #25"));
-        let result = run_stack_probe("~=40 ?=~+2", &basic);
-        assert_eq!(
-            result.status.code(),
-            Some(if observed == 24 { 132 } else { 0 }),
-            "{result:?}"
-        );
-        assert_eq!(
-            result.stdout,
-            if observed == 24 {
-                b"".as_slice()
-            } else {
-                b"42".as_slice()
-            }
-        );
+    for (source, expected) in [
+        ("~=40 ?=~+2", b"42".as_slice()),
+        (".BASE:=-4096 :=.BASE,0 ?=:(.BASE+@(0))", b"0".as_slice()),
+    ] {
+        for observed in [24, 25] {
+            // Change the comparison input, never TXS or the live return frames.
+            // Both the value-first and stack-root operand entry branches execute.
+            let basic = stack_probe_basic()
+                .replace("    cpx #25", &format!("    ldx #{observed}\n    cpx #25"));
+            let result = run_stack_probe(source, &basic);
+            assert_eq!(
+                result.status.code(),
+                Some(if observed == 24 { 132 } else { 0 }),
+                "{result:?}"
+            );
+            assert_eq!(
+                result.stdout,
+                if observed == 24 {
+                    b"".as_slice()
+                } else {
+                    expected
+                }
+            );
+        }
     }
 }
 
@@ -1339,4 +1433,23 @@ fn compile_stack_guard_observes_nested_static_reads() {
     assert!((25..255).contains(&minimum), "{result:?}");
     assert_eq!(result.stdout, b"0");
     eprintln!("16 nested static reads: minimum guard S={minimum}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn compile_stack_guard_observes_nested_byte_and_storage_reads() {
+    let source = format!(
+        ".BASE:=-4096 :=.BASE,0 ?={}0{}",
+        ":(.BASE+@(".repeat(8),
+        "))".repeat(8)
+    );
+    let basic = stack_probe_basic().replace(
+        "@returned:\n",
+        "@returned:\n    lda audit_min\n    jmp halt\n",
+    );
+    let result = run_stack_probe(&source, &basic);
+    let minimum = result.status.code().unwrap();
+    assert!((25..255).contains(&minimum), "{result:?}");
+    assert_eq!(result.stdout, b"0");
+    eprintln!("8 nested :/@ pairs: minimum guard S={minimum}");
 }

@@ -18,6 +18,7 @@
 .import cc_static_start, cc_static_length
 .import cc_literal_output_begin, cc_literal_output_byte, cc_literal_output_finish
 .import rt_init, rt_load_storage, rt_store_storage
+.import rt_peek, rt_poke
 .import rt_add, rt_sub, rt_mul, rt_div, rt_rem
 .import rt_and, rt_or, rt_xor
 .import cell_add, cell_sub, cell_mul
@@ -440,6 +441,8 @@ statement:
 @special:
     cmp #'@'
     beq @target_ok
+    cmp #':'
+    beq @target_ok
     cmp #'?'
     beq @target_ok
     cmp #'$'
@@ -448,6 +451,8 @@ statement:
     lda target_index
     cmp #'?'
     jeq @question_output
+    cmp #':'
+    beq @call_operands
     lda target_index
     cmp #'a'
     jcc @compile_operand
@@ -457,6 +462,7 @@ statement:
     jsr cc_resolve
     sta call_target
     stx call_target+1
+@call_operands:
     ; `p=()` has no operands; keep its parentheses out of value().
     jsr peek
     lda look_state
@@ -478,6 +484,9 @@ statement:
     jsr take
     jsr peek
     jsr statement_end
+    lda target_index
+    cmp #':'
+    jeq @poke
     lda call_target
     ldx call_target+1
     jmp cc_call
@@ -583,9 +592,16 @@ statement:
     jmp cc_store_reg
 @write_special:
     cmp #'@'
-    bne @number
+    bne @check_poke
     lda #<rt_store_storage
     ldx #>rt_store_storage
+    jmp cc_call
+@check_poke:
+    cmp #':'
+    bne @number
+@poke:
+    lda #<rt_poke
+    ldx #>rt_poke
     jmp cc_call
 @number:
     cmp #'?'
@@ -1611,7 +1627,17 @@ value:
     jmp cc_static_read
 @applied:
     cmp #'@'
+    beq @applied_start
+    cmp #':'
     jne syntax_error
+@applied_start:
+    ; This frame owns its selection until its operand list is complete.
+    ; A nested static-data or applied read uses a different nesting slot.
+    jsr enter_nesting
+    ldx nesting
+    dex
+    lda look_byte
+    sta static_slots,x
     jsr take
     jsr peek
     lda look_state
@@ -1621,7 +1647,6 @@ value:
     cmp #'('
     jne syntax_error
     jsr take
-    jsr enter_nesting
     lda #0
     jsr operand
 @applied_comma:
@@ -1639,9 +1664,18 @@ value:
 @close_applied:
     jsr close_group
 @leave:
+    ldx nesting
+    dex
+    lda static_slots,x
     dec nesting
+    cmp #':'
+    beq @peek_byte
     lda #<rt_load_storage
     ldx #>rt_load_storage
+    jmp cc_call
+@peek_byte:
+    lda #<rt_peek
+    ldx #>rt_peek
     jmp cc_call
 @literal:
     jsr parse_literal

@@ -75,6 +75,14 @@ fn assert_runtime_input_output(
 }
 
 #[test]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn byte_memory_via_product_cli() {
+    let temp = TestDir::new();
+    let source = b".BASE:=-4096 :=.BASE,128 :=$F001,$CAFE ?=:(.BASE) ?=() ?=:(.BASE+1)&$FF";
+    assert_runtime_input_output(&temp, "byte-memory", source, b"", b"128\n254");
+}
+
+#[test]
 fn help_and_argument_errors_do_not_need_cc65() {
     let help = run_cli(&["--help"]);
     assert!(help.status.success());

@@ -470,6 +470,52 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires ca65 and ld65; run with --ignored"]
+    fn byte_access_test_address_is_free_in_product_link() {
+        let (temp, _) = build_image(None).unwrap();
+        let mut objects: Vec<_> = std::fs::read_dir(&temp.0)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter_map(|path| {
+                let index = path.file_stem()?.to_str()?.parse::<usize>().ok()?;
+                (path.extension()? == "o").then_some((index, path))
+            })
+            .collect();
+        objects.sort_by_key(|(index, _)| *index);
+        assert!(!objects.is_empty());
+        let objects: Vec<_> = objects.into_iter().map(|(_, path)| path).collect();
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let map = temp.0.join("test.map");
+        let mut args = raw_link_args(
+            &root.join("6502/target/mos6502.cfg"),
+            &temp.0.join("test.bin"),
+            &objects,
+        );
+        args.extend([OsString::from("-m"), map.as_os_str().to_owned()]);
+        let args: Vec<_> = args.iter().map(OsString::as_os_str).collect();
+        let output = run_tool("ld65", "link", &args, &[]).unwrap();
+        require_success("link", "ld65", &output).unwrap();
+        let map = std::fs::read_to_string(map).unwrap();
+        let segments = map.split("Segment list:").nth(1).unwrap();
+        let segments = segments.split("Exports list").next().unwrap();
+        let mut seen = false;
+        for line in segments.lines() {
+            let columns: Vec<_> = line.split_whitespace().collect();
+            if columns.len() < 4 {
+                continue;
+            }
+            if let (Ok(start), Ok(end)) = (
+                u32::from_str_radix(columns[1], 16),
+                u32::from_str_radix(columns[2], 16),
+            ) {
+                seen = true;
+                assert!(end < 0xf000 || start > 0xf003, "occupied test RAM: {line}");
+            }
+        }
+        assert!(seen);
+    }
+
+    #[test]
     fn framing_preserves_source_and_binary_runtime_input() {
         assert_eq!(
             frame_input(b"A=1\n", &[0, 0xff]).unwrap(),

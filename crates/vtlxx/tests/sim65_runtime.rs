@@ -183,6 +183,20 @@ fn runtime_state_and_ring_aliases() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn direct_byte_access_preserves_stack_and_guards() {
+    for (case, status) in [(1, 0), (2, 1), (3, 1), (4, 1)] {
+        let output = build_and_run("runtime_byte", Some(case)).unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(status),
+            "case {case}: {output:?}"
+        );
+        assert_eq!(output.stdout, b"K", "case {case}: {output:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn static_byte_read_checks_bounds_and_preserves_stack_on_failure() {
     for (case, status) in [(1, 0), (2, 0), (3, 7), (4, 7), (5, 7), (6, 7), (7, 1)] {
         let output = build_and_run("runtime_static", Some(case)).unwrap();
