@@ -158,10 +158,20 @@ fn byte_memory_sources_match_reference() {
     {
         let source = format!("?=42 &=p [ ?=1 ] {invalid}");
         let mut machine = Machine::new();
-        assert!(machine.execute_source(&source).is_err(), "{source}");
+        assert!(
+            matches!(
+                machine.execute_source(&source),
+                Err(SourceError::Compile(_))
+            ),
+            "{source}"
+        );
         assert_eq!(machine.output(), b"42", "{source}");
         let target = run(&format!("invalid-{index}"), &source, b"");
-        assert!(!target.status.success(), "{source}: {target:?}");
+        assert_eq!(target.status.code(), Some(130), "{source}: {target:?}");
+        assert!(
+            String::from_utf8_lossy(&target.stderr).contains("syntax error"),
+            "{source}: {target:?}"
+        );
         assert!(target.stdout.is_empty(), "{source}: {target:?}");
     }
     for (index, source) in [":=()", ":=1"].iter().enumerate() {
