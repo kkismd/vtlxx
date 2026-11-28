@@ -10,18 +10,32 @@
     PUSH $1234
     PUSH lhs
     PUSH rhs
-    ; The result must not depend on the incoming decimal or carry flags.
-    sed
+    ; Stack indexing requires binary mode; the bitwise result ignores carry.
+    cld
 .if (rhs) & 1
     sec
 .else
     clc
 .endif
     jsr op
-    cld
     lda #<(result)
     ldx #>(result)
     jsr check_result
+.endmacro
+
+.macro CHECK_FULL op, result
+    jsr rt_init
+.repeat 14
+    PUSH $1234
+.endrepeat
+    PUSH $a55a
+    PUSH $0ff0
+    cld
+    sec
+    jsr op
+    lda #<(result)
+    ldx #>(result)
+    jsr check_full_result
 .endmacro
 
 .segment "CODE"
@@ -47,6 +61,9 @@ _main:
     CHECK rt_and, $a55a, $0ff0, $0550
     CHECK rt_or, $a55a, $0ff0, $affa
     CHECK rt_xor, $a55a, $0ff0, $aaaa
+    CHECK_FULL rt_and, $0550
+    CHECK_FULL rt_or, $affa
+    CHECK_FULL rt_xor, $aaaa
     lda #'K'
     jsr serial_out
     lda #0
@@ -66,6 +83,27 @@ check_result:
     lda rt_stack+1
     cmp #$12
     bne bad
+    rts
+check_full_result:
+    cmp rt_stack+28
+    bne bad
+    cpx rt_stack+29
+    bne bad
+    lda rt_depth
+    cmp #15
+    bne bad
+    ldy #0
+@check_lower:
+    lda rt_stack,y
+    cmp #$34
+    bne bad
+    iny
+    lda rt_stack,y
+    cmp #$12
+    bne bad
+    iny
+    cpy #28
+    bne @check_lower
     rts
 bad:
     cld
