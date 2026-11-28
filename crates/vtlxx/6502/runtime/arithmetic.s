@@ -2,6 +2,7 @@
 .setcpu "6502"
 
 .export rt_add, rt_sub, rt_mul, rt_div, rt_rem
+.export rt_and, rt_or, rt_xor
 .export cell_add, cell_sub, cell_mul
 .export rt_eq, rt_ne, rt_lt, rt_le, rt_gt, rt_ge
 .importzp rt_lhs, rt_rhs, rt_result
@@ -29,6 +30,36 @@ rt_sub:
 rt_mul:
     jsr rt_need_two
     jsr cell_mul
+    jmp rt_commit_binary
+
+rt_and:
+    jsr rt_need_two
+    lda rt_lhs
+    and rt_rhs
+    sta rt_result
+    lda rt_lhs+1
+    and rt_rhs+1
+    sta rt_result+1
+    jmp rt_commit_binary
+
+rt_or:
+    jsr rt_need_two
+    lda rt_lhs
+    ora rt_rhs
+    sta rt_result
+    lda rt_lhs+1
+    ora rt_rhs+1
+    sta rt_result+1
+    jmp rt_commit_binary
+
+rt_xor:
+    jsr rt_need_two
+    lda rt_lhs
+    eor rt_rhs
+    sta rt_result
+    lda rt_lhs+1
+    eor rt_rhs+1
+    sta rt_result+1
     jmp rt_commit_binary
 
 ; Private compile/runtime ABI: D=0; rt_lhs and rt_rhs are little-endian

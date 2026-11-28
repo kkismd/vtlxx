@@ -1049,6 +1049,59 @@ fn malformed_source_never_starts_runtime() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn bitwise_operators_work_in_expressions_and_evaluate_both_operands() {
+    expect(
+        concat!(
+            "A=1|2&4 B=1|(2&4) C=2+3&1 D=(128&128)!=0 ",
+            "~=5 E=~^3 @=1|2,42 F=@(7&3) %=1&1 [ G=9 ] ",
+            "H=$CAFE&$00FF I=$8000|$1 J=$ACE1^$FFFF ",
+            "&=p [ K=7 ] p=() #=1 K=99 ^=1 L=1!=2 M=B^-1 ",
+            "?=A ?=\",\" ?=B ?=\",\" ?=C ?=\",\" ?=D ?=\",\" ",
+            "?=E ?=\",\" ?=F ?=\",\" ?=G ?=\",\" ?=H ?=\",\" ",
+            "?=I ?=\",\" ?=J ?=\",\" ?=K ?=\",\" ?=L ?=\",\" ?=M"
+        ),
+        0,
+        b"0,1,1,1,6,42,9,254,-32767,21278,7,1,-2Z",
+    );
+    let output = build_and_run_read_char(
+        b"A=($*256)|$ B=0&$ C=-1|$ D=$^$ E=$ F=$ ?=A ?=\",\" ?=B ?=\",\" ?=C ?=\",\" ?=D ?=\",\" ?=E ?=\",\" ?=F",
+        &[1, 2, 3, 4, 5, 6, 7, 8],
+    );
+    assert_eq!(output.status.code(), Some(0), "{output:?}");
+    assert_eq!(output.stdout, b"258,0,-1,3,7,8", "{output:?}");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn invalid_bitwise_forms_fail_before_runtime() {
+    for source in [
+        "A=&",
+        "A=|",
+        "A=^",
+        "A=1&",
+        "A=1|",
+        "A=1^",
+        "A=1&&2",
+        "A=1||2",
+        "A=1^^2",
+        "A=&1",
+        "A=|1",
+        "A=^1",
+        "|1",
+        ".MASK:=1|2",
+        ".MASK:=$1|$2",
+        ".DATA:=[1&2]",
+        "^=1|2",
+        "#=1^2",
+    ] {
+        let result = build_and_run(format!("?=42 {source}").as_bytes(), b"Z");
+        assert!(!result.status.success(), "{source}: {result:?}");
+        assert!(result.stdout.is_empty(), "{source}: {result:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn hexadecimal_literals_share_cell_and_existing_input_semantics() {
     expect(
         "?=$0 ?=$A ?=$00FF ?=$7FFF ?=$8000 ?=$ACE1 ?=$CAFE ?=$FFFF",

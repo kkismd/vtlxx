@@ -234,6 +234,27 @@ fn binary_arithmetic_wrappers_preserve_stack_contract() {
 
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn bitwise_truth_tables_cover_all_cell_bits() {
+    expect("runtime_bitwise", 0, b"K");
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn bitwise_wrappers_preserve_stack_contract() {
+    for case in 1..=9 {
+        let output = build_and_run("runtime_bitwise_contract", Some(case)).unwrap();
+        let status = if case <= 6 { 1 } else { 0 };
+        assert_eq!(
+            output.status.code(),
+            Some(status),
+            "case {case}: {output:?}"
+        );
+        assert_eq!(output.stdout, b"K", "case {case}: {output:?}");
+    }
+}
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn comparisons_are_signed_and_normalized() {
     expect("runtime_comparisons", 0, b"1,0,1,0,1,0,0,1,0,1,0,1");
 }
