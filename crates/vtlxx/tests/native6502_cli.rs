@@ -91,6 +91,105 @@ fn byte_memory_via_product_cli() {
 }
 
 #[test]
+#[ignore = "requires Linux, ca65 and ld65; run with --ignored"]
+fn byte_memory_sources_match_reference() {
+    use std::io::Cursor;
+    use vtlxx::{Machine, RuntimeError, SourceError};
+
+    let temp = TestDir::new();
+    // This seed matches the product link-map test for $F000..$F003.
+    let run = |name: &str, source: &str, input: &[u8]| {
+        let path = temp.0.join(format!("byte-shared-{name}.vtl"));
+        let input_path = temp.0.join(format!("byte-shared-{name}.bin"));
+        fs::write(&path, source).unwrap();
+        fs::write(&input_path, input).unwrap();
+        Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+            .arg(path)
+            .arg("--runtime-input")
+            .arg(input_path)
+            .args(["--seed", "1234", "--cycle-limit", "200000000"])
+            .output()
+            .unwrap()
+    };
+    let cases: &[(&str, &str, &[u8], &[u8])] = &[
+        (
+            "values",
+            ".BASE:=-4096 :=.BASE+1,77 :=.BASE,0 ?=:(.BASE) ?=\",\" :=.BASE,128 ?=:(.BASE) ?=\",\" :=.BASE,255 ?=:(.BASE) ?=\",\" :=.BASE,256 ?=:(.BASE) ?=\",\" :=.BASE,-1 ?=:(.BASE) ?=\",\" :=.BASE,511 ?=:(.BASE) ?=\",\" ?=:(.BASE+1)",
+            b"",
+            b"0,128,255,0,255,255,77",
+        ),
+        (
+            "nested",
+            ".BASE:=-4096 .DATA:=[2,3] :=.BASE,1 :=.BASE+1,44 :=.BASE+2,55 :=.BASE+3,66 @=0,.BASE @=1,99 @=255,123 I=0 A=.BASE ?=:(@(I)) ?=\",\" ?=@(:(A)) ?=\",\" ?=:(.BASE+:(A)) ?=\",\" ?=:(.BASE+.DATA(0)) ?=\",\" ?=@(255)",
+            b"",
+            b"1,99,44,55,123",
+        ),
+        (
+            "stack",
+            ".BASE:=-4096 ~=90 :=42,.BASE,65 ~=.BASE+1,66 :=~ ~=.BASE+2,67 :=() A=:(7,.BASE) ?=A ?=\",\" ?=~ ?=\",\" ?=~ ?=\",\" ?=~ ?=\",\" ?=:(.BASE+1) ?=\",\" ?=:(.BASE+2)",
+            b"",
+            b"65,7,42,90,66,67",
+        ),
+        (
+            "input",
+            ".BASE:=-4096 :=($+.BASE),$ ?=:(.BASE+1) ?=\",\" ?=$",
+            &[1, 2, 3],
+            b"2,3",
+        ),
+        (
+            "hex",
+            ":=$F000,$CAFE ?=:(-4096)&$FF ?=\",\" :=-4095,511 ?=:($F001)",
+            b"",
+            b"254,255",
+        ),
+    ];
+    for &(name, source, input, expected) in cases {
+        let mut machine = Machine::new();
+        machine.set_input(Cursor::new(input.to_vec()));
+        machine.execute_source(source).unwrap();
+        let target = run(name, source, input);
+        assert!(target.status.success(), "{name}: {target:?}");
+        assert_eq!(machine.output(), expected, "{name}");
+        assert_eq!(target.stdout, machine.output(), "{name}");
+    }
+    for (index, invalid) in ["A=:", "A=:()", ":=", "A=:(1", ":=1,", "A=1:2", "A=:(~)"]
+        .iter()
+        .enumerate()
+    {
+        let source = format!("?=42 &=p [ ?=1 ] {invalid}");
+        let mut machine = Machine::new();
+        assert!(
+            matches!(
+                machine.execute_source(&source),
+                Err(SourceError::Compile(_))
+            ),
+            "{source}"
+        );
+        assert_eq!(machine.output(), b"42", "{source}");
+        let target = run(&format!("invalid-{index}"), &source, b"");
+        assert_eq!(target.status.code(), Some(130), "{source}: {target:?}");
+        assert!(
+            String::from_utf8_lossy(&target.stderr).contains("syntax error"),
+            "{source}: {target:?}"
+        );
+        assert!(target.stdout.is_empty(), "{source}: {target:?}");
+    }
+    for (index, source) in [":=()", ":=1"].iter().enumerate() {
+        let mut machine = Machine::new();
+        assert_eq!(
+            machine.execute_source(source),
+            Err(SourceError::Runtime(RuntimeError::StackUnderflow))
+        );
+        let target = run(&format!("underflow-{index}"), source, b"");
+        assert_eq!(target.status.code(), Some(1), "{source}: {target:?}");
+        assert!(
+            String::from_utf8_lossy(&target.stderr).contains("guest exited with status 1"),
+            "{source}: {target:?}"
+        );
+    }
+}
+
+#[test]
 fn help_and_argument_errors_do_not_need_cc65() {
     let help = run_cli(&["--help"]);
     assert!(help.status.success());

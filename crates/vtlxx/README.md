@@ -31,6 +31,7 @@ Rust package `vtlxx`、path `crates/vtlxx/`、CLI `vtlxx` / `vtlxx6502` は正�
 - [#280](https://github.com/kkismd/vtlxx/issues/280): value stack 接続記号を `~` に変更
 - [#679](https://github.com/kkismd/vtlxx/issues/679): 16進リテラルと文字入出力の位置による判定
 - [#688](https://github.com/kkismd/vtlxx/issues/688): 16 bit の AND・OR・XOR
+- [#678](https://github.com/kkismd/vtlxx/issues/678): byte 直接アクセス
 - [#634](https://github.com/kkismd/vtlxx/issues/634): 名前付き整数の宣言式。[#469](https://github.com/kkismd/vtlxx/issues/469) の右辺をリテラル1個に限る判断を置換し、その他の契約と [#255](https://github.com/kkismd/vtlxx/issues/255) の定義順を継承
 - [#217](https://github.com/kkismd/vtlxx/issues/217): target profile ごとの indexed storage の容量とアドレス規則
 - [#433](https://github.com/kkismd/vtlxx/issues/433), [#528](https://github.com/kkismd/vtlxx/issues/528): SourceProcedure・手続テンプレートの廃止
@@ -189,6 +190,21 @@ address は Cell の raw 16-bit pattern の**下位アドレス幅ぶん**を使
 
 この例の `-1` は Rust reference では address `65535`、現行 6502/sim65 では `255` を指します。同様に `256` は Rust では `256`、6502 では `0` を指します。複数のターゲットで同じ結果を必要とするプログラムでは、利用する storage のアドレスを共通範囲に収めてください。
 
+### Byte 直接アクセス
+
+`:(address)` は1 byteを読み、`:=address,value` は1 byteを書きます（採用 ADR [#678](https://github.com/kkismd/vtlxx/issues/678)）。address Cell の raw 16 bit を `0..65535` のアドレスとして使います。読み取りは byte を `0..255` の Cell にゼロ拡張し、書き込みは value の下位8 bitだけを使います。例えば `-1` はアドレス `$FFFF` を表し、値 `256` は `0`、値 `-1` は `255` として書かれます。
+
+次は、使用するターゲットで `$F000..$F001` が安全な書き込み可能 RAM であることを使用者が確認した場合の例です。アドレスは予約されたユーザー領域ではありません。
+
+```vtl
+  :=-4096,256
+  :=$F001,$FF
+  ?=:(-4096)  ; 0
+  ?=:($F001)  ; 255
+```
+
+Rust reference では `Machine` が独立した65536 byteの仮想メモリを所有し、初期値はすべて0です。同じ `Machine` の `execute_source` 呼び出し間でも保持し、`@`、register、host memory とは独立しています。6502 では CPU の実アドレス空間に直接アクセスし、RAM、ROM、MMIOなどの応答はターゲットに依存します。処理系の領域と重なることもあり、Rust と同じ初期状態や `@` との物理的独立は保証されません。どちらもアドレスを保護せず、処理系の動作に必要な領域を破壊した後の正常実行は保証されません。6502 のバス動作と配置の確認方法は [6502 README](6502/README.md) を参照してください。
+
 ### Value stack
 
 VTLXX の procedure / primitive は共通の value stack を使います。
@@ -273,6 +289,7 @@ VTLXX の expression は、小さい parser と source role binding で構成さ
 | `!` | PRNG PrimaryRead（xorshift16 から次の値を読む） |
 | `'c'` | ASCII文字リテラル（文字 `c` の byte 値） |
 | `@(expr)` | storage read |
+| `:(expr)` | byte 直接読み取り（AppliedRead） |
 | `(expr)` | grouping |
 
 16進リテラルは `$` に続く ASCII 大文字の `0..9` / `A..F` を1〜4桁で書きます。先頭の0も1桁として数え、5桁以上、小文字、符号付き16進数は使えません。十進リテラルの範囲は従来どおり `-32768..32767` です。通常式で値を読む位置の `$` は、直後が16進数字ならリテラル、そうでなければ待機文字入力です。`$-1` は入力値から1を引く式です。名前付き整数、静的バイト列、直接ラベルのリテラル位置では裸の `$` は使えません。
@@ -421,6 +438,12 @@ stack effect は概念上:
 ( address value -- )
 ```
 
+### Byte write
+
+`:=address,value` は byte 直接書き込みです。読み取り `:(address)` の stack effect は `( address -- byte )`、書き込みの effect は `( address value -- )` です。operand は左から右へ評価され、余剰 operand や下位 stack は自動 cleanup されません。`:` は PrimaryRead や binary operator ではなく、空の `:()` は式に使えません。
+
+必要な値が stack にない場合は runtime underflow となり、その操作は stack を変更せず対象アドレスにアクセスしません。既に評価した operand の入力などの副作用は rollback されません。
+
 ### Decimal output
 
 ```vtl
@@ -497,6 +520,8 @@ source-defined procedure に対しても同じです。
 ```
 
 procedure が何値を消費するかは、その procedure の stack-effect contract に従います。
+
+byte 書き込みにも `:=~` を使えます。`:=()` は operand を追加せず呼び出し、既存 stack の上位2 Cellを address と value として消費します。どちらも必要な値が不足すれば underflow です。
 
 ### RHS root の `~`
 
