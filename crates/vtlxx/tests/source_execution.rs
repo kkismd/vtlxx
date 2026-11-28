@@ -1,6 +1,85 @@
 use vtlxx::{CompileError, Machine, RuntimeError, SourceError};
 
 #[test]
+fn bitwise_operators_follow_existing_expression_rules() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(concat!(
+            "A=1|2&4 B=1|(2&4) C=2+3&1 D=(128&128)!=0 ",
+            "~=5 E=~^3 @=1|2,42 F=@(7&3) %=1&1 [ G=9 ] ",
+            "H=$CAFE&$00FF I=$8000|$1 J=$ACE1^$FFFF ",
+            "&=p [ K=7 ] p=() #=1 K=99 ^=1 L=1!=2"
+        ))
+        .unwrap();
+    for (index, expected) in [0, 1, 1, 1, 6, 42, 9, 254, -32767, 21278, 7, 1]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(machine.register(index), Some(expected), "register {index}");
+    }
+}
+
+#[test]
+fn bitwise_operands_are_evaluated_once_in_order_without_short_circuit() {
+    let mut machine = Machine::new();
+    machine.set_input(std::io::Cursor::new(vec![1, 2, 3, 4, 5, 6, 7, 8]));
+    machine
+        .execute_source("A=($*256)|$ B=0&$ C=-1|$ D=$^$ E=$ F=$")
+        .unwrap();
+    for (index, expected) in [258, 0, -1, 3, 7, 8].into_iter().enumerate() {
+        assert_eq!(machine.register(index), Some(expected), "register {index}");
+    }
+}
+
+#[test]
+fn bitwise_operators_reject_unsupported_positions_and_forms() {
+    for source in [
+        "A=&",
+        "A=|",
+        "A=^",
+        "A=1&",
+        "A=1|",
+        "A=1^",
+        "A=1&&2",
+        "A=1||2",
+        "A=1^^2",
+        "A=&1",
+        "A=|1",
+        "A=^1",
+        "|1",
+        ".MASK:=1|2",
+        ".MASK:=$1|$2",
+        ".DATA:=[1&2]",
+        "^=1|2",
+        "#=1^2",
+    ] {
+        assert!(
+            matches!(
+                Machine::new().execute_source(source),
+                Err(SourceError::Compile(_))
+            ),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn invalid_bitwise_expression_preserves_prior_commits_and_discards_owner() {
+    let mut machine = Machine::new();
+    assert!(matches!(
+        machine.execute_source("A=7 &=p [ B=8 ] &=q [ C=1||2 ]"),
+        Err(SourceError::Compile(_))
+    ));
+    assert_eq!(machine.register(0), Some(7));
+    machine.execute_source("p=()").unwrap();
+    assert_eq!(machine.register(1), Some(8));
+    assert!(matches!(
+        machine.execute_source("q=()"),
+        Err(SourceError::Compile(_))
+    ));
+}
+
+#[test]
 fn hex_literals_work_in_all_constant_positions() {
     let mut machine = Machine::new();
     machine

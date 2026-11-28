@@ -11,6 +11,9 @@ pub(crate) enum Primitive {
     Mul,
     Div,
     Rem,
+    BitAnd,
+    BitOr,
+    BitXor,
     Eq,
     Ne,
     Lt,
@@ -64,6 +67,9 @@ impl Primitive {
             Self::Mul => binary(machine, |lhs, rhs| Ok(cell::mul(lhs, rhs)))?,
             Self::Div => binary(machine, cell::div)?,
             Self::Rem => binary(machine, cell::rem)?,
+            Self::BitAnd => binary(machine, |lhs, rhs| Ok(cell::bit_and(lhs, rhs)))?,
+            Self::BitOr => binary(machine, |lhs, rhs| Ok(cell::bit_or(lhs, rhs)))?,
+            Self::BitXor => binary(machine, |lhs, rhs| Ok(cell::bit_xor(lhs, rhs)))?,
             Self::Eq => binary(machine, |lhs, rhs| Ok(cell::eq(lhs, rhs)))?,
             Self::Ne => binary(machine, |lhs, rhs| Ok(cell::ne(lhs, rhs)))?,
             Self::Lt => binary(machine, |lhs, rhs| Ok(cell::lt(lhs, rhs)))?,
@@ -170,6 +176,33 @@ mod tests {
         }
     }
     use super::*;
+
+    #[test]
+    fn bitwise_stack_effect_and_underflow() {
+        for (primitive, result) in [
+            (Primitive::BitAnd, 0),
+            (Primitive::BitOr, -1),
+            (Primitive::BitXor, -1),
+        ] {
+            for stack in [&[][..], &[42][..]] {
+                let mut machine = Machine::new();
+                for &value in stack {
+                    machine.push(value);
+                }
+                assert_eq!(
+                    primitive.execute(&mut machine),
+                    Err(RuntimeError::StackUnderflow)
+                );
+                assert_eq!(machine.stack(), stack);
+            }
+            let mut machine = Machine::new();
+            for value in [42, 255, -256] {
+                machine.push(value);
+            }
+            primitive.execute(&mut machine).unwrap();
+            assert_eq!(machine.stack(), &[42, result]);
+        }
+    }
 
     #[test]
     fn read_preserves_stack_on_success_eof_and_error() {

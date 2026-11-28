@@ -37,6 +37,16 @@ pub(crate) fn mul(lhs: Cell, rhs: Cell) -> Cell {
     lhs.wrapping_mul(rhs)
 }
 
+pub(crate) fn bit_and(lhs: Cell, rhs: Cell) -> Cell {
+    lhs & rhs
+}
+pub(crate) fn bit_or(lhs: Cell, rhs: Cell) -> Cell {
+    lhs | rhs
+}
+pub(crate) fn bit_xor(lhs: Cell, rhs: Cell) -> Cell {
+    lhs ^ rhs
+}
+
 pub(crate) fn div(lhs: Cell, rhs: Cell) -> Result<Cell, RuntimeError> {
     if rhs == 0 {
         return Err(RuntimeError::DivisionByZero);
@@ -84,6 +94,25 @@ pub(crate) fn ge(lhs: Cell, rhs: Cell) -> Cell {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bitwise_operations_cover_all_bits() {
+        for bit in 0..16 {
+            let mask = (1u16 << bit) as Cell;
+            for (a, b) in [(0, 0), (0, mask), (mask, 0), (mask, mask)] {
+                assert_eq!(bit_and(a, b), if a != 0 && b != 0 { mask } else { 0 });
+                assert_eq!(bit_or(a, b), if a != 0 || b != 0 { mask } else { 0 });
+                assert_eq!(bit_xor(a, b), if (a != 0) != (b != 0) { mask } else { 0 });
+            }
+        }
+        for value in [0, -1, Cell::MAX, Cell::MIN, 255, -256] {
+            assert_eq!(bit_xor(value, -1), !value);
+        }
+        assert_eq!(bit_and(255, -256), 0);
+        assert_eq!(bit_or(255, -256), -1);
+        assert_eq!(bit_xor(255, -256), -1);
+        assert_eq!(bit_xor(Cell::MIN, Cell::MAX), -1);
+    }
 
     #[test]
     fn arithmetic_wraps_to_16_bits() {
