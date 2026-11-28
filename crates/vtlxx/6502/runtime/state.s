@@ -8,7 +8,7 @@
 .export rt_need_one, rt_need_two, rt_commit_binary
 .export rt_underflow, rt_overflow, rt_div_zero, rt_rem_zero, rt_entropy_unavailable, rt_input_failure
 .export rt_rng_state
-.exportzp rt_depth, rt_stack, rt_lhs, rt_rhs, rt_result
+.exportzp rt_depth, rt_stack, rt_lhs, rt_rhs, rt_result, rt_regs
 .exportzp rt_input_eof
 .import halt
 .ifdef ENTROPY16_TEST
@@ -33,7 +33,6 @@ rt_storage: .res 512
 rt_rng_state: .res 2
 .ifdef RT_TEST_PROBE
 .export rt_storage
-.exportzp rt_regs
 .endif
 
 .segment "CODE"

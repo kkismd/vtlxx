@@ -5,6 +5,8 @@
 .import cc_init, cc_mark, cc_emit_byte, cc_emit_u16, cc_patch
 .import cc_push_const, cc_call, cc_return, cc_jump, cc_jz
 .import cc_load_reg, cc_store_reg
+.import cc_byte_op, cc_byte_store_cell, cc_byte_operand
+.importzp rt_regs, rt_stack
 .import cc_jump_placeholder, cc_jz_placeholder, cc_patch_here, cc_jump_to
 .import cc_begin_owner, cc_complete_owner, cc_is_bound, cc_publish, cc_resolve
 .import cc_define_label, cc_label_jump
@@ -58,12 +60,17 @@ caller_sp: .res 1
 software_sp: .res 2
 phase: .res 1
 patches: .res 98
+byte_op: .res 1
+byte_mode: .res 1
+byte_slot: .res 1
+byte_expected: .res 1
+byte_target: .res 1
 
 .segment "CODE"
 _main:
     jsr rt_init
     jsr cc_init
-.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 40
+.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 40 .or TEST_CASE = 62 .or TEST_CASE = 63 .or TEST_CASE = 65
     ; Detect even a single byte written beyond the arena.
     lda #$a5
     sta cc_arena+$6000
@@ -77,7 +84,7 @@ _main:
     lda sp+1
     sta software_sp+1
     jsr probe_session
-.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 48 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57
+.if TEST_CASE = 4 .or TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 8 .or TEST_CASE = 9 .or TEST_CASE = 11 .or TEST_CASE = 12 .or TEST_CASE = 13 .or TEST_CASE = 15 .or TEST_CASE = 16 .or TEST_CASE = 19 .or TEST_CASE = 20 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 31 .or TEST_CASE = 32 .or TEST_CASE = 33 .or TEST_CASE = 34 .or TEST_CASE = 35 .or TEST_CASE = 36 .or TEST_CASE = 37 .or TEST_CASE = 38 .or TEST_CASE = 39 .or TEST_CASE = 40 .or TEST_CASE = 41 .or TEST_CASE = 42 .or TEST_CASE = 43 .or TEST_CASE = 44 .or TEST_CASE = 45 .or TEST_CASE = 46 .or TEST_CASE = 48 .or TEST_CASE = 49 .or TEST_CASE = 51 .or TEST_CASE = 52 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57 .or TEST_CASE = 60 .or TEST_CASE = 61 .or TEST_CASE = 62 .or TEST_CASE = 63 .or TEST_CASE = 64 .or TEST_CASE = 66 .or TEST_CASE = 67 .or TEST_CASE = 68 .or TEST_CASE = 69 .or TEST_CASE = 70 .or TEST_CASE = 71
     bcs :+
     jmp bad
 :
@@ -86,11 +93,11 @@ _main:
     beq :+
     jmp bad
 :
-.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
+.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40 .or TEST_CASE = 62 .or TEST_CASE = 63
     lda #1
 .elseif TEST_CASE = 4 .or TEST_CASE = 16 .or TEST_CASE = 32 .or TEST_CASE = 48 .or TEST_CASE = 54 .or TEST_CASE = 55 .or TEST_CASE = 56 .or TEST_CASE = 57
     lda #2
-.elseif TEST_CASE = 34 .or TEST_CASE = 52
+.elseif TEST_CASE = 34 .or TEST_CASE = 52 .or TEST_CASE = 60 .or TEST_CASE = 61 .or TEST_CASE = 64 .or TEST_CASE = 66 .or TEST_CASE = 67 .or TEST_CASE = 68 .or TEST_CASE = 69 .or TEST_CASE = 70 .or TEST_CASE = 71
     lda #3
 .elseif TEST_CASE = 11
     lda #4
@@ -117,7 +124,7 @@ _main:
     jmp bad
 :
 .endif
-.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40
+.if TEST_CASE = 5 .or TEST_CASE = 6 .or TEST_CASE = 19 .or TEST_CASE = 21 .or TEST_CASE = 22 .or TEST_CASE = 33 .or TEST_CASE = 40 .or TEST_CASE = 62 .or TEST_CASE = 63 .or TEST_CASE = 65
     lda cc_arena+$6000
     cmp #$a5
     jne bad
@@ -126,6 +133,30 @@ _main:
     lda cc_arena+$6062
     cmp #$a5
     jne bad
+.endif
+.if TEST_CASE = 61
+    lda cc_arena
+    cmp #$60               ; completed owner's RTS is unchanged
+    jne bad
+.elseif TEST_CASE = 62
+    lda cc_arena+$5ffe
+    cmp #$a5
+    jne bad
+    lda cc_arena+$5fff
+    cmp #$a5
+    jne bad
+.elseif TEST_CASE = 63
+    lda cc_arena+$5ffb
+    cmp #$a5
+    jne bad
+    lda cc_arena+$5fff
+    cmp #$a5
+    jne bad
+.endif
+.if TEST_CASE = 62 .or TEST_CASE = 63
+    NAME 'z'
+    jsr cc_is_bound
+    jcs bad                ; aborted owner was not published
 .endif
     tsx
     cpx caller_sp
@@ -1149,6 +1180,416 @@ probe_session:
     sta phase
     WORD $ffff
     jsr cc_patch
+ .elseif TEST_CASE = 58
+    ; Exhaustive opcode/mode matrix: immediate, $00ff and $0100.
+    jsr cc_begin_owner
+    lda #0
+    sta byte_op
+    sta byte_slot
+@op:
+    lda #0
+    sta byte_mode
+@mode:
+    ; STORE has no immediate form.
+    lda byte_op
+    cmp #1
+    bne @emit
+    lda byte_mode
+    beq @next
+@emit:
+    lda cc_cursor
+    sta probe_ptr
+    lda cc_cursor+1
+    sta probe_ptr+1
+    lda #$ff
+    sta cc_byte_operand
+    lda #0
+    sta cc_byte_operand+1
+    ldx byte_mode
+    beq @call
+    dex
+    beq :+
+    lda #1
+    sta cc_byte_operand+1
+:
+    ldx #1
+@call:
+    lda byte_op
+    jsr cc_byte_op
+    ldy #0
+    lda byte_op
+    cmp #5
+    bcc @opcode
+    beq :+
+    lda #$38
+    bne :++
+:
+    lda #$18
+:
+    cmp (probe_ptr),y
+    jne bad
+    iny
+@opcode:
+    ldx byte_slot
+    lda byte_opcodes,x
+    cmp (probe_ptr),y
+    jne bad
+    iny
+    lda (probe_ptr),y
+    cmp #$ff
+    jne bad
+    lda byte_mode
+    cmp #2
+    bne @next
+    iny
+    lda (probe_ptr),y
+    cmp #1
+    jne bad
+@next:
+    inc byte_slot
+    inc byte_mode
+    lda byte_mode
+    cmp #3
+    jne @mode
+    inc byte_op
+    lda byte_op
+    cmp #7
+    jne @op
+    ; Every Cell index and selector maps to the runtime zero page.
+    lda #0
+    sta byte_op
+@cell:
+    lda #0
+    sta byte_mode
+@selector:
+    lda cc_cursor
+    sta probe_ptr
+    lda cc_cursor+1
+    sta probe_ptr+1
+    lda byte_op
+    sta cc_byte_operand
+    lda byte_mode
+    sta cc_byte_operand+1
+    lda #0
+    ldx #2
+    jsr cc_byte_op
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$a5
+    jne bad
+    iny
+    lda byte_op
+    asl a
+    clc
+    adc #<rt_regs
+    adc byte_mode
+    cmp (probe_ptr),y
+    jne bad
+    inc byte_mode
+    lda byte_mode
+    cmp #2
+    bne @selector
+    lda cc_cursor
+    sta probe_ptr
+    lda cc_cursor+1
+    sta probe_ptr+1
+    lda byte_op
+    jsr cc_byte_store_cell
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$85
+    jne bad
+    iny
+    lda byte_op
+    asl a
+    clc
+    adc #<rt_regs
+    cmp (probe_ptr),y
+    jne bad
+    iny
+    lda (probe_ptr),y
+    cmp #$a2
+    jne bad
+    iny
+    lda (probe_ptr),y
+    jne bad
+    iny
+    lda (probe_ptr),y
+    cmp #$86
+    jne bad
+    iny
+    lda byte_op
+    asl a
+    clc
+    adc #<rt_regs+1
+    cmp (probe_ptr),y
+    jne bad
+    inc byte_op
+    lda byte_op
+    cmp #26
+    jne @cell
+    ; Full-address upper boundary is an absolute operand.
+    lda cc_cursor
+    sta probe_ptr
+    lda cc_cursor+1
+    sta probe_ptr+1
+    lda #$ff
+    sta cc_byte_operand
+    sta cc_byte_operand+1
+    lda #0
+    ldx #1
+    jsr cc_byte_op
+    ldy #0
+    lda (probe_ptr),y
+    cmp #$ad
+    jne bad
+    iny
+    lda (probe_ptr),y
+    cmp #$ff
+    jne bad
+    iny
+    lda (probe_ptr),y
+    cmp #$ff
+    jne bad
+.elseif TEST_CASE = 59
+    ; Execute only after completion and reset runtime overlay after compilation.
+    jsr cc_begin_owner
+    sta entry
+    stx entry+1
+    lda #$ff
+    sta cc_byte_operand
+    lda #0
+    ldx #0
+    jsr cc_byte_op           ; A = 255
+    lda #1
+    sta cc_byte_operand
+    lda #5
+    ldx #0
+    jsr cc_byte_op           ; A = 0 regardless of incoming carry
+    lda #1
+    sta cc_byte_operand
+    lda #6
+    ldx #0
+    jsr cc_byte_op           ; A = 255, carry clear
+    lda #0
+    sta cc_byte_operand
+    lda #6
+    ldx #0
+    jsr cc_byte_op           ; A remains 255 even with incoming carry clear
+    lda #$0f
+    sta cc_byte_operand
+    lda #2
+    ldx #0
+    jsr cc_byte_op
+    lda #$30
+    sta cc_byte_operand
+    lda #3
+    ldx #0
+    jsr cc_byte_op
+    lda #$03
+    sta cc_byte_operand
+    lda #4
+    ldx #0
+    jsr cc_byte_op           ; A = $3c
+    lda #25
+    jsr cc_byte_store_cell
+    lda #<byte_target
+    sta cc_byte_operand
+    lda #>byte_target
+    sta cc_byte_operand+1
+    lda #1
+    ldx #1
+    jsr cc_byte_op
+    lda #0
+    ldx #1
+    jsr cc_byte_op           ; read back test-owned RAM
+    lda #<probe_ptr
+    sta cc_byte_operand
+    lda #0
+    sta cc_byte_operand+1
+    lda #1
+    ldx #1
+    jsr cc_byte_op           ; store to test-owned zero page
+    lda #0
+    ldx #1
+    jsr cc_byte_op           ; load from test-owned zero page
+    lda #0
+    sta cc_byte_operand
+    sta cc_byte_operand+1
+    lda #4
+    ldx #2
+    jsr cc_byte_op           ; XOR Cell A low
+    lda #<byte_target
+    sta cc_byte_operand
+    lda #>byte_target
+    sta cc_byte_operand+1
+    lda #1
+    ldx #1
+    jsr cc_byte_op           ; A and RAM now $3f
+    lda #25
+    sta cc_byte_operand
+    lda #0
+    sta cc_byte_operand+1
+    ldx #2
+    jsr cc_byte_op           ; read stored low byte
+    jsr cc_complete_owner
+    jsr rt_init
+    lda #$55
+    ldx #$a6
+    jsr rt_push              ; a live Cell with nonzero high byte
+    lda rt_depth
+    cmp #1
+    jne bad
+    lda rt_stack
+    cmp #$55
+    jne bad
+    lda rt_stack+1
+    cmp #$a6
+    jne bad
+    lda #3
+    sta rt_regs
+    lda #$aa
+    sta rt_regs+49
+    sta rt_regs+51
+    lda #$42
+    sec
+    jsr invoke
+    cmp #$3c
+    jne bad
+    cmp rt_regs+50
+    jne bad
+    lda byte_target
+    cmp #$3f
+    jne bad
+    lda probe_ptr
+    cmp #$3c
+    jne bad
+    lda rt_regs+51
+    jne bad
+    lda rt_regs+49
+    cmp #$aa
+    jne bad
+    lda rt_stack
+    cmp #$55
+    jne bad
+    lda rt_stack+1
+    cmp #$a6
+    jne bad
+    lda rt_depth
+    cmp #1
+    jne bad
+.elseif TEST_CASE = 60
+    ; No active owner.
+    lda #0
+    ldx #0
+    jsr cc_byte_op
+.elseif TEST_CASE = 61
+    ; Completed owner is frozen.
+    jsr cc_begin_owner
+    jsr cc_complete_owner
+    lda #0
+    jsr cc_byte_store_cell
+.elseif TEST_CASE = 62
+    ; ADD immediate is three bytes: two free cannot fit prefix and operand.
+    lda #$a5
+    sta cc_arena+$5ffe
+    sta cc_arena+$5fff
+    jsr cc_begin_owner
+    lda #<(cc_arena+$5ffe)
+    sta cc_cursor
+    lda #>(cc_arena+$5ffe)
+    sta cc_cursor+1
+    lda #5
+    ldx #0
+    jsr cc_byte_op
+.elseif TEST_CASE = 63
+    ; Cell store reserves all six bytes together.
+    lda #$a5
+    sta cc_arena+$5ffb
+    sta cc_arena+$5fff
+    jsr cc_begin_owner
+    lda #<(cc_arena+$5ffb)
+    sta cc_cursor
+    lda #>(cc_arena+$5ffb)
+    sta cc_cursor+1
+    lda #25
+    jsr cc_byte_store_cell
+.elseif TEST_CASE = 64
+    ; An invalid internal Cell index must fail rather than address outside Cells.
+    jsr cc_begin_owner
+    lda #26
+    jsr cc_byte_store_cell
+ .elseif TEST_CASE = 65
+    ; Both templates fit exactly, without writing the byte after the arena.
+    jsr cc_begin_owner
+    lda #<(cc_arena+$5ffa)
+    sta cc_cursor
+    lda #>(cc_arena+$5ffa)
+    sta cc_cursor+1
+    lda #25
+    jsr cc_byte_store_cell
+    lda cc_cursor
+    cmp #<(cc_arena+$6000)
+    jne bad
+    lda cc_cursor+1
+    cmp #>(cc_arena+$6000)
+    jne bad
+    jsr cc_init
+    jsr cc_begin_owner
+    lda #<(cc_arena+$5ffd)
+    sta cc_cursor
+    lda #>(cc_arena+$5ffd)
+    sta cc_cursor+1
+    lda #5
+    ldx #0
+    jsr cc_byte_op
+    lda cc_cursor
+    cmp #<(cc_arena+$6000)
+    jne bad
+    lda cc_cursor+1
+    cmp #>(cc_arena+$6000)
+    jne bad
+.elseif TEST_CASE = 66
+    jsr cc_begin_owner
+    lda #0
+    sta cc_byte_operand
+    lda #2
+    sta cc_byte_operand+1
+    lda #0
+    ldx #2
+    jsr cc_byte_op
+.elseif TEST_CASE = 67
+    jsr cc_begin_owner
+    lda #7
+    ldx #0
+    jsr cc_byte_op
+.elseif TEST_CASE = 68
+    jsr cc_begin_owner
+    lda #1
+    ldx #0
+    jsr cc_byte_op
+ .elseif TEST_CASE = 69
+    jsr cc_begin_owner
+    lda #26
+    sta cc_byte_operand
+    lda #0
+    sta cc_byte_operand+1
+    ldx #2
+    jsr cc_byte_op
+.elseif TEST_CASE = 70
+    jsr cc_begin_owner
+    lda #0
+    ldx #3
+    jsr cc_byte_op
+.elseif TEST_CASE = 71
+    ; STORE cannot use a Cell byte operand.
+    jsr cc_begin_owner
+    lda #0
+    sta cc_byte_operand
+    sta cc_byte_operand+1
+    lda #1
+    ldx #2
+    jsr cc_byte_op
 .else
     .error "unknown backend probe case"
 .endif
@@ -1192,3 +1633,8 @@ verify_value:
     cmp #$a1
     jne bad
     rts
+
+.segment "RODATA"
+byte_opcodes:
+    .byte $a9,$a5,$ad, $00,$85,$8d, $29,$25,$2d
+    .byte $09,$05,$0d, $49,$45,$4d, $69,$65,$6d, $e9,$e5,$ed
