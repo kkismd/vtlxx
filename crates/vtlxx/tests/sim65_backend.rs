@@ -201,3 +201,11 @@ fn bounded_pending_patch_registry() {
         expect(case, b"K");
     }
 }
+
+#[test]
+#[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
+fn byte_templates_and_owner_contract() {
+    for case in 58..=70 {
+        expect(case, b"K");
+    }
+}

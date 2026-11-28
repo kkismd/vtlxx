@@ -8,10 +8,12 @@
 .export cc_literal_output_begin, cc_literal_output_byte, cc_literal_output_finish
 .export cc_static_reset, cc_static_begin, cc_static_byte, cc_static_finish, cc_static_read
 .export cc_static_start, cc_static_length
+.export cc_byte_op, cc_byte_store_cell, cc_byte_operand
 .import cc_reserve, cc_write_byte_raw, cc_emit_byte, cc_mark, cc_patch, cc_track_patch
 .import rt_push, rt_pop_condition, rt_load_reg, rt_store_reg, rt_print_bytes
 .import rt_read_static
 .importzp rt_lhs, rt_rhs
+.importzp rt_regs
 .import owner_require_active
 .importzp cc_status, cc_arg, cc_cursor
 
@@ -30,7 +32,150 @@ cc_static_length: .res 2
 static_patch: .res 2
 static_active: .res 1
 static_byte: .res 1
+; Input word is owned by the caller until entry; copied before nested calls.
+cc_byte_operand: .res 2
 
+.segment "RODATA"
+; Immediate opcode bases; STORE immediate is rejected before selection.
+byte_base: .byte $a9, $89, $29, $09, $49, $69, $e9
+
+.segment "CODE"
+; Private ABI: A=operation 0..6 (LOAD, STORE, AND, OR, XOR, ADD,
+; SUB), X=kind (0 immediate, 1 raw address, 2 Cell byte), and
+; cc_byte_operand=immediate/address or index,selector (0 low, 1 high).
+; All input is saved before owner/reserve calls. em_word, em_index and
+; em_patch are emitter-owned compile-phase scratch, dead on return.
+cc_byte_op:
+    sta em_index
+    stx em_patch
+    lda cc_byte_operand
+    sta em_word
+    lda cc_byte_operand+1
+    sta em_word+1
+    jsr owner_require_active
+    lda em_index
+    cmp #7
+    bcc :+
+    jmp byte_bad
+:
+    lda em_patch
+    cmp #3
+    bcc :+
+    jmp byte_bad
+:
+    cmp #2
+    bne @not_cell
+    lda em_index
+    cmp #1
+    beq byte_bad
+    lda em_word
+    cmp #26
+    bcs byte_bad
+    asl a
+    clc
+    adc #<rt_regs
+    sta em_word
+    lda em_word+1
+    cmp #2
+    bcs byte_bad
+    clc
+    adc em_word
+    sta em_word
+    lda #1
+    sta em_patch
+    bne @mode_ready
+@not_cell:
+    lda em_patch
+    bne @address
+    lda em_index
+    cmp #1
+    beq byte_bad
+    jmp @mode_ready
+@address:
+    lda em_word+1
+    beq @mode_ready
+    inc em_patch
+@mode_ready:
+    ; Mode is 0 immediate, 1 zero page, 2 absolute.
+byte_select_opcode:
+    ldx em_index
+    lda byte_base,x
+    ldx em_patch
+    clc
+    adc byte_delta,x
+    sta em_patch+1
+byte_select_done:
+    lda #2
+    ldx em_patch
+    cpx #2
+    bne @length_prefix
+    clc
+    adc #1
+@length_prefix:
+    ldx em_index
+    cpx #5
+    bcc @reserve
+    clc
+    adc #1
+@reserve:
+    jsr cc_reserve
+    lda em_index
+    cmp #5
+    bcc @opcode
+    lda #$18
+    ldx em_index
+    cpx #5
+    beq @prefix
+    lda #$38
+@prefix:
+    jsr cc_write_byte_raw
+@opcode:
+    lda em_patch+1
+    jsr cc_write_byte_raw
+    lda em_word
+    jsr cc_write_byte_raw
+    lda em_patch
+    cmp #2
+    bne @done
+    lda em_word+1
+    jsr cc_write_byte_raw
+@done:
+    rts
+byte_bad:
+    lda #3
+    jmp session_backend_error
+
+; A=Cell index 0..25. STA low; LDX #0; STX high preserves A.
+cc_byte_store_cell:
+    sta em_index
+    jsr owner_require_active
+    lda em_index
+    cmp #26
+    bcs byte_bad
+    asl a
+    clc
+    adc #<rt_regs
+    sta em_word
+    lda #6
+    jsr cc_reserve
+    lda #$85
+    jsr cc_write_byte_raw
+    lda em_word
+    jsr cc_write_byte_raw
+    lda #$a2
+    jsr cc_write_byte_raw
+    lda #0
+    jsr cc_write_byte_raw
+    lda #$86
+    jsr cc_write_byte_raw
+    lda em_word
+    clc
+    adc #1
+    jmp cc_write_byte_raw
+
+.segment "RODATA"
+byte_delta: .byte 0, $fc, 4
+.assert <rt_regs + 51 <= $ff, lderror, "Cell registers must fit in zero page"
 .segment "CODE"
 ; Static payload operations are sequential and require an active top-level
 ; owner. A fatal error aborts the compile session; only successful
