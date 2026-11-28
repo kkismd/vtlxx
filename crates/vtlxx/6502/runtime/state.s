@@ -3,6 +3,7 @@
 
 .export rt_init, rt_push, rt_pop_condition, rt_load_reg, rt_store_reg
 .export rt_load_storage, rt_store_storage
+.export rt_peek, rt_poke
 .export rt_read_static
 .export rt_need_one, rt_need_two, rt_commit_binary
 .export rt_underflow, rt_overflow, rt_div_zero, rt_rem_zero, rt_entropy_unavailable, rt_input_failure
@@ -206,6 +207,42 @@ rt_store_storage:
     lda rt_rhs+1
     sta rt_storage+257,x
 @stored:
+    dec rt_depth
+    dec rt_depth
+    rts
+
+; Direct byte access. rt_lhs is a temporary indirect pointer; its runtime
+; live range is confined to this call, as with the arithmetic helpers.
+rt_peek:
+    jsr rt_need_one
+    lda rt_depth
+    sec
+    sbc #1
+    asl a
+    tay
+    lda rt_stack,y
+    sta rt_lhs
+    lda rt_stack+1,y
+    sta rt_lhs+1
+    ldy #0
+    lda (rt_lhs),y
+    pha
+    lda rt_depth
+    sec
+    sbc #1
+    asl a
+    tay
+    pla
+    sta rt_stack,y
+    lda #0
+    sta rt_stack+1,y
+    rts
+
+rt_poke:
+    jsr rt_need_two
+    ldy #0
+    lda rt_rhs
+    sta (rt_lhs),y
     dec rt_depth
     dec rt_depth
     rts

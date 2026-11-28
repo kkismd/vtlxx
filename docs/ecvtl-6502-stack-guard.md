@@ -288,3 +288,37 @@ guard 間の K=24 B、残り 1 B を確保する S>=25、入口外の従来の�
 runtime 64段の保守的上界 145 B は維持する。これらは割込みなしの条件に
 限り、実機の IRQ/NMI を含む安全性を意味しない。独立 sim65 fixture は
 従来の startup と guard 試験を維持する。
+
+## 直接 byte 読書の追加（#681）
+
+`:` の AppliedRead は既存 `value` guard の後に `enter_nesting` を JSR
+する。同 helper は leaf で追加 push はなく、戻ってから operand を呼ぶ。
+選択した primitive は既存 `static_slots` の当該 nesting に保存し、PHA を
+追加しない。内側 operand / value はそれぞれ既存 guard を通る。guard 間では
+`close_group → peek` が JSR 2個と peek 内最大9 Bで計13 B、operand 次入口
+への JSR は2 B、`cc_call` への tail JMP は追加0 Bであり、従来の value
+上界13 B と K=24 B以内。Write の追加分も `peek`、operand の既存経路と
+`cc_call` の選択であり、同時に生存する push を増やさない。入口外の定数・
+framing 経路に新たな呼出しはない。S>=25、入口外19 Bの上界を維持する。
+
+runtime の `rt_peek` は `rt_need_one` の JSR（2 B）と読取後の PHA（1 B）が
+同時に生存しない。`rt_poke` は `rt_need_two` の JSR（2 B）が最大であり、
+両者とも生成コードからの JSR 2 Bを含めて最大4 B。既存入力経路より浅く、
+同一 sim6502 library・割込みなし・通常手続64段の条件付き145 Bを維持する。
+既存の `rt_lhs` / `rt_rhs` は compile phase と runtime phase が排他的で、
+各 runtime helper 呼出し中のみ使用する。対象が scratch や stack に重なる
+場合は ADR #678 の保証外である。`STA (zp),Y` は NMOS 6502 の物理バス上
+ダミー read を伴うため、read 副作用のある MMIO は未検証である。
+
+ca65 V2.18、製品と同じ13 source、`VTLXX_RAW`、同じ mos6502 config、
+load `$0200`、service `$FFEF` での変更前後比較は CODE 6729→6876 B、
+RODATA 40→40 B、ZEROPAGE 108→108 B、BSS 29291→29291 B。新しい
+生成呼出しは既存 `cc_call` の3 B JSR を使う。
+以下の cycles はレビュー前 head `1589921` での同 toolchain の独立 sim6502 の測定値。
+`?=42` が 336341→336352 cycles、
+`@=0,128` と `?=@(0)` が 344961→345001 cycles。新しい
+`:= -4096,128`（実際の入力は `:=` の直後に空白なし）と `?=:(-4096)` は
+350124 cycles、出力128だった。これらは startup、compile、runtime、出力、
+終了を含む合計であり、各段階の単独測定ではない。runtime helper の正常経路
+は命令の静的計算で `rt_peek` 86 cycles、`rt_poke` 87 cycles（各入口から
+RTS まで、呼出元の JSR 6 cyclesを除く）。実機 IRQ/NMI と MMIO は未検証。
