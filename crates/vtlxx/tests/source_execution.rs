@@ -1887,3 +1887,109 @@ fn static_byte_read_bounds_errors_preserve_the_stack() {
     machine.execute_source("C=1").unwrap();
     assert_eq!(machine.register(2), Some(1));
 }
+
+#[test]
+fn byte_memory_addresses_values_and_machine_lifetime() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source("A=:(0) B=:(255) C=:(256) D=:(32767) E=:(-32768) F=:(-1)")
+        .unwrap();
+    for index in 0..6 {
+        assert_eq!(machine.register(index), Some(0));
+    }
+    machine
+        .execute_source(":=0,0 :=255,127 :=256,128 :=32767,255 :=-32768,256 :=-1,-1")
+        .unwrap();
+    machine.execute_source("A=:(0) B=:(255) C=:(256) D=:(32767) E=:(-32768) F=:(-1) G=:(254) H=:(257) :=1,511 I=:(1)").unwrap();
+    for (index, value) in [0, 127, 128, 255, 0, 255, 0, 0, 255]
+        .into_iter()
+        .enumerate()
+    {
+        assert_eq!(machine.register(index), Some(value));
+    }
+    let mut other = Machine::new();
+    other.execute_source("A=:(255) B=:(-1)").unwrap();
+    assert_eq!((other.register(0), other.register(1)), (Some(0), Some(0)));
+}
+
+#[test]
+fn byte_memory_composes_with_storage_expressions_and_hex() {
+    let mut machine = Machine::new();
+    machine
+        .execute_source(concat!(
+            ".BASE:=10 I=3 @=I,.BASE :=.BASE,42 :=42,7 @=10,3 ",
+            "A=:(@(I)) B=@(:(.BASE)) C=:(:(.BASE)) ",
+            ":=$ACE1,$CAFE D=:(-21279)&$FF ?=:($ACE1)&$FF"
+        ))
+        .unwrap();
+    for (index, value) in [42, 0, 7, 254].into_iter().enumerate() {
+        assert_eq!(machine.register(index), Some(value));
+    }
+    assert_eq!(machine.storage(10), 3);
+    assert_eq!(machine.output(), b"254");
+}
+
+#[test]
+fn byte_memory_uses_existing_operand_and_stack_rules() {
+    let mut machine = Machine::new();
+    machine.execute_source(":=2,99 ~=42 A=:(1,2)").unwrap();
+    assert_eq!(machine.register(0), Some(99));
+    assert_eq!(machine.stack(), &[42, 1]);
+    machine
+        .execute_source(":=42,8192,65 ~=8193,66 :=~ ~=8194,67 :=() B=:(8192) C=:(8193) D=:(8194)")
+        .unwrap();
+    assert_eq!(machine.stack(), &[42, 1, 42]);
+    assert_eq!(
+        (
+            machine.register(1),
+            machine.register(2),
+            machine.register(3)
+        ),
+        (Some(65), Some(66), Some(67))
+    );
+
+    let mut machine = Machine::new();
+    machine.execute_source(":=8192,77").unwrap();
+    assert_eq!(
+        machine.execute_source(":=8192"),
+        Err(SourceError::Runtime(RuntimeError::StackUnderflow))
+    );
+    assert_eq!(machine.stack(), &[8192]);
+    machine.execute_source("A=:(8192)").unwrap();
+    assert_eq!(machine.register(0), Some(77));
+}
+
+#[test]
+fn byte_memory_operands_are_evaluated_once_left_to_right() {
+    let mut machine = Machine::new();
+    machine.set_input(std::io::Cursor::new(vec![3, 65, 7]));
+    machine.execute_source(":=$,$ A=:(3) B=$").unwrap();
+    assert_eq!(
+        (machine.register(0), machine.register(1)),
+        (Some(65), Some(7))
+    );
+}
+
+#[test]
+fn byte_memory_rejects_invalid_source_and_preserves_completed_work() {
+    for source in ["A=:", "A=:()", ":=", "A=:(1", ":=1,", "A=:(1,)"] {
+        assert!(
+            matches!(
+                Machine::new().execute_source(source),
+                Err(SourceError::Compile(_))
+            ),
+            "{source}"
+        );
+    }
+    let mut machine = Machine::new();
+    assert!(matches!(
+        machine.execute_source(":=12,34 &=p [ A=:(12) ] &=q [ B=:() ]"),
+        Err(SourceError::Compile(_))
+    ));
+    machine.execute_source("p=()").unwrap();
+    assert_eq!(machine.register(0), Some(34));
+    assert!(matches!(
+        machine.execute_source("q=()"),
+        Err(SourceError::Compile(_))
+    ));
+}

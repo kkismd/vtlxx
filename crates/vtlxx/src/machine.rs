@@ -79,6 +79,7 @@ struct Continuation {
 pub struct Machine {
     pub(crate) registers: [Cell; REGISTER_COUNT],
     pub(crate) storage: Box<[Cell; STORAGE_SIZE]>,
+    memory: Box<[u8; STORAGE_SIZE]>,
     pub(crate) value_stack: Vec<Cell>,
     executables: Vec<Executable>,
     static_data: Vec<Box<[u8]>>,
@@ -108,6 +109,7 @@ impl Machine {
         let mut machine = Self {
             registers: [0; REGISTER_COUNT],
             storage: Box::new([0; STORAGE_SIZE]),
+            memory: Box::new([0; STORAGE_SIZE]),
             value_stack: Vec::new(),
             executables: Vec::new(),
             static_data: Vec::new(),
@@ -340,6 +342,14 @@ impl Machine {
             .map(|(_, id)| *id)
     }
 
+    pub(crate) fn read_byte(&self, address: Cell) -> u8 {
+        self.memory[address as u16 as usize]
+    }
+
+    pub(crate) fn write_byte(&mut self, address: Cell, value: u8) {
+        self.memory[address as u16 as usize] = value;
+    }
+
     pub(crate) fn publish_initial(
         &mut self,
         identity: char,
@@ -379,6 +389,8 @@ impl Machine {
         for (primitive, binding) in [
             (Primitive::LoadStorage, Some(('@', SourceRole::AppliedRead))),
             (Primitive::StoreStorage, Some(('@', SourceRole::Write))),
+            (Primitive::LoadByte, Some((':', SourceRole::AppliedRead))),
+            (Primitive::StoreByte, Some((':', SourceRole::Write))),
             (Primitive::PrintNumber, Some(('?', SourceRole::Write))),
             (Primitive::ReadChar, Some(('$', SourceRole::PrimaryRead))),
             (Primitive::TryReadChar, Some(('`', SourceRole::PrimaryRead))),
@@ -534,6 +546,8 @@ mod tests {
         for (identity, role, primitive) in [
             ('@', SourceRole::AppliedRead, Primitive::LoadStorage),
             ('@', SourceRole::Write, Primitive::StoreStorage),
+            (':', SourceRole::AppliedRead, Primitive::LoadByte),
+            (':', SourceRole::Write, Primitive::StoreByte),
             ('?', SourceRole::Write, Primitive::PrintNumber),
             ('$', SourceRole::Write, Primitive::PrintChar),
             ('$', SourceRole::PrimaryRead, Primitive::ReadChar),
@@ -578,6 +592,8 @@ mod tests {
         }
         assert_eq!(machine.resolve('?', SourceRole::PrimaryRead), None);
         assert_eq!(machine.resolve('@', SourceRole::PrimaryRead), None);
+        assert_eq!(machine.resolve(':', SourceRole::PrimaryRead), None);
+        assert_eq!(machine.resolve(':', SourceRole::BinaryOperator), None);
         // The old PRNG spelling is not kept as an alias (ADR #613).
         assert_eq!(machine.resolve('\'', SourceRole::PrimaryRead), None);
         assert_eq!(machine.resolve('!', SourceRole::Write), None);
