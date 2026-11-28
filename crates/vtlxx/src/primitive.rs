@@ -6,6 +6,8 @@ pub(crate) enum Primitive {
     StoreReg(usize),
     LoadStorage,
     StoreStorage,
+    LoadByte,
+    StoreByte,
     Add,
     Sub,
     Mul,
@@ -60,6 +62,24 @@ impl Primitive {
                 let index = machine.value_stack[len - 2];
                 let value = machine.value_stack[len - 1];
                 machine.storage[index as u16 as usize] = value;
+                machine.value_stack.truncate(len - 2);
+            }
+            Self::LoadByte => {
+                let address = *machine
+                    .value_stack
+                    .last()
+                    .ok_or(RuntimeError::StackUnderflow)?;
+                let value = Cell::from(machine.read_byte(address));
+                *machine.value_stack.last_mut().unwrap() = value;
+            }
+            Self::StoreByte => {
+                let len = machine.value_stack.len();
+                if len < 2 {
+                    return Err(RuntimeError::StackUnderflow);
+                }
+                let address = machine.value_stack[len - 2];
+                let value = machine.value_stack[len - 1] as u8;
+                machine.write_byte(address, value);
                 machine.value_stack.truncate(len - 2);
             }
             Self::Add => binary(machine, |lhs, rhs| Ok(cell::add(lhs, rhs)))?,
@@ -126,6 +146,67 @@ fn binary(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn byte_memory_addresses_values_and_atomic_underflow() {
+        use super::*;
+        let mut machine = Machine::new();
+        for address in [0, 255, 256, 32767, -32768, -1] {
+            assert_eq!(machine.read_byte(address), 0);
+            for value in [0, 127, 128, 255, 256, -1, 511] {
+                machine.push(42);
+                machine.push(address);
+                machine.push(value);
+                Primitive::StoreByte.execute(&mut machine).unwrap();
+                assert_eq!(machine.stack(), &[42]);
+                machine.push(address);
+                Primitive::LoadByte.execute(&mut machine).unwrap();
+                assert_eq!(machine.pop(), Some(i16::from(value as u8)));
+                assert_eq!(machine.pop(), Some(42));
+            }
+        }
+        machine.write_byte(100, 17);
+        machine.push(101);
+        machine.push(128);
+        Primitive::StoreByte.execute(&mut machine).unwrap();
+        assert_eq!(machine.read_byte(100), 17);
+        assert_eq!(machine.read_byte(102), 0);
+        assert_eq!(machine.storage(101), 0);
+        machine.push(101);
+        machine.push(999);
+        Primitive::StoreStorage.execute(&mut machine).unwrap();
+        assert_eq!(machine.read_byte(101), 128);
+        let before: Vec<_> = (0..=u16::MAX)
+            .map(|a| machine.read_byte(a as i16))
+            .collect();
+        for stack in [&[][..], &[101][..]] {
+            machine.value_stack = stack.to_vec();
+            assert_eq!(
+                Primitive::StoreByte.execute(&mut machine),
+                Err(RuntimeError::StackUnderflow)
+            );
+            assert_eq!(machine.stack(), stack);
+            assert!(
+                before
+                    .iter()
+                    .enumerate()
+                    .all(|(a, &v)| machine.read_byte(a as i16) == v)
+            );
+        }
+        machine.value_stack.clear();
+        assert_eq!(
+            Primitive::LoadByte.execute(&mut machine),
+            Err(RuntimeError::StackUnderflow)
+        );
+        assert!(machine.stack().is_empty());
+        assert!(
+            before
+                .iter()
+                .enumerate()
+                .all(|(a, &v)| machine.read_byte(a as i16) == v)
+        );
+        assert_eq!(Machine::new().read_byte(101), 0);
+    }
+
     #[test]
     fn output_failures_preserve_operand_and_successful_prefix() {
         use std::{
