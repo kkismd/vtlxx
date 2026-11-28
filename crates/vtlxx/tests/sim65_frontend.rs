@@ -236,6 +236,7 @@ fn byte_memory_rejects_bad_syntax_before_runtime() {
     for source in [
         "?=42 A=:",
         "?=42 A=:()",
+        "?=42 A=:(~)",
         "?=42 :=",
         "?=42 A=:(1",
         "?=42 A=1:2",
@@ -251,15 +252,19 @@ fn byte_memory_rejects_bad_syntax_before_runtime() {
 #[test]
 #[ignore = "requires ca65, ld65, and sim65; run with --ignored"]
 fn byte_memory_runtime_underflow_and_input_order() {
-    for source in [":=()", ":=1", "?=:(~)"] {
+    for source in [":=()", ":=1"] {
         let output = build_and_run(source.as_bytes(), b"Z");
-        assert!(!output.status.success(), "{source}: {output:?}");
+        assert_eq!(output.status.code(), Some(1), "{source}: {output:?}");
         assert!(output.stdout.is_empty(), "{source}: {output:?}");
     }
     let source = b".BASE:=-4096 ~=.BASE :=~,$ ?=:(.BASE) ?=$";
     let output = build_and_run(source, b"ABZ");
     assert!(output.status.success(), "{output:?}");
     assert_eq!(output.stdout, b"6566Z");
+    let source = b".BASE:=-4096 :=($+.BASE),$ ?=:(.BASE+1) ?=$";
+    let output = build_and_run(source, b"\x01\x02\x03Q");
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"23Q");
 }
 
 fn build_and_run(source: &[u8], runtime_input: &[u8]) -> Output {

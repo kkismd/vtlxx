@@ -466,6 +466,13 @@ statement:
     ; `p=()` has no operands; keep its parentheses out of value().
     jsr peek
     lda look_state
+    cmp #3
+    bne :+
+    lda target_index
+    cmp #':'
+    jeq source_error
+    lda look_state
+:
     cmp #1
     jne @compile_operand
     lda look_byte
@@ -1641,6 +1648,15 @@ value:
     jsr take
     jsr peek
     lda look_state
+    cmp #3
+    bne :+
+    ldx nesting
+    dex
+    lda static_slots,x
+    cmp #':'
+    jeq source_error
+    lda look_state
+:
     cmp #1
     jne syntax_error
     lda look_byte

@@ -339,6 +339,8 @@ fn failure_returns_to_caller_for_truncated_input_and_eof_classification() {
     let mut cases: Vec<(Vec<u8>, i32)> =
         vec![(vec![], 65), (vec![1], 65), (vec![8, 0, b'A', b'='], 66)];
     for (source, frame_end_status) in [
+        ("?=42 A=:", 66),
+        ("?=42 :=", 66),
         ("?=42 .BAD:=-", 67),
         ("?=42 .BAD:=1+", 67),
         ("?=42 .GOOD:=1 .BAD:=.GO", 66),

@@ -79,7 +79,15 @@ fn assert_runtime_input_output(
 fn byte_memory_via_product_cli() {
     let temp = TestDir::new();
     let source = b".BASE:=-4096 :=.BASE,128 :=$F001,$CAFE ?=:(.BASE) ?=() ?=:(.BASE+1)&$FF";
-    assert_runtime_input_output(&temp, "byte-memory", source, b"", b"128\n254");
+    let path = temp.0.join("byte-memory.vtl");
+    fs::write(&path, source).unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_vtlxx6502"))
+        .arg(path)
+        .args(["--seed", "1234", "--cycle-limit", "200000000"])
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    assert_eq!(output.stdout, b"128\n254");
 }
 
 #[test]

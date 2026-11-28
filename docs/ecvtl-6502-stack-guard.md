@@ -311,10 +311,11 @@ runtime の `rt_peek` は `rt_need_one` の JSR（2 B）と読取後の PHA（1 
 ダミー read を伴うため、read 副作用のある MMIO は未検証である。
 
 ca65 V2.18、製品と同じ13 source、`VTLXX_RAW`、同じ mos6502 config、
-load `$0200`、service `$FFEF` での変更前後比較は CODE 6729→6842 B、
+load `$0200`、service `$FFEF` での変更前後比較は CODE 6729→6876 B、
 RODATA 40→40 B、ZEROPAGE 108→108 B、BSS 29291→29291 B。新しい
 生成呼出しは既存 `cc_call` の3 B JSR を使う。
-同 toolchain の独立 sim6502 では `?=42` が 336341→336352 cycles、
+以下の cycles はレビュー前 head `1589921` での同 toolchain の独立 sim6502 の測定値。
+`?=42` が 336341→336352 cycles、
 `@=0,128` と `?=@(0)` が 344961→345001 cycles。新しい
 `:= -4096,128`（実際の入力は `:=` の直後に空白なし）と `?=:(-4096)` は
 350124 cycles、出力128だった。これらは startup、compile、runtime、出力、

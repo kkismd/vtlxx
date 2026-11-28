@@ -472,7 +472,7 @@ mod tests {
     #[test]
     #[ignore = "requires ca65 and ld65; run with --ignored"]
     fn byte_access_test_address_is_free_in_product_link() {
-        let (temp, _) = build_image(None).unwrap();
+        let (temp, _) = build_image(Some(1234)).unwrap();
         let mut objects: Vec<_> = std::fs::read_dir(&temp.0)
             .unwrap()
             .map(|entry| entry.unwrap().path())
